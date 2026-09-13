@@ -58,7 +58,12 @@ class RuntimeSetupResult:
 
 async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings: dict) -> RuntimeSetupResult:
     """Compose and start protocol/runtime resources for one config entry."""
-    inventory = DeviceInventory(hass.config.path("show_network_device_overrides.json"))
+    # DeviceInventory reads a JSON overrides file synchronously in __init__;
+    # run the construction in the executor so that disk I/O never happens
+    # directly on the event loop during config entry setup.
+    inventory = await hass.async_add_executor_job(
+        DeviceInventory, hass.config.path("show_network_device_overrides.json")
+    )
     hosts = [h.strip() for h in settings.get(CONF_GIGACORE_HOSTS, "").replace(";", ",").split(",") if h.strip()]
     community = settings.get(CONF_GIGACORE_COMMUNITY, "public")
     gigacore = GigaCoreMonitor(hosts, community)
@@ -70,7 +75,11 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     resources = ResourceRegistry()
     coordinator.resource_registry = resources
     coordinator.ha_builder_enabled = bool(settings.get(CONF_HA_BUILDER_ENABLED, True))
-    coordinator.ha_builder = HABuilder(hass.config.path("show_network_ha_builder.json"))
+    # Same reasoning as DeviceInventory above: HABuilder.__init__ loads a JSON
+    # file synchronously, so build it off the event loop.
+    coordinator.ha_builder = await hass.async_add_executor_job(
+        HABuilder, hass.config.path("show_network_ha_builder.json")
+    )
     coordinator.notifications = ShowNetworkNotifications(
         hass, settings.get(CONF_NOTIFICATION_TARGET, "persistent"),
         bool(settings.get(CONF_NOTIFICATION_ENABLED, False)),
@@ -229,7 +238,11 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                 elif row.get("vendor")=="elc": coordinator.elc.observe(host,source="mdns",evidence=row.get("evidence"),last_seen=row.get("observed_at"))
             coordinator.publish(vendor_discovery=coordinator.vendor_discovery,green_go_inventory=coordinator.green_go.snapshot(),elc_inventory=coordinator.elc.snapshot())
         except Exception as err: _LOGGER.debug("Vendor mDNS discovery failed: %s",err)
-    vendor_discovery_cancel=async_track_time_interval(hass,_vendor_discovery_tick,timedelta(seconds=60)); await _vendor_discovery_tick()
+    vendor_discovery_cancel=async_track_time_interval(hass,_vendor_discovery_tick,timedelta(seconds=60))
+    # Run the first scan in the background instead of awaiting it inline: this
+    # scan takes >=2s and was previously blocking async_setup_entry directly,
+    # contributing to slow/timed-out config entry bootstraps.
+    hass.async_create_task(_vendor_discovery_tick(), name="show_network_initial_vendor_discovery")
     async def _punchlight_periodic_discovery(_now):
         try:
             devices=await async_scan_punchlight_network(interface, timeout=2.0)
