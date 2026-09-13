@@ -231,7 +231,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
 
     async def _vendor_discovery_tick(_now=None):
         try:
-            rows=await async_scan_vendor_discovery(2.0); coordinator.vendor_discovery=rows[-100:]
+            rows=await async_scan_vendor_discovery(hass, 2.0); coordinator.vendor_discovery=rows[-100:]
             for row in rows:
                 host=(row.get("addresses",[row.get("host")])[0] or row.get("host") or row.get("name"))
                 if row.get("vendor")=="green_go": coordinator.green_go.observe(host,source="mdns",evidence=row.get("evidence"),last_seen=row.get("observed_at"))
@@ -245,7 +245,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     hass.async_create_task(_vendor_discovery_tick(), name="show_network_initial_vendor_discovery")
     async def _punchlight_periodic_discovery(_now):
         try:
-            devices=await async_scan_punchlight_network(interface, timeout=2.0)
+            devices=await async_scan_punchlight_network(hass, interface, timeout=2.0)
             coordinator.publish(punchlight_network=devices)
         except Exception as err: _LOGGER.debug("PunchLight network discovery failed: %s",err)
     punchlight_discovery_cancel=async_track_time_interval(hass,_punchlight_periodic_discovery,timedelta(seconds=PUNCHLIGHT_DISCOVERY_INTERVAL_S))

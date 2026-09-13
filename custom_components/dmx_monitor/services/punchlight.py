@@ -12,7 +12,7 @@ async def async_register(hass: HomeAssistant) -> None:
             c = coordinator_for_call(hass, call)
             interface_name = str(call.data.get("interface", "0.0.0.0"))
             timeout = max(0.5, min(float(call.data.get("timeout", 2.0)), 10.0))
-            devices = await async_scan_punchlight_network(interface_name, timeout)
+            devices = await async_scan_punchlight_network(hass, interface_name, timeout)
             c.publish(punchlight_network=devices)
             if c.archive:
                 c.archive.record("punchlight", "network_discovery", {"interface": interface_name, "count": len(devices)})

@@ -113,12 +113,13 @@ class DmxMonitorConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        return DmxMonitorOptionsFlow(config_entry)
+        # Home Assistant injects the config entry into OptionsFlow and exposes
+        # it through self.config_entry. Assigning that property manually has
+        # been unsupported since HA 2026.x.
+        return DmxMonitorOptionsFlow()
 
 
 class DmxMonitorOptionsFlow(config_entries.OptionsFlow):
-    def __init__(self, config_entry):
-        self.config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
         flow = DmxMonitorConfigFlow()

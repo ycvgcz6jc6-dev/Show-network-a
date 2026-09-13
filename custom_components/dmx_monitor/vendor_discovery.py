@@ -15,14 +15,13 @@ MARKERS = {
 }
 
 
-def _scan_sync(timeout: float = 2.0) -> list[dict[str, Any]]:
+def _scan_sync(zc, timeout: float = 2.0) -> list[dict[str, Any]]:
     try:
-        from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
+        from zeroconf import ServiceBrowser, ServiceListener
     except ImportError:
         return []
     found: dict[str, dict[str, Any]] = {}
     browsers = []
-    zc = Zeroconf()
 
     class Listener(ServiceListener):
         def add_service(self, zc_, service_type, name): self._update(zc_, service_type, name)
@@ -54,6 +53,7 @@ def _scan_sync(timeout: float = 2.0) -> list[dict[str, Any]]:
                 return
 
     listener = Listener()
+    type_browser = None
     try:
         # Standard DNS-SD meta service: discover advertised service types first.
         class TypeListener(ServiceListener):
@@ -62,17 +62,29 @@ def _scan_sync(timeout: float = 2.0) -> list[dict[str, Any]]:
                     browsers.append(ServiceBrowser(zc_, name, listener))
             def update_service(self, zc_, service_type, name): pass
             def remove_service(self, zc_, service_type, name): pass
-        ServiceBrowser(zc, "_services._dns-sd._udp.local.", TypeListener())
+        type_browser = ServiceBrowser(zc, "_services._dns-sd._udp.local.", TypeListener())
         deadline = time.monotonic() + max(0.5, min(timeout, 5.0))
         while time.monotonic() < deadline:
             time.sleep(0.05)
     finally:
-        try:
-            zc.close()
-        except Exception:
-            pass
+        # Cancel only the browsers created by this scan. The Zeroconf instance
+        # itself is shared and owned by Home Assistant.
+        for browser in browsers:
+            try:
+                browser.cancel()
+            except Exception:
+                pass
+        if type_browser is not None:
+            try:
+                type_browser.cancel()
+            except Exception:
+                pass
     return list(found.values())
 
 
-async def async_scan(timeout: float = 2.0) -> list[dict[str, Any]]:
-    return await asyncio.to_thread(_scan_sync, timeout)
+async def async_scan(hass, timeout: float = 2.0) -> list[dict[str, Any]]:
+    """Observe vendor mDNS records using Home Assistant's shared Zeroconf."""
+    from homeassistant.components import zeroconf as ha_zeroconf
+
+    zc = await ha_zeroconf.async_get_instance(hass)
+    return await asyncio.to_thread(_scan_sync, zc, timeout)

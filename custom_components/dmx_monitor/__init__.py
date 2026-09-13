@@ -20,6 +20,25 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         static_dir = str(__import__("pathlib").Path(__file__).parent / "static")
         await hass.http.async_register_static_paths([StaticPathConfig("/api/dmx_monitor/static", static_dir, False)])
         hass.data[f"{DOMAIN}_static_registered"] = True
+
+    # Expose the existing Show Network frontend as a real Home Assistant
+    # sidebar panel. Earlier builds served the JS bundle but never registered
+    # a panel, so there was no visible interface unless a dashboard was added
+    # manually.
+    if not hass.data.get(f"{DOMAIN}_panel_registered"):
+        from homeassistant.components import panel_custom
+        await panel_custom.async_register_panel(
+            hass,
+            webcomponent_name="show-network-pro-dashboard",
+            frontend_url_path="show-network",
+            module_url="/api/dmx_monitor/static/show-network.js?v=0.12.4",
+            sidebar_title="Show Network",
+            sidebar_icon="mdi:network-outline",
+            require_admin=True,
+            config={},
+            config_panel_domain=DOMAIN,
+        )
+        hass.data[f"{DOMAIN}_panel_registered"] = True
     return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

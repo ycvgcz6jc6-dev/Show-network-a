@@ -1,7 +1,7 @@
 {
   "domain": "dmx_monitor",
   "name": "Show Network",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "documentation": "https://github.com/ycvgcz6jc6-dev/dmx-monitor-",
   "issue_tracker": "https://github.com/ycvgcz6jc6-dev/dmx-monitor-/issues",
   "requirements": [
@@ -16,5 +16,10 @@
   ],
   "config_flow": true,
   "integration_type": "hub",
-  "iot_class": "local_push"
+  "iot_class": "local_push",
+  "dependencies": [
+    "frontend",
+    "panel_custom",
+    "zeroconf"
+  ]
 }
