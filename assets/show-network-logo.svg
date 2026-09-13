@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 220" role="img" aria-label="Show Network DMX Monitor">
+  <rect width="900" height="220" rx="34" fill="#0b0d10"/>
+  <g fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M55 110h95"/><path d="M150 110l42-42"/><path d="M150 110l42 42"/>
+    <circle cx="55" cy="110" r="14" fill="#fff" stroke="none"/><circle cx="192" cy="68" r="12"/><circle cx="192" cy="152" r="12"/>
+    <path d="M225 68h58M225 152h58M283 68l42 42-42 42"/>
+  </g>
+  <text x="365" y="103" fill="#fff" font-family="Arial,Helvetica,sans-serif" font-size="54" font-weight="700">SHOW NETWORK</text>
+  <text x="368" y="151" fill="#aab2bb" font-family="Arial,Helvetica,sans-serif" font-size="28">DMX MONITOR</text>
+</svg>

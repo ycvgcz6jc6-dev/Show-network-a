@@ -1,0 +1,47 @@
+# Show Network — Tablet dashboard pack
+views:
+  - title: Show Network
+    path: show-network-tablet
+    icon: mdi:tablet-dashboard
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: markdown
+            content: |
+              # SHOW NETWORK
+              LIGHT · AUDIO · NETWORK · MA REMOTE
+          - type: entities
+            title: État
+            entities:
+              - entity: sensor.dmx_monitor_host_cpu_percent
+              - entity: sensor.dmx_monitor_host_memory_percent
+              - entity: sensor.dmx_monitor_network_interfaces_up
+              - entity: sensor.dmx_monitor_audio_protocols_active
+              - entity: sensor.dmx_monitor_audio_amplifiers_online
+              - entity: sensor.dmx_monitor_audio_amplifiers_errors
+              - entity: sensor.dmx_monitor_audio_amplifier_temperature_max
+      - type: grid
+        cards:
+          - type: custom:enttec-panel
+            entity: switch.dmx_monitor_enttec_dmx_input_listen
+          - type: custom:dmx-monitor-panel
+          - type: custom:dmx-ha-mapping-panel
+          - type: custom:dmx-ha-zones-panel
+          - type: custom:osc-output-panel
+          - type: custom:punchlight-network-panel
+      - type: grid
+        cards:
+          - type: custom:ma-inspector-panel
+          - type: custom:signal-watchdog-panel
+      - type: grid
+        cards:
+          - type: custom:show-network-topology-panel
+          - type: custom:show-network-rule-builder
+          - type: custom:show-network-reliability-panel
+          - type: custom:show-network-archive-panel
+          - type: custom:show-network-ha-builder-panel
+          - type: custom:show-network-notification-panel
+
+          - type: custom:show-network-brand-catalog
