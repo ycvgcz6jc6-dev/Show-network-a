@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from .coordinator import ShowNetworkCoordinator
 from .entity import ShowNetworkEntity, DOMAIN
 from .ha_builder_entities import BuilderSensor, BuilderNumber
+from .projector_platform import sensor_entities as projector_sensor_entities
 
 SENSORS = (
     ("devices_total", "Appareils découverts / Discovered devices", None),
@@ -120,18 +121,12 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return self.coordinator.data.get("performance", {}).get("level", "normal")
         if self._key == "performance_interval_s":
             return self.coordinator.data.get("performance", {}).get("telemetry_interval_s", 5.0)
-        if self._key == "journal_archive":
-            return dict(self.coordinator.data.get("archive", {}))
         if self._key == "ha_builder":
             return len(self.coordinator.data.get("ha_builder", []))
         if self._key == "notification":
             return "active" if self.coordinator.data.get("notification", {}).get("enabled") else "inactive"
         if self._key == "punchlight_network":
             return len(self.coordinator.data.get("punchlight_network", []))
-        if self._key == "network_capacity_utilization":
-            return dict(self.coordinator.data.get("network_capacity", {}))
-        if self._key == "chaos_status":
-            return dict(self.coordinator.data.get("chaos", {}))
         if self._key == "device_inventory":
             return len(self.coordinator.data.get("device_inventory", []))
         if self._key.startswith("network_"):
@@ -154,8 +149,6 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return self.coordinator.data.get(self._key, 0)
         if self._key == "dmx_ha_mappings_total":
             return len(self.coordinator.data.get("dmx_ha_mappings", []))
-        if self._key == "dmx_ha_mappings_total":
-            return {"mappings": self.coordinator.data.get("dmx_ha_mappings", [])}
         if self._key == "dmx_ha_zones_total":
             return len(self.coordinator.data.get("dmx_ha_zones", []))
         if self._key == "network_capacity_utilization":
@@ -195,8 +188,6 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return {"enabled": self.coordinator.data.get("notification", {}).get("enabled", False), "target_configured": bool(self.coordinator.data.get("notification", {}).get("target"))}
         if self._key == "punchlight_network":
             return {"devices": self.coordinator.data.get("punchlight_network", [])}
-        if self._key == "dmx_ha_mappings_total":
-            return {"mappings": self.coordinator.data.get("dmx_ha_mappings", [])}
         if self._key == "dmx_ha_zones_total":
             from .hue_catalog import snapshot as hue_catalog_snapshot
             return {"zones": self.coordinator.data.get("dmx_ha_zones", []), "rdm": self.coordinator.data.get("dmx_ha_rdm", {}), "hue_catalog": hue_catalog_snapshot()}
@@ -240,6 +231,7 @@ async def async_setup_entry(
     entities.extend(GigaCoreTemperatureSensor(coordinator, f"gigacore_temperature_{i}", host, i) for i, host in enumerate(hosts))
     entities.append(DmxUniverseSensor(coordinator))
     entities.append(TimecodeSensor(coordinator))
+    entities.extend(projector_sensor_entities(coordinator))
     entities.extend(BuilderSensor(coordinator, item) for item in coordinator.ha_builder.items.values() if item.entity_type == "sensor" and item.enabled)
     entities.extend(BuilderNumber(coordinator, item) for item in coordinator.ha_builder.items.values() if item.entity_type == "number" and item.enabled)
     async_add_entities(entities)

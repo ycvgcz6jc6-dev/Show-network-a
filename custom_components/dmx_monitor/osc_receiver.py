@@ -35,6 +35,10 @@ class OSCReceiver:
         self.callback=callback
         self.allowed_sources=normalize_ip_allowlist(allowed_sources)
         self.rejected_messages=0
+        # Strong references to fire-and-forget callback tasks: without this,
+        # asyncio may garbage-collect a Task mid-execution (per asyncio docs),
+        # silently dropping the callback.
+        self._bg_tasks: set[asyncio.Task] = set()
 
     async def start(self):
         loop=asyncio.get_running_loop()
@@ -58,7 +62,9 @@ class OSCReceiver:
         if self.callback:
             result = self.callback(message)
             if asyncio.iscoroutine(result):
-                asyncio.create_task(result, name="show-network-osc-callback")
+                task = asyncio.create_task(result, name="show-network-osc-callback")
+                self._bg_tasks.add(task)
+                task.add_done_callback(self._bg_tasks.discard)
         return message
 
 class _OSCProtocol(asyncio.DatagramProtocol):

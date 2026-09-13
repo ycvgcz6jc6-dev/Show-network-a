@@ -35,6 +35,7 @@ class PunchLightState:
         self.last_message = None
         self.last_error: str | None = None
         self.messages = 0
+        self._callback_tasks: set[asyncio.Task] = set()
 
     @staticmethod
     def list_input_ports() -> list[str]:
@@ -107,9 +108,16 @@ class PunchLightState:
         if changed:
             result = self.on_change(self.snapshot())
             if asyncio.iscoroutine(result):
-                asyncio.create_task(result, name=f"show-network-punchlight-change-{self.source_name}")
+                task = asyncio.create_task(result, name=f"show-network-punchlight-change-{self.source_name}")
+                self._callback_tasks.add(task)
+                task.add_done_callback(self._callback_tasks.discard)
 
     async def async_stop(self) -> None:
+        for task in list(self._callback_tasks):
+            task.cancel()
+        if self._callback_tasks:
+            await asyncio.gather(*self._callback_tasks, return_exceptions=True)
+        self._callback_tasks.clear()
         if self._task:
             self._task.cancel()
             with suppress(asyncio.CancelledError):

@@ -3,6 +3,7 @@ from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .ha_builder_entities import BuilderBinarySensor
+from .projector_platform import binary_entities as projector_binary_entities
 
 class PunchLightRecording(CoordinatorEntity, BinarySensorEntity):
     _attr_has_entity_name = True
@@ -37,6 +38,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     seen = {(x.protocol, x.universe) for x in coordinator.dmx_tracker.all()}
     entities = [UniverseActive(coordinator, protocol, universe) for protocol, universe in sorted(seen, key=str)]
     entities.extend([PunchLightRecording(coordinator), PunchLightReady(coordinator)])
+    entities.extend(projector_binary_entities(coordinator))
     entities.extend(BuilderBinarySensor(coordinator, item) for item in coordinator.ha_builder.items.values() if item.entity_type == "binary_sensor" and item.enabled)
     async_add_entities(entities)
     coordinator._dmx_universe_entity_keys = set(seen)

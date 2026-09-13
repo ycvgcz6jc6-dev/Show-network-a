@@ -195,12 +195,19 @@ class DmxNetworkReceiver:
 
     async def _supervise(self, protocol, port, group):
         backoff = 1.0
+        # Minimum uptime (seconds) below which a connection is considered a
+        # failed/flapping attempt: the backoff only resets to 1.0 once the
+        # receive loop has actually stayed up longer than this, so a listener
+        # that connects then immediately errors out keeps backing off instead
+        # of retrying every second forever.
+        MIN_STABLE_UPTIME_S = 5.0
         while not self._stopping:
             sock = None
             parser_task = None
+            started_at = None
             try:
                 sock = await self._open_socket(protocol, port, group)
-                backoff = 1.0
+                started_at = asyncio.get_running_loop().time()
                 parser_task = asyncio.create_task(self._parser_worker(protocol), name=f"show-network-{protocol.lower()}-parser")
                 await self._receive(sock, protocol)
             except asyncio.CancelledError:
@@ -223,13 +230,14 @@ class DmxNetworkReceiver:
                         sock.close()
                     except OSError:
                         pass
+            if started_at is not None and (asyncio.get_running_loop().time() - started_at) > MIN_STABLE_UPTIME_S:
+                backoff = 1.0
             if not self._stopping:
                 await asyncio.sleep(backoff)
                 backoff = min(30.0, backoff * 2.0)
 
     async def _receive(self, sock, protocol):
         loop = asyncio.get_running_loop()
-        queue = self._queues[protocol]
         while not self._stopping:
             try:
                 data, addr = await loop.sock_recvfrom(sock, 2048)

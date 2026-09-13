@@ -37,12 +37,26 @@ class ProjectorState(ProjectorEntity,SensorEntity):
     @property
     def extra_state_attributes(self): return {'host':self.r.host,'port':self.r.port,'manufacturer':self.r.manufacturer,'model':self.r.model,'profile':self.r.profile,'last_error':self.r.last_error}
 
-def _entities(c):
-    out=[]
-    for i,r in enumerate(c.projector_monitor.records):
-        base=f'{i}_{uid_from_record(r, i)}'
-        out += [ProjectorOnline(c,r,base), ProjectorState(c,r,base,'power'), ProjectorState(c,r,base,'input_source'), ProjectorState(c,r,base,'av_mute'), ProjectorState(c,r,base,'lamp_hours'), ProjectorState(c,r,base,'temperature_c'), ProjectorState(c,r,base,'errors')]
+def binary_entities(c):
+    """Return projector binary-sensor entities for the HA binary_sensor platform."""
+    out = []
+    for i, r in enumerate(c.projector_monitor.records):
+        base = f"{i}_{uid_from_record(r, i)}"
+        out.append(ProjectorOnline(c, r, base))
     return out
 
-async def async_setup_entry(hass,entry,async_add_entities):
-    c=hass.data[DOMAIN][entry.entry_id]['coordinator']; async_add_entities(_entities(c))
+
+def sensor_entities(c):
+    """Return projector sensor entities for the HA sensor platform."""
+    out = []
+    for i, r in enumerate(c.projector_monitor.records):
+        base = f"{i}_{uid_from_record(r, i)}"
+        out.extend([
+            ProjectorState(c, r, base, "power"),
+            ProjectorState(c, r, base, "input_source"),
+            ProjectorState(c, r, base, "av_mute"),
+            ProjectorState(c, r, base, "lamp_hours"),
+            ProjectorState(c, r, base, "temperature_c"),
+            ProjectorState(c, r, base, "errors"),
+        ])
+    return out

@@ -34,8 +34,15 @@ SWITCH_PROFILES = tuple(SwitchProfile(
 ) for x in _RAW)
 
 def profiles() -> list[dict]: return [asdict(item) for item in SWITCH_PROFILES]
-def enabled_profiles(settings: dict | None = None) -> list[SwitchProfile]:
-    selected = (settings or {}).get("switch_manufacturers")
+def enabled_profiles(selected: list[str] | tuple[str, ...] | None = None) -> list[SwitchProfile]:
+    """Return the switch profiles enabled for the given manufacturer keys.
+
+    ``selected`` is the raw list of manufacturer keys (e.g. coordinator.data
+    ["switch_manufacturers"]), not a settings dict — the previous signature
+    expected a dict and called .get("switch_manufacturers") on it, which
+    crashed with AttributeError as soon as a list was passed in (the only
+    real caller, ShowNetworkCoordinator, always passes a list).
+    """
     if selected is None: return [p for p in SWITCH_PROFILES if p.enabled_by_default]
     selected = set(selected)
     return [p for p in SWITCH_PROFILES if p.key in selected]
