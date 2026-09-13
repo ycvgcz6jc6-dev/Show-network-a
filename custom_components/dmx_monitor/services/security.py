@@ -1,0 +1,31 @@
+"""Show Network security service handlers."""
+from __future__ import annotations
+
+from homeassistant.core import HomeAssistant
+
+from ..services.common import coordinator_for_call, DOMAIN
+
+async def async_register(hass: HomeAssistant) -> None:
+    if not hass.services.has_service(DOMAIN, "set_security_password"):
+        async def _set_security_password(call):
+            c = coordinator_for_call(hass, call)
+            if c.security.state.configured:
+                current = str(call.data.get("current_password", ""))
+                if not c.security.verify(current):
+                    raise PermissionError("Current Show Network password is invalid")
+            c.security.set_password(str(call.data["password"]))
+            c.publish(security=c.security.snapshot())
+        async def _unlock_security(call):
+            c = coordinator_for_call(hass, call)
+            c.security.unlock(str(call.data["password"]))
+            c.publish(security=c.security.snapshot())
+        async def _lock_security(call):
+            c = coordinator_for_call(hass, call)
+            c.security.lock()
+            c.set_osc_output_enabled(False, require_security=False)
+            c.set_light_sync_enabled(False, require_security=False)
+            c.projector_controller.set_control_enabled(False)
+            c.publish(security=c.security.snapshot(), projector_control_enabled=False)
+        hass.services.async_register(DOMAIN, "set_security_password", _set_security_password)
+        hass.services.async_register(DOMAIN, "unlock_security", _unlock_security)
+        hass.services.async_register(DOMAIN, "lock_security", _lock_security)
