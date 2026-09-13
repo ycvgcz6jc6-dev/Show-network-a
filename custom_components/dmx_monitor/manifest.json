@@ -1,0 +1,21 @@
+{
+  "domain": "dmx_monitor",
+  "name": "Show Network",
+  "version": "0.12.1",
+  "documentation": "https://github.com/ycvgcz6jc6-dev/dmx-monitor-",
+  "issue_tracker": "https://github.com/ycvgcz6jc6-dev/dmx-monitor-/issues",
+  "requirements": [
+    "psutil>=5.9.0",
+    "pyserial>=3.5",
+    "mido>=1.3.0",
+    "python-rtmidi>=1.5.8",
+    "zeroconf>=0.132.0",
+    "aes70py>=1.0.3"
+  ],
+  "codeowners": [
+    "@ycvgcz6jc6-dev"
+  ],
+  "config_flow": true,
+  "integration_type": "hub",
+  "iot_class": "local_push"
+}
