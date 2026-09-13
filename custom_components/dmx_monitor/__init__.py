@@ -11,7 +11,7 @@ from .runtime_data import ShowNetworkRuntimeData
 
 DOMAIN = "dmx_monitor"
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = ["sensor", "binary_sensor", "switch", "projector_platform"]
+PLATFORMS = ["sensor", "binary_sensor", "switch"]
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Register the single canonical frontend asset path."""
