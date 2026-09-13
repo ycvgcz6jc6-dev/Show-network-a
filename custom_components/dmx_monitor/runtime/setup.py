@@ -34,6 +34,7 @@ from ..vendor_discovery import async_scan as async_scan_vendor_discovery
 from ..punchlight_network import async_scan as async_scan_punchlight_network
 from ..const import *
 from ..aes70_monitor import AES70Monitor
+from ..audio_health import AudioHealth
 from ..performance_manager import AdaptivePerformance
 
 _LOGGER = logging.getLogger(__name__)
