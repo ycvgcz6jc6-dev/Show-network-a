@@ -1,0 +1,183 @@
+"""Rich device identity and network inventory.
+
+IPs are connection metadata, never stable identity.  Identity prefers a trusted
+serial number or MAC.  Each fact may carry an evidence source and confidence
+so the UI can explain why a device/model/protocol was identified.
+"""
+from __future__ import annotations
+from dataclasses import dataclass, field, asdict
+from time import time
+import json
+from pathlib import Path
+
+@dataclass
+class Evidence:
+    field: str
+    value: str
+    source: str
+    confidence: float = 1.0
+
+@dataclass
+class DeviceRecord:
+    unique_id: str
+    ip: str | None = None
+    ipv6: str | None = None
+    hostname: str | None = None
+    mac: str | None = None
+    manufacturer: str | None = None
+    model: str | None = None
+    product_type: str | None = None
+    serial: str | None = None
+    firmware: str | None = None
+    category: str | None = None
+    vlan: int | None = None
+    switch_name: str | None = None
+    switch_port: str | None = None
+    link_speed_mbps: int | None = None
+    protocols: set[str] = field(default_factory=set)
+    sources: set[str] = field(default_factory=set)
+    evidence: list[Evidence] = field(default_factory=list)
+    confidence: str = "unknown"
+    confidence_score: float = 0.0
+    first_seen: float = field(default_factory=time)
+    last_seen: float = field(default_factory=time)
+    custom_name: str | None = None
+    custom_manufacturer: str | None = None
+    custom_model: str | None = None
+    custom_location: str | None = None
+    custom_role: str | None = None
+    hidden: bool = False
+
+    def display_name(self):
+        return self.custom_name or self.hostname or self.model or self.manufacturer or self.unique_id
+
+    def display_manufacturer(self):
+        return self.custom_manufacturer or self.manufacturer
+
+    def display_model(self):
+        return self.custom_model or self.model
+
+    def update_connection(self, ip=None, hostname=None, ipv6=None):
+        if ip: self.ip = ip
+        if hostname: self.hostname = hostname
+        if ipv6: self.ipv6 = ipv6
+        self.last_seen = time()
+
+    def add_evidence(self, field: str, value, source: str, confidence: float = 1.0):
+        if value is None:
+            return
+        self.evidence.append(Evidence(field, str(value), source, max(0.0, min(1.0, confidence))))
+        self.confidence_score = max(self.confidence_score, confidence)
+
+    def as_public_dict(self):
+        data = asdict(self)
+        data["display_name"] = self.display_name()
+        data["display_manufacturer"] = self.display_manufacturer()
+        data["display_model"] = self.display_model()
+        data["protocols"] = sorted(self.protocols)
+        data["sources"] = sorted(self.sources)
+        data["evidence"] = [asdict(e) for e in self.evidence[-50:]]
+        return data
+
+class DeviceInventory:
+    def __init__(self, storage_path: str | None = None):
+        self.devices: dict[str, DeviceRecord] = {}
+        self.storage_path = Path(storage_path) if storage_path else None
+        self.overrides: dict[str, dict] = {}
+        self.load_overrides()
+
+    def load_overrides(self):
+        if not self.storage_path or not self.storage_path.exists():
+            return
+        try:
+            raw = json.loads(self.storage_path.read_text())
+            self.overrides = raw if isinstance(raw, dict) else {}
+        except (OSError, ValueError):
+            self.overrides = {}
+
+    def save_overrides(self):
+        if not self.storage_path:
+            return
+        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.storage_path.with_suffix(self.storage_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(self.overrides, indent=2, ensure_ascii=False))
+        tmp.replace(self.storage_path)
+
+    def set_override(self, unique_id: str, **values):
+        allowed = {"name": "custom_name", "manufacturer": "custom_manufacturer",
+                   "model": "custom_model", "location": "custom_location",
+                   "role": "custom_role", "hidden": "hidden"}
+        current = self.overrides.setdefault(unique_id, {})
+        for key, value in values.items():
+            if key in allowed and value is not None:
+                current[allowed[key]] = value
+        self._apply_override(unique_id)
+        self.save_overrides()
+
+    def clear_override(self, unique_id: str):
+        self.overrides.pop(unique_id, None)
+        self._apply_override(unique_id)
+        self.save_overrides()
+
+    def _apply_override(self, unique_id: str):
+        device = self.devices.get(unique_id)
+        override = self.overrides.get(unique_id, {})
+        if not device:
+            return
+        for key in ("custom_name", "custom_manufacturer", "custom_model", "custom_location", "custom_role", "hidden"):
+            if key in override:
+                setattr(device, key, override[key])
+
+    def apply_overrides(self):
+        for uid in self.devices:
+            self._apply_override(uid)
+
+    def identity(self, *, serial=None, mac=None, fallback=None):
+        if serial:
+            return f"serial:{serial.lower()}"
+        if mac:
+            return f"mac:{mac.lower().replace(':','').replace('-','')}"
+        return fallback or "unknown"
+
+    def upsert(self, **kwargs):
+        uid = self.identity(serial=kwargs.get("serial"), mac=kwargs.get("mac"), fallback=kwargs.get("unique_id"))
+        device = self.devices.get(uid)
+        if device is None:
+            device = DeviceRecord(unique_id=uid)
+            self.devices[uid] = device
+        for key in (
+            "ip", "ipv6", "hostname", "mac", "manufacturer", "model", "product_type",
+            "serial", "firmware", "category", "vlan", "switch_name", "switch_port", "link_speed_mbps",
+        ):
+            value = kwargs.get(key)
+            if value is not None:
+                setattr(device, key, value)
+        device.protocols.update(kwargs.get("protocols", set()))
+        device.sources.update(kwargs.get("sources", set()))
+        for item in kwargs.get("evidence", []):
+            if isinstance(item, Evidence):
+                device.evidence.append(item)
+            elif isinstance(item, dict):
+                device.add_evidence(item.get("field", "unknown"), item.get("value"), item.get("source", "unknown"), float(item.get("confidence", 1.0)))
+        if kwargs.get("confidence"):
+            device.confidence = kwargs["confidence"]
+        if kwargs.get("confidence_score") is not None:
+            device.confidence_score = float(kwargs["confidence_score"])
+        device.last_seen = time()
+        self._apply_override(uid)
+        return device
+
+    def find_by_ip(self, ip):
+        return next((d for d in self.devices.values() if d.ip == ip or d.ipv6 == ip), None)
+
+    def public(self, include_hidden=True):
+        rows = [d.as_public_dict() for d in self.devices.values() if include_hidden or not d.hidden]
+        return rows
+
+    def summary(self):
+        return {
+            "total": len(self.devices),
+            "confirmed": sum(d.confidence == "confirmed" for d in self.devices.values()),
+            "candidates": sum(d.confidence == "candidate" for d in self.devices.values()),
+            "unknown": sum(d.confidence == "unknown" for d in self.devices.values()),
+        }
