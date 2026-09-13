@@ -476,28 +476,75 @@ customElements.define('show-network-notification-panel',ShowNetworkNotificationP
 
 /* ===== show-network-pro-dashboard.js ===== */
 class ShowNetworkProDashboard extends HTMLElement {
+  constructor(){super();this._view='pro';this._entityMap={};this._registryLoading=false;this._notice='';}
   setConfig(c){this._config=c||{}; this.render();}
-  set hass(h){this._hass=h; if(this._raf)return; const run=()=>{this._raf=null;this.render();}; this._raf=(typeof requestAnimationFrame==="function"?requestAnimationFrame(run):setTimeout(run,100));}
-  connectedCallback(){this.render();}
-  render(){
-    const s=this._hass?.states||{};
-    const get=(id)=>s[id]?.state ?? '—';
-    const cap=get('sensor.dmx_monitor_network_capacity_utilization');
-    const nodes=get('sensor.dmx_monitor_topology_nodes');
-    const links=get('sensor.dmx_monitor_topology_links');
-    const chaos=get('sensor.dmx_monitor_chaos_status');
-    const archive=s['sensor.dmx_monitor_journal_archive']?.attributes||{};
-    const pct=parseFloat(cap); const status=Number.isFinite(pct)?(pct>=90?'critical':pct>=75?'warning':'ok'):'off';
-    this.innerHTML=`<style>
-:host{display:block;background:#0a0c0f;color:#eef1f4;font-family:Inter,system-ui,sans-serif;min-height:100vh}.wrap{padding:18px;max-width:1500px;margin:auto}.top{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border:1px solid #293039;background:#12161a;border-radius:12px}.brand{font-size:20px;font-weight:800;letter-spacing:.06em}.muted{color:#8f99a3;font-size:11px}.badge{padding:7px 10px;border-radius:999px;border:1px solid #343b43;font-size:11px}.grid{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:12px;margin-top:12px}.card{background:#12161a;border:1px solid #293039;border-radius:12px;padding:15px}.title{font-size:11px;color:#8f99a3;letter-spacing:.08em}.big{font-size:34px;font-weight:800;margin:6px 0}.ok{color:#68df9a}.warning{color:#e5bf6b}.critical{color:#ef7777}.off{color:#8f99a3}.row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #22282e;font-size:12px}.row:last-child{border:0}.topology{height:260px;display:flex;align-items:center;justify-content:center;gap:16px}.node{border:1px solid #39424c;border-radius:10px;padding:12px;text-align:center;background:#171c21;min-width:105px}.arrow{color:#68737d}.footer{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}.btn{background:#171c21;border:1px solid #39424c;border-radius:8px;padding:9px 12px;color:#eee;cursor:pointer}.btn:hover{background:#20262c}@media(max-width:900px){.grid{grid-template-columns:1fr}.wrap{padding:10px}.topology{height:190px}}
-</style><div class="wrap"><div class="top"><div><div class="brand">SHOW NETWORK / PRO</div><div class="muted">IP · FLOW · TOPOLOGY · TIMELINE · RELIABILITY</div></div><div class="badge ${status}">CAPACITY ${cap}%</div></div>
-<div class="grid"><div class="card"><div class="title">NETWORK CAPACITY</div><div class="big ${status}">${cap}%</div><div class="row"><span>Link</span><span>${get('sensor.dmx_monitor_network_capacity_link_mbps')} Mb/s</span></div><div class="row"><span>Utilisé</span><span>${get('sensor.dmx_monitor_network_capacity_total_mbps')} Mb/s</span></div><div class="row"><span>Marge</span><span>${get('sensor.dmx_monitor_network_capacity_headroom_mbps')} Mb/s</span></div></div>
-<div class="card"><div class="title">TOPOLOGY</div><div class="big">${nodes}</div><div class="muted">NŒUDS</div><div class="row"><span>Liens</span><span>${links}</span></div></div>
-<div class="card"><div class="title">RELIABILITY</div><div class="big ${chaos==='inactive'?'ok':'warning'}">${chaos}</div><div class="muted">CHAOS / FAULT INJECTION</div><div class="row"><span>Archive</span><span>${archive.files??'—'} fichiers</span></div><div class="row"><span>Destination</span><span>${archive.configured_destination??'—'}</span></div></div></div>
-<div class="card topology"><div class="node">NIC<br><span class="muted">${get('sensor.dmx_monitor_network_interfaces_up')} UP</span></div><div class="arrow">→</div><div class="node">SWITCH<br><span class="muted">${nodes} nodes</span></div><div class="arrow">→</div><div class="node">SHOW DEVICES<br><span class="muted">${get('sensor.dmx_monitor_devices_total')} devices</span></div></div>
-<div class="footer"><button class="btn" id="classic">Vue classique</button><button class="btn" id="timeline">Show Timeline</button><button class="btn" id="archive">Journal & backups</button></div></div>`;
-    this.querySelector('#classic')?.addEventListener('click',()=>this.dispatchEvent(new CustomEvent('show-network-view',{detail:{view:'classic'},bubbles:true,composed:true})));
+  set hass(h){this._hass=h; this._ensureRegistry(); if(this._raf)return; const run=()=>{this._raf=null;this.render();}; this._raf=(typeof requestAnimationFrame==="function"?requestAnimationFrame(run):setTimeout(run,100));}
+  connectedCallback(){this._ensureRegistry();this.render();}
+  async _ensureRegistry(){
+    if(!this._hass?.connection || this._registryLoading || Object.keys(this._entityMap).length)return;
+    this._registryLoading=true;
+    try{
+      const rows=await this._hass.connection.sendMessagePromise({type:'config/entity_registry/list'});
+      for(const row of rows||[]){if(row.platform==='dmx_monitor' && row.unique_id)this._entityMap[row.unique_id]=row.entity_id;}
+    }catch(e){console.warn('Show Network: entity registry unavailable',e);}
+    finally{this._registryLoading=false;this.render();}
   }
+  _entityId(unique,fallback){return this._entityMap[unique]||fallback;}
+  _state(unique,fallback){const id=this._entityId(unique,fallback);return this._hass?.states?.[id];}
+  _value(unique,fallback='—',fallbackId){const st=this._state(unique,fallbackId);return st?.state ?? fallback;}
+  _setView(view){this._view=view;this._notice='';this.render();}
+  async _call(service,data={}){
+    try{await this._hass?.callService?.('dmx_monitor',service,data);this._notice='Action exécutée';}
+    catch(e){this._notice=`Erreur: ${e?.message||e}`;}
+    this.render();
+  }
+  _securityHtml(){
+    const configured=String(this._value('security_configured','false'))==='true';
+    const unlocked=String(this._value('security_unlocked','false'))==='true';
+    const remaining=this._value('security_unlock_remaining_s','0');
+    return `<div class="card security"><div class="title">SÉCURITÉ COMMANDES ACTIVES</div><div class="big ${unlocked?'ok':configured?'warning':'critical'}">${unlocked?'DÉVERROUILLÉ':configured?'VERROUILLÉ':'NON CONFIGURÉ'}</div><div class="muted">${unlocked?`Encore ${remaining} s`:'OSC OUT, Light Sync et Projector Control restent bloqués.'}</div><div class="security-actions">${!configured?'<button class="btn" id="setpwd">Configurer mot de passe</button>':'<button class="btn" id="unlock">Déverrouiller</button>'}${configured?'<button class="btn" id="lock">Verrouiller</button>':''}</div></div>`;
+  }
+  _wireSecurity(){
+    this.querySelector('#setpwd')?.addEventListener('click',async()=>{const p=prompt('Nouveau mot de passe Show Network');if(!p)return;await this._call('set_security_password',{password:p});});
+    this.querySelector('#unlock')?.addEventListener('click',async()=>{const p=prompt('Mot de passe Show Network');if(!p)return;await this._call('unlock_security',{password:p});});
+    this.querySelector('#lock')?.addEventListener('click',()=>this._call('lock_security',{}));
+  }
+  _shell(content){return `<style>
+:host{display:block;background:#0a0c0f;color:#eef1f4;font-family:Inter,system-ui,sans-serif;min-height:100vh}.wrap{padding:18px;max-width:1500px;margin:auto}.top{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border:1px solid #293039;background:#12161a;border-radius:12px}.brand{font-size:20px;font-weight:800;letter-spacing:.06em}.muted{color:#8f99a3;font-size:11px}.badge{padding:7px 10px;border-radius:999px;border:1px solid #343b43;font-size:11px}.grid{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:12px;margin-top:12px}.card{background:#12161a;border:1px solid #293039;border-radius:12px;padding:15px}.title{font-size:11px;color:#8f99a3;letter-spacing:.08em}.big{font-size:34px;font-weight:800;margin:6px 0}.ok{color:#68df9a}.warning{color:#e5bf6b}.critical{color:#ef7777}.off{color:#8f99a3}.row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #22282e;font-size:12px}.row:last-child{border:0}.topology{height:260px;display:flex;align-items:center;justify-content:center;gap:16px}.node{border:1px solid #39424c;border-radius:10px;padding:12px;text-align:center;background:#171c21;min-width:105px}.arrow{color:#68737d}.footer,.security-actions{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}.btn{background:#171c21;border:1px solid #39424c;border-radius:8px;padding:9px 12px;color:#eee;cursor:pointer}.btn:hover{background:#20262c}.notice{margin-top:12px;padding:10px 12px;border:1px solid #39424c;border-radius:8px;background:#151a1f;font-size:12px}.back{margin-bottom:12px}.classic-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.timeline-item{padding:11px 0;border-bottom:1px solid #252b31}.timeline-item:last-child{border:0}.security{margin-top:12px}@media(max-width:900px){.grid,.classic-grid{grid-template-columns:1fr}.wrap{padding:10px}.topology{height:190px}}
+</style><div class="wrap">${content}${this._notice?`<div class="notice">${this._notice}</div>`:''}</div>`;}
+  _renderPro(){
+    const cap=this._value('network_capacity_utilization','—','sensor.dmx_monitor_network_capacity_utilization');
+    const nodes=this._value('topology_nodes','—','sensor.dmx_monitor_topology_nodes');
+    const links=this._value('topology_links','—','sensor.dmx_monitor_topology_links');
+    const chaos=this._value('chaos_status','—','sensor.dmx_monitor_chaos_status');
+    const archive=this._state('journal_archive','sensor.dmx_monitor_journal_archive')?.attributes||{};
+    const pct=parseFloat(cap); const status=Number.isFinite(pct)?(pct>=90?'critical':pct>=75?'warning':'ok'):'off';
+    const content=`<div class="top"><div><div class="brand">SHOW NETWORK / PRO</div><div class="muted">IP · FLOW · TOPOLOGY · TIMELINE · RELIABILITY</div></div><div class="badge ${status}">CAPACITY ${cap}%</div></div>
+<div class="grid"><div class="card"><div class="title">NETWORK CAPACITY</div><div class="big ${status}">${cap}%</div><div class="row"><span>Link</span><span>${this._value('network_capacity_link_mbps','—','sensor.dmx_monitor_network_capacity_link_mbps')} Mb/s</span></div><div class="row"><span>Utilisé</span><span>${this._value('network_capacity_total_mbps','—','sensor.dmx_monitor_network_capacity_total_mbps')} Mb/s</span></div><div class="row"><span>Marge</span><span>${this._value('network_capacity_headroom_mbps','—','sensor.dmx_monitor_network_capacity_headroom_mbps')} Mb/s</span></div></div>
+<div class="card"><div class="title">TOPOLOGY</div><div class="big">${nodes}</div><div class="muted">NŒUDS</div><div class="row"><span>Liens</span><span>${links}</span></div></div>
+<div class="card"><div class="title">RELIABILITY</div><div class="big ${chaos==='inactive'?'ok':'warning'}">${chaos}</div><div class="muted">CHAOS / FAULT INJECTION</div><div class="row"><span>Archive</span><span>${archive.files??'—'} fichiers</span></div><div class="row"><span>Destination</span><span>${archive.configured_destination??archive.destination??'—'}</span></div></div></div>
+<div class="card topology"><div class="node">NIC<br><span class="muted">${this._value('network_interfaces_up','—','sensor.dmx_monitor_network_interfaces_up')} UP</span></div><div class="arrow">→</div><div class="node">SWITCH<br><span class="muted">${nodes} nodes</span></div><div class="arrow">→</div><div class="node">SHOW DEVICES<br><span class="muted">${this._value('devices_total','—','sensor.dmx_monitor_devices_total')} devices</span></div></div>${this._securityHtml()}
+<div class="footer"><button class="btn" id="classic">Vue classique</button><button class="btn" id="timeline">Show Timeline</button><button class="btn" id="archive">Journal & backups</button></div>`;
+    this.innerHTML=this._shell(content);this._wireSecurity();
+    this.querySelector('#classic')?.addEventListener('click',()=>this._setView('classic'));
+    this.querySelector('#timeline')?.addEventListener('click',()=>this._setView('timeline'));
+    this.querySelector('#archive')?.addEventListener('click',()=>this._setView('archive'));
+  }
+  _renderClassic(){
+    const rows=[['LIGHT','DMX / sACN / Art-Net',this._value('network_packets_observed','—')],['AUDIO','Dante / AES67 / ST2110 / AVB',this._value('audio_protocols_active','—')],['NETWORK','Interfaces actives',this._value('network_interfaces_up','—')],['MA','Stations actives',this._value('ma_live_stations','—')]];
+    const cards=rows.map(r=>`<div class="card"><div class="title">${r[0]}</div><div class="big">${r[2]}</div><div class="muted">${r[1]}</div></div>`).join('');
+    this.innerHTML=this._shell(`<button class="btn back" id="back">← PRO</button><div class="top"><div><div class="brand">SHOW NETWORK / CLASSIC</div><div class="muted">Vue diagnostic synthétique</div></div></div><div class="classic-grid" style="margin-top:12px">${cards}</div>${this._securityHtml()}`);this._wireSecurity();this.querySelector('#back')?.addEventListener('click',()=>this._setView('pro'));
+  }
+  _renderArchive(){
+    const a=this._state('journal_archive','sensor.dmx_monitor_journal_archive')?.attributes||{};
+    this.innerHTML=this._shell(`<button class="btn back" id="back">← PRO</button><div class="top"><div><div class="brand">JOURNAL & BACKUPS</div><div class="muted">Archive persistante Show Network</div></div></div><div class="card" style="margin-top:12px"><div class="row"><span>Destination</span><span>${a.configured_destination??a.destination??'—'}</span></div><div class="row"><span>Fichiers</span><span>${a.files??'—'}</span></div><div class="row"><span>Taille</span><span>${a.bytes??0} octets</span></div><div class="row"><span>Rétention</span><span>${a.retention_days??'—'} jours</span></div><div class="row"><span>Dernier backup</span><span>${a.last_backup_success??'—'}</span></div><div class="footer"><button class="btn" id="backup">Backup maintenant</button><button class="btn" id="export">Exporter ZIP</button></div></div>`);
+    this.querySelector('#back')?.addEventListener('click',()=>this._setView('pro'));this.querySelector('#backup')?.addEventListener('click',()=>this._call('archive_backup',{}));this.querySelector('#export')?.addEventListener('click',()=>this._call('archive_export',{}));
+  }
+  _renderTimeline(){
+    const a=this._state('journal_archive','sensor.dmx_monitor_journal_archive')?.attributes||{};
+    this.innerHTML=this._shell(`<button class="btn back" id="back">← PRO</button><div class="top"><div><div class="brand">SHOW TIMELINE</div><div class="muted">État du journal événementiel persistant</div></div></div><div class="card" style="margin-top:12px"><div class="timeline-item"><b>Journal actif</b><div class="muted">${a.timeline_file??'—'}</div></div><div class="timeline-item"><b>${a.files??'—'} fichier(s) journal</b><div class="muted">${a.bytes??0} octets enregistrés</div></div><div class="timeline-item"><b>Dernière sauvegarde</b><div class="muted">${a.last_backup_success??'—'}</div></div><div class="muted" style="margin-top:12px">Cette vue n'invente pas d'événements : l'intégration expose actuellement les métadonnées du journal, tandis que les événements détaillés restent dans le fichier timeline.</div></div>`);this.querySelector('#back')?.addEventListener('click',()=>this._setView('pro'));
+  }
+  render(){if(this._view==='classic')return this._renderClassic();if(this._view==='archive')return this._renderArchive();if(this._view==='timeline')return this._renderTimeline();return this._renderPro();}
 }
 customElements.define('show-network-pro-dashboard',ShowNetworkProDashboard);
 
