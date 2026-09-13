@@ -32,7 +32,7 @@ class HAActionDispatcher:
 
     def start(self) -> None:
         if self._task is None or self._task.done():
-            self._task = self.hass.async_create_task(self._run(), name="show-network-ha-actions")
+            self._task = self.hass.async_create_background_task(self._run(), name="show-network-ha-actions")
 
     def submit(self, action: ServiceAction, *, zone_id: str | None = None) -> bool:
         if zone_id:

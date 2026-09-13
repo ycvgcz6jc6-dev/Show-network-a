@@ -242,7 +242,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     # Run the first scan in the background instead of awaiting it inline: this
     # scan takes >=2s and was previously blocking async_setup_entry directly,
     # contributing to slow/timed-out config entry bootstraps.
-    hass.async_create_task(_vendor_discovery_tick(), name="show_network_initial_vendor_discovery")
+    hass.async_create_background_task(_vendor_discovery_tick(), name="show_network_initial_vendor_discovery")
     async def _punchlight_periodic_discovery(_now):
         try:
             devices=await async_scan_punchlight_network(hass, interface, timeout=2.0)

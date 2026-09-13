@@ -33,67 +33,75 @@ def _notification_choices(hass, current: str = "") -> list[str]:
     return choices
 
 
+async def _choices_for_hass(hass):
+    rows, enttec_ports, midi_ports = await asyncio.gather(
+        hass.async_add_executor_job(network_interface_snapshot),
+        hass.async_add_executor_job(discover_ports),
+        hass.async_add_executor_job(MIDIInputRuntime.list_input_ports),
+    )
+    return _interfaces(rows), [port.device for port in enttec_ports], midi_ports
+
+
+def _schema_for_hass(hass, data: dict | None, interfaces: list[str], enttec_ports: list[str], midi_ports: list[str]):
+    data = data or {}
+    interface = data.get(const.CONF_INTERFACE, "0.0.0.0")
+    interface_fields = {
+        const.CONF_INTERFACE: vol.Required(const.CONF_INTERFACE, default=interface),
+        const.CONF_INTERFACE_DMX: vol.Optional(const.CONF_INTERFACE_DMX, default=data.get(const.CONF_INTERFACE_DMX, interface)),
+        const.CONF_INTERFACE_DANTE: vol.Optional(const.CONF_INTERFACE_DANTE, default=data.get(const.CONF_INTERFACE_DANTE, interface)),
+        const.CONF_INTERFACE_PTP: vol.Optional(const.CONF_INTERFACE_PTP, default=data.get(const.CONF_INTERFACE_PTP, interface)),
+        const.CONF_INTERFACE_MA: vol.Optional(const.CONF_INTERFACE_MA, default=data.get(const.CONF_INTERFACE_MA, interface)),
+        const.CONF_INTERFACE_AUDIO: vol.Optional(const.CONF_INTERFACE_AUDIO, default=data.get(const.CONF_INTERFACE_AUDIO, interface)),
+    }
+    schema = {key: vol.In(interfaces) for key in interface_fields.values()}
+    schema.update({
+        vol.Required(const.CONF_UNIVERSES, default=data.get(const.CONF_UNIVERSES, "1-16")): str,
+        vol.Required(const.CONF_THRESHOLD, default=data.get(const.CONF_THRESHOLD, 10)): vol.All(vol.Coerce(int), vol.Range(min=0, max=255)),
+        vol.Required(const.CONF_LANGUAGE, default=data.get(const.CONF_LANGUAGE, "auto")): vol.In(["auto", "fr", "en", "es", "it", "nl", "de"]),
+        vol.Optional(const.CONF_PERFORMANCE_PROFILE, default=data.get(const.CONF_PERFORMANCE_PROFILE, "auto")): vol.In(const.PERFORMANCE_PROFILES),
+        vol.Optional(const.CONF_GIGACORE_HOSTS, default=data.get(const.CONF_GIGACORE_HOSTS, "")): str,
+        vol.Optional(const.CONF_GIGACORE_COMMUNITY, default=data.get(const.CONF_GIGACORE_COMMUNITY, const.DEFAULT_GIGACORE_COMMUNITY)): str,
+        vol.Optional(const.CONF_AES70_HOSTS, default=data.get(const.CONF_AES70_HOSTS, "")): str,
+        vol.Optional(const.CONF_AES70_PORT, default=data.get(const.CONF_AES70_PORT, 65000)): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
+        vol.Optional(const.CONF_ENTTEC_DEVICE, default=data.get(const.CONF_ENTTEC_DEVICE, "")): vol.In([""] + enttec_ports),
+        vol.Optional(const.CONF_ENTTEC_MODEL, default=data.get(const.CONF_ENTTEC_MODEL, "auto")): vol.In(["auto", "DMX USB Pro", "DMX USB Pro Mk2"]),
+        vol.Optional(const.CONF_OSC_INPUT_ENABLED, default=data.get(const.CONF_OSC_INPUT_ENABLED, False)): bool,
+        vol.Optional(const.CONF_OSC_INPUT_PORT, default=data.get(const.CONF_OSC_INPUT_PORT, 8000)): vol.All(vol.Coerce(int), vol.Range(min=1024, max=65535)),
+        vol.Optional(const.CONF_MIDI_ENABLED, default=data.get(const.CONF_MIDI_ENABLED, False)): bool,
+        vol.Optional(const.CONF_MIDI_DEVICE, default=data.get(const.CONF_MIDI_DEVICE, "")): vol.In([""] + midi_ports),
+        vol.Optional(const.CONF_PUNCHLIGHT_ENABLED, default=data.get(const.CONF_PUNCHLIGHT_ENABLED, False)): bool,
+        vol.Optional(const.CONF_PUNCHLIGHT_DEVICE, default=data.get(const.CONF_PUNCHLIGHT_DEVICE, "")): vol.In([""] + midi_ports),
+        vol.Optional(const.CONF_WATCHDOG_ENABLED, default=data.get(const.CONF_WATCHDOG_ENABLED, False)): bool,
+        vol.Optional(const.CONF_WATCHDOG_PROTOCOL, default=data.get(const.CONF_WATCHDOG_PROTOCOL, "ENTTEC")): vol.In(["ENTTEC", "sACN", "Art-Net"]),
+        vol.Optional(const.CONF_WATCHDOG_UNIVERSE, default=data.get(const.CONF_WATCHDOG_UNIVERSE, 1)): vol.All(vol.Coerce(int), vol.Range(min=1, max=63999)),
+        vol.Optional(const.CONF_WATCHDOG_TIMEOUT, default=data.get(const.CONF_WATCHDOG_TIMEOUT, 10)): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=3600)),
+        vol.Optional(const.CONF_WATCHDOG_RECOVERY_DELAY, default=data.get(const.CONF_WATCHDOG_RECOVERY_DELAY, 3)): vol.All(vol.Coerce(float), vol.Range(min=0, max=3600)),
+        vol.Optional("switch_manufacturers", default=data.get("switch_manufacturers", ["luminex", "elc", "green_go"])): selector.SelectSelector(selector.SelectSelectorConfig(options=["luminex", "elc", "green_go"], multiple=True)),
+        vol.Optional(const.CONF_ARCHIVE_DESTINATION, default=data.get(const.CONF_ARCHIVE_DESTINATION, "show_network_archive")): str,
+        vol.Optional(const.CONF_NOTIFICATION_ENABLED, default=data.get(const.CONF_NOTIFICATION_ENABLED, False)): bool,
+        vol.Optional(const.CONF_NOTIFICATION_TARGET, default=data.get(const.CONF_NOTIFICATION_TARGET, "persistent")): vol.In(_notification_choices(hass, data.get(const.CONF_NOTIFICATION_TARGET, ""))),
+        vol.Optional(const.CONF_NOTIFICATION_MODE, default=data.get(const.CONF_NOTIFICATION_MODE, "both")): vol.In(["notify", "persistent", "both"]),
+        vol.Optional(const.CONF_HA_BUILDER_ENABLED, default=data.get(const.CONF_HA_BUILDER_ENABLED, True)): bool,
+        vol.Optional(const.CONF_ARCHIVE_RETENTION_DAYS, default=data.get(const.CONF_ARCHIVE_RETENTION_DAYS, 30)): vol.All(vol.Coerce(int), vol.Range(min=1, max=3650)),
+        vol.Optional(const.CONF_ARCHIVE_MAX_BYTES, default=data.get(const.CONF_ARCHIVE_MAX_BYTES, 5 * 1024 * 1024)): vol.All(vol.Coerce(int), vol.Range(min=256000, max=100 * 1024 * 1024)),
+        vol.Optional(const.CONF_CAPACITY_LINK_MBPS, default=data.get(const.CONF_CAPACITY_LINK_MBPS, 1000)): vol.All(vol.Coerce(float), vol.Range(min=10, max=100000)),
+        vol.Optional(const.CONF_CAPACITY_DANTE_MBPS, default=data.get(const.CONF_CAPACITY_DANTE_MBPS, 0)): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
+        vol.Optional(const.CONF_CAPACITY_CAMERAS_MBPS, default=data.get(const.CONF_CAPACITY_CAMERAS_MBPS, 0)): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
+        vol.Optional(const.CONF_CAPACITY_ST2110_MBPS, default=data.get(const.CONF_CAPACITY_ST2110_MBPS, 0)): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
+        vol.Optional(const.CONF_CAPACITY_OTHER_MBPS, default=data.get(const.CONF_CAPACITY_OTHER_MBPS, 0)): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
+        vol.Optional("projectors", default=json.dumps(data.get("projectors", [])) if isinstance(data.get("projectors", []), list) else data.get("projectors", "")): str,
+    })
+    return vol.Schema(schema)
+
+
 class DmxMonitorConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
     VERSION = 2
 
     async def _choices(self):
-        rows, enttec_ports, midi_ports = await asyncio.gather(
-            self.hass.async_add_executor_job(network_interface_snapshot),
-            self.hass.async_add_executor_job(discover_ports),
-            self.hass.async_add_executor_job(MIDIInputRuntime.list_input_ports),
-        )
-        return _interfaces(rows), [port.device for port in enttec_ports], midi_ports
+        return await _choices_for_hass(self.hass)
 
     def _schema(self, data: dict | None, interfaces: list[str], enttec_ports: list[str], midi_ports: list[str]):
-        data = data or {}
-        interface = data.get(const.CONF_INTERFACE, "0.0.0.0")
-        interface_fields = {
-            const.CONF_INTERFACE: vol.Required(const.CONF_INTERFACE, default=interface),
-            const.CONF_INTERFACE_DMX: vol.Optional(const.CONF_INTERFACE_DMX, default=data.get(const.CONF_INTERFACE_DMX, interface)),
-            const.CONF_INTERFACE_DANTE: vol.Optional(const.CONF_INTERFACE_DANTE, default=data.get(const.CONF_INTERFACE_DANTE, interface)),
-            const.CONF_INTERFACE_PTP: vol.Optional(const.CONF_INTERFACE_PTP, default=data.get(const.CONF_INTERFACE_PTP, interface)),
-            const.CONF_INTERFACE_MA: vol.Optional(const.CONF_INTERFACE_MA, default=data.get(const.CONF_INTERFACE_MA, interface)),
-            const.CONF_INTERFACE_AUDIO: vol.Optional(const.CONF_INTERFACE_AUDIO, default=data.get(const.CONF_INTERFACE_AUDIO, interface)),
-        }
-        schema = {key: vol.In(interfaces) for key in interface_fields.values()}
-        schema.update({
-            vol.Required(const.CONF_UNIVERSES, default=data.get(const.CONF_UNIVERSES, "1-16")): str,
-            vol.Required(const.CONF_THRESHOLD, default=data.get(const.CONF_THRESHOLD, 10)): vol.All(vol.Coerce(int), vol.Range(min=0, max=255)),
-            vol.Required(const.CONF_LANGUAGE, default=data.get(const.CONF_LANGUAGE, "auto")): vol.In(["auto", "fr", "en", "es", "it", "nl", "de"]),
-            vol.Optional(const.CONF_PERFORMANCE_PROFILE, default=data.get(const.CONF_PERFORMANCE_PROFILE, "auto")): vol.In(const.PERFORMANCE_PROFILES),
-            vol.Optional(const.CONF_GIGACORE_HOSTS, default=data.get(const.CONF_GIGACORE_HOSTS, "")): str,
-            vol.Optional(const.CONF_GIGACORE_COMMUNITY, default=data.get(const.CONF_GIGACORE_COMMUNITY, const.DEFAULT_GIGACORE_COMMUNITY)): str,
-            vol.Optional(const.CONF_AES70_HOSTS, default=data.get(const.CONF_AES70_HOSTS, "")): str,
-            vol.Optional(const.CONF_AES70_PORT, default=data.get(const.CONF_AES70_PORT, 65000)): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
-            vol.Optional(const.CONF_ENTTEC_DEVICE, default=data.get(const.CONF_ENTTEC_DEVICE, "")): vol.In([""] + enttec_ports),
-            vol.Optional(const.CONF_ENTTEC_MODEL, default=data.get(const.CONF_ENTTEC_MODEL, "auto")): vol.In(["auto", "DMX USB Pro", "DMX USB Pro Mk2"]),
-            vol.Optional(const.CONF_OSC_INPUT_ENABLED, default=data.get(const.CONF_OSC_INPUT_ENABLED, False)): bool,
-            vol.Optional(const.CONF_OSC_INPUT_PORT, default=data.get(const.CONF_OSC_INPUT_PORT, 8000)): vol.All(vol.Coerce(int), vol.Range(min=1024, max=65535)),
-            vol.Optional(const.CONF_MIDI_ENABLED, default=data.get(const.CONF_MIDI_ENABLED, False)): bool,
-            vol.Optional(const.CONF_MIDI_DEVICE, default=data.get(const.CONF_MIDI_DEVICE, "")): vol.In([""] + midi_ports),
-            vol.Optional(const.CONF_PUNCHLIGHT_ENABLED, default=data.get(const.CONF_PUNCHLIGHT_ENABLED, False)): bool,
-            vol.Optional(const.CONF_PUNCHLIGHT_DEVICE, default=data.get(const.CONF_PUNCHLIGHT_DEVICE, "")): vol.In([""] + midi_ports),
-            vol.Optional(const.CONF_WATCHDOG_ENABLED, default=data.get(const.CONF_WATCHDOG_ENABLED, False)): bool,
-            vol.Optional(const.CONF_WATCHDOG_PROTOCOL, default=data.get(const.CONF_WATCHDOG_PROTOCOL, "ENTTEC")): vol.In(["ENTTEC", "sACN", "Art-Net"]),
-            vol.Optional(const.CONF_WATCHDOG_UNIVERSE, default=data.get(const.CONF_WATCHDOG_UNIVERSE, 1)): vol.All(vol.Coerce(int), vol.Range(min=1, max=63999)),
-            vol.Optional(const.CONF_WATCHDOG_TIMEOUT, default=data.get(const.CONF_WATCHDOG_TIMEOUT, 10)): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=3600)),
-            vol.Optional(const.CONF_WATCHDOG_RECOVERY_DELAY, default=data.get(const.CONF_WATCHDOG_RECOVERY_DELAY, 3)): vol.All(vol.Coerce(float), vol.Range(min=0, max=3600)),
-            vol.Optional("switch_manufacturers", default=data.get("switch_manufacturers", ["luminex", "elc", "green_go"])): selector.SelectSelector(selector.SelectSelectorConfig(options=["luminex", "elc", "green_go"], multiple=True)),
-            vol.Optional(const.CONF_ARCHIVE_DESTINATION, default=data.get(const.CONF_ARCHIVE_DESTINATION, "show_network_archive")): str,
-            vol.Optional(const.CONF_NOTIFICATION_ENABLED, default=data.get(const.CONF_NOTIFICATION_ENABLED, False)): bool,
-            vol.Optional(const.CONF_NOTIFICATION_TARGET, default=data.get(const.CONF_NOTIFICATION_TARGET, "persistent")): vol.In(_notification_choices(self.hass, data.get(const.CONF_NOTIFICATION_TARGET, ""))),
-            vol.Optional(const.CONF_NOTIFICATION_MODE, default=data.get(const.CONF_NOTIFICATION_MODE, "both")): vol.In(["notify", "persistent", "both"]),
-            vol.Optional(const.CONF_HA_BUILDER_ENABLED, default=data.get(const.CONF_HA_BUILDER_ENABLED, True)): bool,
-            vol.Optional(const.CONF_ARCHIVE_RETENTION_DAYS, default=data.get(const.CONF_ARCHIVE_RETENTION_DAYS, 30)): vol.All(vol.Coerce(int), vol.Range(min=1, max=3650)),
-            vol.Optional(const.CONF_ARCHIVE_MAX_BYTES, default=data.get(const.CONF_ARCHIVE_MAX_BYTES, 5 * 1024 * 1024)): vol.All(vol.Coerce(int), vol.Range(min=256000, max=100 * 1024 * 1024)),
-            vol.Optional(const.CONF_CAPACITY_LINK_MBPS, default=data.get(const.CONF_CAPACITY_LINK_MBPS, 1000)): vol.All(vol.Coerce(float), vol.Range(min=10, max=100000)),
-            vol.Optional(const.CONF_CAPACITY_DANTE_MBPS, default=data.get(const.CONF_CAPACITY_DANTE_MBPS, 0)): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
-            vol.Optional(const.CONF_CAPACITY_CAMERAS_MBPS, default=data.get(const.CONF_CAPACITY_CAMERAS_MBPS, 0)): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
-            vol.Optional(const.CONF_CAPACITY_ST2110_MBPS, default=data.get(const.CONF_CAPACITY_ST2110_MBPS, 0)): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
-            vol.Optional(const.CONF_CAPACITY_OTHER_MBPS, default=data.get(const.CONF_CAPACITY_OTHER_MBPS, 0)): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
-            vol.Optional("projectors", default=json.dumps(data.get("projectors", [])) if isinstance(data.get("projectors", []), list) else data.get("projectors", "")): str,
-        })
-        return vol.Schema(schema)
+        return _schema_for_hass(self.hass, data, interfaces, enttec_ports, midi_ports)
 
     async def async_step_user(self, user_input=None):
         await self.async_set_unique_id("show_network")
@@ -113,18 +121,21 @@ class DmxMonitorConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        # Home Assistant injects the config entry into OptionsFlow and exposes
-        # it through self.config_entry. Assigning that property manually has
-        # been unsupported since HA 2026.x.
+        # Home Assistant exposes the entry through OptionsFlow.config_entry.
         return DmxMonitorOptionsFlow()
 
 
 class DmxMonitorOptionsFlow(config_entries.OptionsFlow):
-
     async def async_step_init(self, user_input=None):
-        flow = DmxMonitorConfigFlow()
-        interfaces, enttec_ports, midi_ports = await flow._choices()
+        interfaces, enttec_ports, midi_ports = await _choices_for_hass(self.hass)
         if user_input is not None:
-            return self.async_create_entry(data=user_input)
+            data = dict(user_input)
+            try:
+                data["projectors"] = json.loads(data.get("projectors") or "[]")
+                if not isinstance(data["projectors"], list):
+                    raise ValueError
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return self.async_show_form(step_id="init", data_schema=_schema_for_hass(self.hass, data, interfaces, enttec_ports, midi_ports), errors={"projectors": "invalid_json"})
+            return self.async_create_entry(data=data)
         data = {**self.config_entry.data, **self.config_entry.options}
-        return self.async_show_form(step_id="init", data_schema=flow._schema(data, interfaces, enttec_ports, midi_ports))
+        return self.async_show_form(step_id="init", data_schema=_schema_for_hass(self.hass, data, interfaces, enttec_ports, midi_ports))
