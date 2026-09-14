@@ -42,6 +42,7 @@ class DanteMonitor:
         self.setup_packets = 0
         self.ports: set[int] = set()
         self.last: DanteObservation | None = None
+        self.source_stats: dict[str, dict] = {}
         self._tasks: list[asyncio.Task] = []
         self._sockets: list[socket.socket] = []
         self.inventory = DanteInventory()
@@ -101,6 +102,8 @@ class DanteMonitor:
             now = time.time()
             self.packets += 1
             self.sources.add(addr[0])
+            st = self.source_stats.setdefault(addr[0], {"packets": 0, "last_seen": None, "ports": set(), "kinds": set()})
+            st["packets"] += 1; st["last_seen"] = now; st["ports"].add(port); st["kinds"].add(kind)
             if kind == "mdns":
                 self.inventory.observe(addr[0], data)
             self.ports.add(port)
@@ -132,6 +135,13 @@ class DanteMonitor:
             "dante_last_port": last.port if last else None,
             "dante_last_length": last.length if last else None,
             "dante_last_seen": last.timestamp if last else None,
+            "dante_source_inventory": [
+                {"source": ip, "packets": st["packets"], "last_seen": st["last_seen"],
+                 "age_s": round(max(0.0, time.time()-st["last_seen"]), 2) if st["last_seen"] else None,
+                 "fresh": bool(st["last_seen"] and time.time()-st["last_seen"] < 10.0),
+                 "ports": sorted(st["ports"]), "kinds": sorted(st["kinds"])}
+                for ip, st in sorted(self.source_stats.items())],
+            "dante_fresh_sources": sum(1 for st in self.source_stats.values() if st["last_seen"] and time.time()-st["last_seen"] < 10.0),
             **self.inventory.snapshot(),
         }
 

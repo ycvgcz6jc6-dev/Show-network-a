@@ -98,13 +98,21 @@ class MANet3Listener:
         prefix = bytes(data[:24])
         self.last_packet_prefix_hex = prefix.hex(" ")
         self.last_packet_prefix_ascii = "".join(chr(b) if 32 <= b < 127 else "." for b in prefix)
-        stats = self.source_stats.setdefault(source, {"packets": 0, "bytes": 0, "last_packet_epoch": None, "last_size": 0, "prefix_hex": "", "prefix_ascii": ""})
+        stats = self.source_stats.setdefault(source, {"packets": 0, "bytes": 0, "last_packet_epoch": None, "last_size": 0, "prefix_hex": "", "prefix_ascii": "", "strings": []})
         stats["packets"] += 1
         stats["bytes"] += len(data)
         stats["last_packet_epoch"] = self.last_packet_epoch
         stats["last_size"] = len(data)
         stats["prefix_hex"] = self.last_packet_prefix_hex
         stats["prefix_ascii"] = self.last_packet_prefix_ascii
+        # Keep bounded printable tokens for passive protocol research. This is
+        # diagnostics only: tokens never become station/session facts without
+        # an explicit MA-related label in the same payload.
+        text = "".join(chr(b) if 32 <= b < 127 else "\n" for b in data)
+        tokens = [x.strip() for x in text.splitlines() if 3 <= len(x.strip()) <= 96]
+        for token in tokens[:24]:
+            if token not in stats["strings"]: stats["strings"].append(token)
+        stats["strings"] = stats["strings"][-48:]
         self.sources.add(source)
         self.groups_seen.add(group)
         self.observations.append(MAObservation(source, group, len(data), now))

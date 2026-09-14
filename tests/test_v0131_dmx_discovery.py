@@ -16,7 +16,7 @@ def test_dmx_module_is_not_rebuilt_on_every_hass_update():
     text = (ROOT / "custom_components/dmx_monitor/static/show-network.js").read_text()
     assert "if(this._view.startsWith('module:'))" in text
     assert "#module-content > *" in text
-    assert "el.hass=h" in text
+    assert "el.hass=this._hass" in text
     assert "sel?.addEventListener('change'" in text
     assert "this.selectionKey=e.target.value" in text
 
@@ -48,6 +48,6 @@ def test_version_0131():
     manifest = (ROOT / "custom_components/dmx_monitor/manifest.json").read_text()
     const = (ROOT / "custom_components/dmx_monitor/const.py").read_text()
     init = (ROOT / "custom_components/dmx_monitor/__init__.py").read_text()
-    assert '"version": "0.13.1"' in manifest
-    assert 'VERSION = "0.13.1"' in const
-    assert 'show-network.js?v=0.13.1' in init
+    assert '"version": "0.14.4"' in manifest
+    assert 'VERSION = "0.14.4"' in const
+    assert 'show-network.js?v=0.14.4' in init

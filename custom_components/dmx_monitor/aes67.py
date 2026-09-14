@@ -24,6 +24,7 @@ class AES67Monitor:
         self.packets = 0
         self.sources: set[str] = set()
         self.last: SAPObservation | None = None
+        self.sessions: dict[str, dict] = {}
         self._sock: socket.socket | None = None
         self._task: asyncio.Task | None = None
 
@@ -62,6 +63,14 @@ class AES67Monitor:
             # Keep only a tiny classification hint; never archive SDP/audio payload.
             text = data.decode("utf-8", errors="ignore")
             hint = "sdp" if "application/sdp" in text.lower() or "m=audio" in text.lower() else "sap"
+            if hint == "sdp":
+                lines=[x.strip() for x in text.replace("\r","\n").split("\n") if x.strip()]
+                name=next((x[2:] for x in lines if x.startswith("s=")), None)
+                conn=next((x[2:] for x in lines if x.startswith("c=")), None)
+                media=next((x[2:] for x in lines if x.startswith("m=audio")), None)
+                clock=next((x for x in lines if "ts-refclk:" in x or "mediaclk:" in x), None)
+                key=f"{addr[0]}:{name or conn or 'sdp'}"
+                self.sessions[key]={"source":addr[0],"name":name,"connection":conn,"media":media,"clock":clock,"last_seen":time.time()}
             self.last = SAPObservation(addr[0], len(data), time.time(), hint)
 
     def snapshot(self) -> dict:
@@ -72,6 +81,8 @@ class AES67Monitor:
             "aes67_last_length": self.last.length if self.last else None,
             "aes67_last_hint": self.last.payload_hint if self.last else None,
             "aes67_last_seen": self.last.timestamp if self.last else None,
+            "aes67_sessions": list(self.sessions.values()),
+            "aes67_session_count": len(self.sessions),
         }
 
     async def stop(self) -> None:

@@ -419,9 +419,13 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             rx_diag["ma_net3"] = ma.get("diagnostics", {})
             for obs in ma.get("observations", [])[-50:]:
                 try:
-                    self.ma_remote.observe(obs.source_ip, obs.destination_group)
+                    raw = ma.get("diagnostics", {}).get("raw_sources", [])
+                    detail = next((x for x in raw if x.get("source_ip")==obs.source_ip), {})
+                    self.ma_remote.observe(obs.source_ip, obs.destination_group, strings=detail.get("strings", []))
                 except AttributeError:
-                    self.ma_remote.observe(obs["source_ip"], obs["destination_group"])
+                    raw = ma.get("diagnostics", {}).get("raw_sources", [])
+                    detail = next((x for x in raw if x.get("source_ip")==obs.get("source_ip")), {})
+                    self.ma_remote.observe(obs["source_ip"], obs["destination_group"], strings=detail.get("strings", []))
             snapshot["ma_remote"] = self.ma_remote.snapshot()
         else:
             rx_diag["ma_net3"] = {"state": "disabled_or_unavailable", "interface": snapshot.get("show_network_config", {}).get("interface_ma")}

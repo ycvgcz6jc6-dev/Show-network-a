@@ -44,7 +44,7 @@ class MARemoteInventory:
     def __init__(self):
         self.stations: dict[str, MAStation] = {}
 
-    def observe(self, source_ip: str, group: str, packet_count: int = 1):
+    def observe(self, source_ip: str, group: str, packet_count: int = 1, strings=None):
         station = self.stations.get(source_ip)
         if station is None:
             station = MAStation(name=f"MA station non classifiée {source_ip}", ip=source_ip)
@@ -53,6 +53,19 @@ class MARemoteInventory:
         station.packets += packet_count
         station.ma_net3_active = True
         station.web_remote = "not_probed"
+        # Proprietary MA-Net3 payloads are not guessed. Only labelled printable
+        # fields are accepted as evidence; otherwise the station stays unknown.
+        for token in (strings or []):
+            low=token.lower()
+            if "session name" in low and (":" in token or "=" in token):
+                value=token.split(":" if ":" in token else "=",1)[1].strip()
+                if value: station.session_name=value[:64]
+            elif ("software version" in low or low.startswith("version=")) and (":" in token or "=" in token):
+                value=token.split(":" if ":" in token else "=",1)[1].strip()
+                if value: station.version=value[:32]
+            elif ("station name" in low or "hostname" in low) and (":" in token or "=" in token):
+                value=token.split(":" if ":" in token else "=",1)[1].strip()
+                if value: station.name=value[:64]
 
     def snapshot(self) -> dict:
         rows = [s.snapshot() for s in self.stations.values()]
@@ -67,9 +80,13 @@ class MARemoteInventory:
             "stations": rows,
             "station_count": len(rows),
             "live_stations": sum(1 for x in rows if x["state"] == "LIVE"),
-            "sessions": [],
-            "session_count": 0,
-            "sessions_note": "Session index/name require MA session metadata; passive listener does not join sessions.",
+            "sessions": [
+                {"name": name, "members": [r for r in rows if r.get("session_name")==name],
+                 "member_count": sum(1 for r in rows if r.get("session_name")==name)}
+                for name in sorted({r.get("session_name") for r in rows if r.get("session_name")})
+            ],
+            "session_count": len({r.get("session_name") for r in rows if r.get("session_name")}),
+            "sessions_note": "Passive evidence only; no MA-Net3 session is joined and unlabeled payload bytes are not guessed.",
             "web_remote_port": MA_WEB_REMOTE_PORT,
             "web_remote_candidates": [],
             "osc": {"default_port": MA_OSC_DEFAULT_PORT, "transport": "UDP/TCP", "observed": False, "control_enabled": False},

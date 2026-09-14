@@ -75,6 +75,17 @@ def parse_response(data: bytes, request_id: int) -> Optional[object]:
         # INTEGER or Counter32/etc. Temperature OID is returned as integer in tenths C on supported GigaCore firmware.
         if value[0] == 0x02:
             _,raw,_=_read_tlv(value,0); return int.from_bytes(raw,'big',signed=True)
+        # OBJECT IDENTIFIER (notably sysObjectID.0). Older builds silently
+        # discarded this tag, preventing vendor/model qualification.
+        if value[0] == 0x06:
+            _, raw, _ = _read_tlv(value, 0)
+            if not raw: return None
+            first = raw[0]; parts = [min(first // 40, 2), first - min(first // 40, 2) * 40]
+            acc = 0
+            for b in raw[1:]:
+                acc = (acc << 7) | (b & 0x7f)
+                if not (b & 0x80): parts.append(acc); acc = 0
+            return ".".join(str(x) for x in parts)
         # Counter/Unsigned/Timeticks: treat as unsigned integer.
         if value[0] in (0x41,0x42,0x43,0x46):
             _,raw,_=_read_tlv(value,0); return int.from_bytes(raw,'big',signed=False)

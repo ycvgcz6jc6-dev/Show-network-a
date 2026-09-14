@@ -1,3 +1,9 @@
+## 0.14.4
+- Dante source freshness and richer audio UI.
+- AES67 SDP session observation.
+- SNMP sysObjectID decoder fix for switch qualification.
+- Conservative MA-Net3 labelled metadata/session evidence.
+
 ## 0.13.5 — Cockpit, DMX live publication, local module controls, Dante cleanup
 
 - Fixed the DMX live publication path: the rate limiter was queued with `None`, which is also its internal “no pending value” sentinel; DMX tracker updates could therefore never be published to HA. It now queues the actual source/universe key.
@@ -145,7 +151,7 @@ Validation: static/unit/syntax only; no claim of real HA/network/hardware valida
 - Improve read-only Luminex/SNMP and Dante DNS-SD discovery.
 - Reduce discovery frequency/concurrency and throttle frontend updates for HA performance.
 
-## 0.14.2
+## 0.14.3
 - Stabilise l'UI temps réel: rafraîchissement du cockpit réduit et contrôles DMX non reconstruits pendant leur utilisation.
 - Corrige la déduplication des binary_sensors DMX par protocole/univers normalisé.
 - PTP: écoute multicast explicite 224.0.1.129 sur l'interface configurée, présence d'horloge, âge, domaine et Grandmaster exposés.

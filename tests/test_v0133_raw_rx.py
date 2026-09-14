@@ -6,8 +6,8 @@ CC = ROOT / "custom_components" / "dmx_monitor"
 
 
 def test_version_bumped():
-    assert '"version": "0.13.3"' in (CC / "manifest.json").read_text()
-    assert 'VERSION = "0.13.3"' in (CC / "const.py").read_text()
+    assert '"version": "0.14.4"' in (CC / "manifest.json").read_text()
+    assert 'VERSION = "0.14.4"' in (CC / "const.py").read_text()
 
 
 def test_sacn_multicast_address_is_e131_universe_address():
