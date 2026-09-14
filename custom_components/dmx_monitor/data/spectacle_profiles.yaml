@@ -539,3 +539,31 @@
   - LLDP
   - multicast
   control_paths: []
+- key: powersoft
+  manufacturer: Powersoft
+  domains: [AUDIO, NETWORK]
+  product_families: [X Series, T Series, Unica, Mezzo]
+  passive_protocols: [Dante, AES67, mDNS, LLDP]
+  diagnostics: [amplifier_status, temperature, input_monitoring, output_monitoring, limiter_activity, faults, network_health]
+  control_paths: [ArmoníaPlus]
+- key: qsc
+  manufacturer: QSC
+  domains: [AUDIO, NETWORK]
+  product_families: [Q-SYS, CX-Q, PLD]
+  passive_protocols: [Dante, AES67, mDNS, LLDP, SNMP]
+  diagnostics: [amplifier_status, temperature, channel_status, faults, network_health]
+  control_paths: [Q-SYS]
+- key: crown
+  manufacturer: Crown Audio
+  domains: [AUDIO, NETWORK]
+  product_families: [DCi, I-Tech, XTi]
+  passive_protocols: [Dante, AES67, mDNS, SNMP]
+  diagnostics: [amplifier_status, temperature, channel_status, limiter_activity, faults]
+  control_paths: [Audio Architect]
+- key: meyer_sound
+  manufacturer: Meyer Sound
+  domains: [AUDIO, NETWORK]
+  product_families: [Galileo GALAXY, RMS]
+  passive_protocols: [mDNS, LLDP]
+  diagnostics: [health_monitoring_capability, temperature, faults, network_health]
+  control_paths: [Compass, RMServer]

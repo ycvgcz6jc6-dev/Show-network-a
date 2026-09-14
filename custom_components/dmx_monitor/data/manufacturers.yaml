@@ -21,3 +21,22 @@ dante: audinate
 cisco: cisco
 aruba: hpe_aruba
 hpe: hpe_aruba
+
+l-acoustics: l_acoustics
+l acoustics: l_acoustics
+d&b: d_and_b
+db audiotechnik: d_and_b
+lab gruppen: lab_gruppen_lake
+lake: lab_gruppen_lake
+powersoft: powersoft
+qsc: qsc
+crown: crown
+adamson: adamson
+yamaha: yamaha
+meyer sound: meyer_sound
+netgear: netgear
+ubiquiti: ubiquiti
+mikrotik: mikrotik
+tp-link: tp_link
+allied telesis: allied_telesis
+juniper: juniper

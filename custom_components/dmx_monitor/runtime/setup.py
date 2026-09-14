@@ -369,30 +369,43 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
             status["snmp_probe_mode"] = "configured" if settings.get(CONF_GIGACORE_COMMUNITY) else "readonly_default_public"
             if community:
                 sem = asyncio.Semaphore(4)
+                status["snmp_hosts"] = []
+                vendor_markers = (
+                    ("Luminex", ("luminex", "gigacore")),
+                    ("ELC Lighting", ("dmxlan", "elc lighting")),
+                    ("Green-GO", ("green-go", "greengo")),
+                    ("Cisco", ("cisco", "catalyst")),
+                    ("HPE Aruba", ("aruba", "procurve", "hewlett packard enterprise", "hpe officeconnect")),
+                    ("NETGEAR", ("netgear",)),
+                    ("Ubiquiti", ("ubiquiti", "unifi switch", "edgeswitch")),
+                    ("MikroTik", ("mikrotik", "routeros")),
+                    ("TP-Link", ("tp-link", "tplink", "jetstream", "omada")),
+                    ("Allied Telesis", ("allied telesis",)),
+                    ("Juniper", ("juniper",)),
+                )
                 async def _snmp_identity(row):
                     ip = row.get("ip")
                     if not ip: return
+                    result = {"ip": ip, "state": "timeout_or_no_snmp", "manufacturer": None, "sys_name": None, "sys_descr": None, "sys_object_id": None}
                     async with sem:
                         descr, name, obj = await asyncio.gather(
-                            async_snmp_get(ip, community, "1.3.6.1.2.1.1.1.0", timeout=.45),
-                            async_snmp_get(ip, community, "1.3.6.1.2.1.1.5.0", timeout=.45),
-                            async_snmp_get(ip, community, "1.3.6.1.2.1.1.2.0", timeout=.45),
+                            async_snmp_get(ip, community, "1.3.6.1.2.1.1.1.0", timeout=.65),
+                            async_snmp_get(ip, community, "1.3.6.1.2.1.1.5.0", timeout=.65),
+                            async_snmp_get(ip, community, "1.3.6.1.2.1.1.2.0", timeout=.65),
                         )
-                    if descr is None and name is None and obj is None: return
-                    text = f"{descr or ''} {name or ''}".lower()
-                    manufacturer = None
-                    model = None
-                    if "luminex" in text or "gigacore" in text:
-                        manufacturer, model = "Luminex", (str(descr) if descr else "GigaCore")
-                    elif "elc" in text or "dmxlan" in text:
-                        manufacturer = "ELC Lighting"
-                    elif "green-go" in text or "greengo" in text:
-                        manufacturer = "Green-GO"
+                    if descr is None and name is None and obj is None:
+                        status["snmp_hosts"].append(result); return
+                    text = f"{descr or ''} {name or ''} {obj or ''}".lower()
+                    manufacturer = next((vendor for vendor, markers in vendor_markers if any(m in text for m in markers)), None)
+                    switch_evidence = bool(manufacturer) or any(x in text for x in ("switch", "ethernet switch", "managed switch", "gigabit ethernet"))
+                    model = str(descr) if descr else None
+                    result.update({"state":"responded", "manufacturer":manufacturer, "sys_name":name, "sys_descr":descr, "sys_object_id":obj, "switch_evidence":switch_evidence})
+                    status["snmp_hosts"].append(result)
                     dev = coordinator.inventory.find_by_ip(ip)
                     coordinator.inventory.upsert(
                         unique_id=(dev.unique_id if dev else f"candidate:{ip}"), ip=ip,
                         hostname=(str(name) if name else None), manufacturer=manufacturer, model=model,
-                        category="network_switch", protocols={"IPv4/ARP", "SNMP"}, sources={"snmp_readonly"},
+                        category=("network_switch" if switch_evidence else "network_device"), protocols={"IPv4/ARP", "SNMP"}, sources={"snmp_readonly"},
                         confidence=("confirmed" if manufacturer else "candidate"),
                         confidence_score=(.96 if manufacturer else .8),
                         evidence=[
@@ -402,7 +415,9 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                         ],
                     )
                 await asyncio.gather(*(_snmp_identity(r) for r in neighbors))
-                status["snmp_responders"] = sum(1 for d in coordinator.inventory.devices.values() if "SNMP" in d.protocols)
+                status["snmp_hosts"].sort(key=lambda x: x.get("ip") or "")
+                status["snmp_attempted"] = len(status["snmp_hosts"])
+                status["snmp_responders"] = sum(1 for x in status["snmp_hosts"] if x.get("state") == "responded")
                 status["identified_switches"] = sum(1 for d in coordinator.inventory.devices.values() if d.category == "network_switch")
             else:
                 status["snmp_state"] = "not_configured"

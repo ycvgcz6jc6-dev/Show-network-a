@@ -373,7 +373,7 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             for row in self.dante_monitor.snapshot().get("dante_inventory", []):
                 text = " ".join(row.get("markers", []) + row.get("services", [])).lower()
                 # Conservative candidates: manufacturer evidence must come from observed payload markers.
-                hints = (("l_acoustics", "l-acoustics"), ("d_and_b", "d&b"), ("d_and_b", "db audiotechnik"), ("lab_gruppen_lake", "lab gruppen"), ("adamson", "adamson"))
+                hints = (("l_acoustics", "l-acoustics"), ("l_acoustics", "l acoustics"), ("d_and_b", "d&b"), ("d_and_b", "db audiotechnik"), ("lab_gruppen_lake", "lab gruppen"), ("lab_gruppen_lake", "lake"), ("adamson", "adamson"), ("powersoft", "powersoft"), ("qsc", "qsc"), ("crown", "crown"), ("yamaha", "yamaha"), ("meyer_sound", "meyer sound"))
                 for manufacturer, marker in hints:
                     if marker in text:
                         self.audio_amplifiers.observe(key=f"{manufacturer}:{row.get("source")}", manufacturer=manufacturer, host=row.get("source"), protocol="Dante/mDNS", evidence=marker)
@@ -419,13 +419,9 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             rx_diag["ma_net3"] = ma.get("diagnostics", {})
             for obs in ma.get("observations", [])[-50:]:
                 try:
-                    raw = ma.get("diagnostics", {}).get("raw_sources", [])
-                    detail = next((x for x in raw if x.get("source_ip")==obs.source_ip), {})
-                    self.ma_remote.observe(obs.source_ip, obs.destination_group, strings=detail.get("strings", []))
+                    self.ma_remote.observe(obs.source_ip, obs.destination_group, session_index=getattr(obs, "session_index", None))
                 except AttributeError:
-                    raw = ma.get("diagnostics", {}).get("raw_sources", [])
-                    detail = next((x for x in raw if x.get("source_ip")==obs.get("source_ip")), {})
-                    self.ma_remote.observe(obs["source_ip"], obs["destination_group"], strings=detail.get("strings", []))
+                    self.ma_remote.observe(obs["source_ip"], obs["destination_group"], session_index=obs.get("session_index"))
             snapshot["ma_remote"] = self.ma_remote.snapshot()
         else:
             rx_diag["ma_net3"] = {"state": "disabled_or_unavailable", "interface": snapshot.get("show_network_config", {}).get("interface_ma")}

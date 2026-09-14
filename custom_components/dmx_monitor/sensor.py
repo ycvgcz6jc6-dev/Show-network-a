@@ -88,6 +88,13 @@ SENSORS = (
     ("security_unlock_remaining_s", "Temps de déverrouillage restant / Security unlock remaining", "s"),
     ("ptp_inter_arrival_ms", "Intervalle PTP / PTP inter-arrival", "ms"),
     ("ptp_jitter_ms", "Jitter PTP / PTP jitter", "ms"),
+    ("ptp_clock_present", "Horloge PTP observée / PTP clock observed", None),
+    ("ptp_clock_age_s", "Âge horloge PTP / PTP clock age", "s"),
+    ("ptp_last_version", "Version PTP observée / Observed PTP version", None),
+    ("ptp_dante_v1_observed", "PTPv1 Dante observé / Dante PTPv1 observed", None),
+    ("ptp_v2_observed", "PTPv2 observé / PTPv2 observed", None),
+    ("aes67_session_count", "Sessions AES67 SDP / AES67 SDP sessions", None),
+    ("aes67_fresh_sessions", "Sessions AES67 fraîches / Fresh AES67 sessions", None),
     ("network_capacity_utilization", "Utilisation réseau prédictive / Predicted network utilization", "%"),
     ("network_capacity_link_mbps", "Lien réseau / Network link", "Mbit/s"),
     ("network_capacity_total_mbps", "Débit théorique / Theoretical throughput", "Mbit/s"),
@@ -247,6 +254,12 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return {"services": self.coordinator.data.get("vendor_discovery", [])}
         if self._key == "switch_profiles":
             return {"profiles": self.coordinator.data.get("switch_profiles", [])}
+        if self._key in {"audio_amplifiers_total", "audio_amplifiers_online", "audio_amplifiers_errors", "audio_amplifier_temperature_max"}:
+            return {"amplifiers": self.coordinator.data.get("audio_amplifiers", []), "stale_timeout_s": self.coordinator.data.get("audio_amplifier_stale_timeout_s")}
+        if self._key in {"aes67_sap_packets", "aes67_sap_sources", "aes67_session_count", "aes67_fresh_sessions"}:
+            return {"sessions": self.coordinator.data.get("aes67_sessions", []), "last_seen": self.coordinator.data.get("aes67_last_seen"), "sap_group": self.coordinator.data.get("aes67_sap_group"), "sap_port": self.coordinator.data.get("aes67_sap_port")}
+        if self._key in {"ptp_clock_present", "ptp_clock_age_s", "ptp_last_version", "ptp_dante_v1_observed", "ptp_v2_observed"}:
+            return {k:v for k,v in self.coordinator.data.items() if k.startswith("ptp_")}
         if self._key == "elc_inventory":
             return {"devices": self.coordinator.data.get("elc_inventory", [])}
         if self._key in {"backup_storage", "backup_last_success", "backup_free_bytes"}:
