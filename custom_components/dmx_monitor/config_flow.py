@@ -55,7 +55,11 @@ def _schema_for_hass(hass, data: dict | None, interfaces: list[str], enttec_port
     }
     schema = {key: vol.In(interfaces) for key in interface_fields.values()}
     schema.update({
+        vol.Optional(const.CONF_DMX_ARTNET_ENABLED, default=data.get(const.CONF_DMX_ARTNET_ENABLED, True)): bool,
+        vol.Optional(const.CONF_DMX_SACN_ENABLED, default=data.get(const.CONF_DMX_SACN_ENABLED, True)): bool,
+        vol.Optional(const.CONF_DMX_SOURCE, default=data.get(const.CONF_DMX_SOURCE, "")): str,
         vol.Required(const.CONF_UNIVERSES, default=data.get(const.CONF_UNIVERSES, "1-16")): str,
+        vol.Optional(const.CONF_MA_ENABLED, default=data.get(const.CONF_MA_ENABLED, True)): bool,
         vol.Required(const.CONF_THRESHOLD, default=data.get(const.CONF_THRESHOLD, 10)): vol.All(vol.Coerce(int), vol.Range(min=0, max=255)),
         vol.Required(const.CONF_LANGUAGE, default=data.get(const.CONF_LANGUAGE, "auto")): vol.In(["auto", "fr", "en", "es", "it", "nl", "de"]),
         vol.Optional(const.CONF_PERFORMANCE_PROFILE, default=data.get(const.CONF_PERFORMANCE_PROFILE, "auto")): vol.In(const.PERFORMANCE_PROFILES),

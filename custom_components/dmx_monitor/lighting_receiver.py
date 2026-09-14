@@ -130,12 +130,16 @@ class DmxNetworkReceiver:
     """
 
     def __init__(self, interface: str, on_frame, on_timecode=None, multicast_universes=None,
-                 queue_size: int = 1024):
+                 queue_size: int = 1024, artnet_enabled: bool = True, sacn_enabled: bool = True,
+                 source_filter: str | None = None):
         self.interface = interface or "0.0.0.0"
         self.on_frame = on_frame
         self.on_timecode = on_timecode
         self.multicast_universes = tuple(sorted({int(u) for u in (multicast_universes or ()) if 1 <= int(u) <= 63999}))
         self.queue_size = max(64, int(queue_size))
+        self.artnet_enabled = bool(artnet_enabled)
+        self.sacn_enabled = bool(sacn_enabled)
+        self.source_filter = str(source_filter or "").strip() or None
         self._tasks: list[asyncio.Task] = []
         self._sockets = []
         # Per-protocol latest packet slots keep parser work bounded during bursts.
@@ -153,6 +157,10 @@ class DmxNetworkReceiver:
     async def start(self):
         self._stopping = False
         for protocol, port, group in (("ARTNET", 6454, None), ("SACN", 5568, "239.255.0.0")):
+            if protocol == "ARTNET" and not self.artnet_enabled:
+                continue
+            if protocol == "SACN" and not self.sacn_enabled:
+                continue
             self._tasks.append(asyncio.create_task(
                 self._supervise(protocol, port, group),
                 name=f"show-network-{protocol.lower()}-supervisor",
@@ -246,6 +254,8 @@ class DmxNetworkReceiver:
             except OSError as err:
                 self._last_error[protocol] = f"{type(err).__name__}: {err}"
                 return
+            if self.source_filter and addr[0] != self.source_filter:
+                continue
             self._packets_received[protocol] += 1
             self._last_packet[protocol] = monotonic()
             # The packet is keyed by its source/universe after a minimal envelope

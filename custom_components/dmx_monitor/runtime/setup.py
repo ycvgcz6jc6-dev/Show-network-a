@@ -42,6 +42,23 @@ from ..performance_manager import AdaptivePerformance
 
 _LOGGER = logging.getLogger(__name__)
 
+def _parse_universes(value):
+    """Parse HA universe text (1,2,10-12) into a bounded tuple."""
+    out=set()
+    for part in str(value or "").replace(" ", "").split(","):
+        if not part: continue
+        try:
+            if "-" in part:
+                a,b=(int(x) for x in part.split("-",1)); a,b=min(a,b),max(a,b)
+                out.update(range(max(1,a), min(63999,b)+1))
+            else:
+                n=int(part)
+                if 1 <= n <= 63999: out.add(n)
+        except ValueError:
+            continue
+    return tuple(sorted(out))
+
+
 def _adapter(key: str):
     """Resolve a protocol implementation only through the adapter catalogue."""
     return get_adapter_spec(key).constructor
@@ -121,6 +138,10 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
         "interface_dante": interface_dante,
         "interface_audio": interface_audio,
         "universes": settings.get(CONF_UNIVERSES, "1-16"),
+        "dmx_artnet_enabled": bool(settings.get(CONF_DMX_ARTNET_ENABLED, True)),
+        "dmx_sacn_enabled": bool(settings.get(CONF_DMX_SACN_ENABLED, True)),
+        "dmx_source": str(settings.get(CONF_DMX_SOURCE, "") or ""),
+        "ma_enabled": bool(settings.get(CONF_MA_ENABLED, True)),
         "osc_input_enabled": bool(settings.get(CONF_OSC_INPUT_ENABLED, False)),
         "osc_input_port": int(settings.get(CONF_OSC_INPUT_PORT, 8000)),
         "midi_enabled": bool(settings.get(CONF_MIDI_ENABLED, False)),
@@ -128,7 +149,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     }
 
     ma_listener = None
-    if interface_ma != "0.0.0.0":
+    if bool(settings.get(CONF_MA_ENABLED, True)) and interface_ma != "0.0.0.0":
         ma_listener = _adapter("ma-net3")(interface_ma, port=MA_NET3_PORT)
         try: await ma_listener.start()
         except Exception as err:
@@ -238,7 +259,15 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     if punchlight: resources.add(RuntimeResource(ProtocolDriver("punchlight","CONTROL"),"punchlight",punchlight,"async_stop",{"role":"receive-only","transport":"MIDI endpoint selected by host"}))
 
     coordinator.data["punchlight_network"]=[]
-    dmx_network=_adapter("dmx-network")(interface,on_frame=lambda protocol,universe,source,values,priority,sequence,iface: coordinator.observe_dmx(protocol,universe,source,values,priority,sequence,iface),on_timecode=lambda data,source:(coordinator.timecode.observe_artnet(data,source) and coordinator.publish(timecode=coordinator.timecode.snapshot())))
+    dmx_network=_adapter("dmx-network")(
+        interface,
+        on_frame=lambda protocol,universe,source,values,priority,sequence,iface: coordinator.observe_dmx(protocol,universe,source,values,priority,sequence,iface),
+        on_timecode=lambda data,source:(coordinator.timecode.observe_artnet(data,source) and coordinator.publish(timecode=coordinator.timecode.snapshot())),
+        multicast_universes=_parse_universes(settings.get(CONF_UNIVERSES, "1-16")),
+        artnet_enabled=bool(settings.get(CONF_DMX_ARTNET_ENABLED, True)),
+        sacn_enabled=bool(settings.get(CONF_DMX_SACN_ENABLED, True)),
+        source_filter=str(settings.get(CONF_DMX_SOURCE, "") or "").strip() or None,
+    )
     try: await dmx_network.start()
     except Exception as err: _LOGGER.warning("DMX network receiver unavailable; continuing without it: %s",err); dmx_network=None
     coordinator.dmx_network=dmx_network

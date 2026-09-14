@@ -31,12 +31,11 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             hass,
             webcomponent_name="show-network-pro-dashboard",
             frontend_url_path="show-network",
-            module_url="/api/dmx_monitor/static/show-network.js?v=0.12.7",
+            module_url="/api/dmx_monitor/static/show-network.js?v=0.12.9",
             sidebar_title="Show Network",
             sidebar_icon="mdi:network-outline",
             require_admin=True,
             config={},
-            config_panel_domain=DOMAIN,
         )
         hass.data[f"{DOMAIN}_panel_registered"] = True
     return True
@@ -51,7 +50,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime.values
     entry.runtime_data = ShowNetworkRuntimeData(coordinator=runtime.coordinator, resource_registry=runtime.resources, archive=runtime.archive, backup_manager=runtime.backup_manager)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # Apply OptionsFlow changes (NIC/protocol/universe choices) immediately by
+    # reloading this entry after Home Assistant stores new options.
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
+
+async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
+
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Migrate legacy entries without destructive data changes."""
