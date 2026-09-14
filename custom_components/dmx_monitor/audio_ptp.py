@@ -60,7 +60,14 @@ class PTPMonitor:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 try:
-                    sock.bind((self.interface, port))
+                    # PTPv2 default profile uses multicast 224.0.1.129. Bind on
+                    # wildcard and explicitly join on the configured NIC so a
+                    # multi-NIC Home Assistant host does not depend on the OS
+                    # default multicast route. Receive-only: no PTP is emitted.
+                    sock.bind(("0.0.0.0", port))
+                    group = socket.inet_aton("224.0.1.129")
+                    iface = socket.inet_aton(self.interface if self.interface != "0.0.0.0" else "0.0.0.0")
+                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, group + iface)
                     sock.setblocking(False)
                     self._sockets.append(sock)
                     self._tasks.append(asyncio.create_task(self._receive(sock, port), name=f"show-network-ptp-{port}"))
@@ -139,6 +146,10 @@ class PTPMonitor:
             "ptp_grandmaster_clock_class": self.grandmaster_clock_class,
             "ptp_grandmaster_accuracy": self.grandmaster_accuracy,
             "ptp_grandmaster_priority2": self.grandmaster_priority2,
+            "ptp_clock_present": bool(self.packets and self._last_time and (time.time() - self._last_time) < 5.0),
+            "ptp_clock_age_s": round(time.time() - self._last_time, 3) if self._last_time else None,
+            "ptp_multicast_group": "224.0.1.129",
+            "ptp_interface": self.interface,
         }
 
     async def stop(self) -> None:

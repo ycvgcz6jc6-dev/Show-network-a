@@ -170,7 +170,7 @@ customElements.define('dmx-ha-mapping-panel',DmxHaMappingPanel)
 class DmxMonitorPanel extends HTMLElement {
   constructor(){super();this.attachShadow({mode:"open"});this.selectionKey="";this.values=Array(512).fill(0);this.source="—";this.protocol="—";this.rate=0;this.active=0;this.priority=null;this.sequence=null;this.selected=new Set();this._framePending=false;this._lastSig="";}
   connectedCallback(){this.render();}
-  set hass(hass){this._hass=hass;this.syncLive();}
+  set hass(hass){this._hass=hass;const a=this.shadowRoot?.activeElement;if(a&&['SELECT','INPUT'].includes(a.tagName)){this._pendingHass=true;return;}this.syncLive();}
   _parseUniverses(raw){
     const out=new Set();
     for(const part of String(raw||'').replace(/\s+/g,'').split(',')){
@@ -469,7 +469,7 @@ customElements.define('show-network-notification-panel',ShowNetworkNotificationP
 class ShowNetworkProDashboard extends HTMLElement {
   constructor(){super();this._view='pro';this._entityMap={};this._registryLoading=false;this._notice='';this._securityOverride=null;}
   setConfig(c){this._config=c||{}; this.render();}
-  set hass(h){this._hass=h; this._ensureRegistry(); if(this._raf)return; const run=()=>{this._raf=null;if(this._view.startsWith('module:')){this.querySelectorAll('#module-content > *').forEach(el=>{try{el.hass=this._hass}catch(e){}});}else{this.render();}}; this._raf=setTimeout(run,250);}
+  set hass(h){this._hass=h; this._ensureRegistry(); if(this._raf)return; const run=()=>{this._raf=null;if(this._view.startsWith('module:')){this.querySelectorAll('#module-content > *').forEach(el=>{try{el.hass=this._hass}catch(e){}});}else{this.render();}}; this._raf=setTimeout(run,750);}
   connectedCallback(){this._ensureRegistry();this.render();}
   async _ensureRegistry(){
     if(!this._hass?.connection || this._registryLoading || Object.keys(this._entityMap).length)return;
@@ -596,7 +596,7 @@ ${card('JOURNAL',archive.recent_events?.length??0,'événements récents', `<div
     if(key==='reliability')controls=`<div class="module-nav">${this._moduleGate('diagnostics','Tests diagnostic','chaos_enabled')}</div>`;
     let inner=`<button class="btn back" id="back">← MODULES</button><div class="top"><div><div class="brand">${meta[1]}</div><div class="muted">${meta[2]}</div></div></div>${controls}<div class="panel-stack" id="module-content"></div>`;
     if(key==='audio'){
-      const rows=[['Dante packets',this._value('dante_packets','—')],['Dante sources',this._value('dante_sources','—')],['Dante endpoints',this._value('dante_endpoints','—')],['Dante mDNS',this._value('dante_mdns_matches','—')],['PTP packets',this._value('ptp_packets','—')],['PTP sources',this._value('ptp_sources','—')],['AES67 SAP',this._value('aes67_sap_packets','—')],['ST2110 RTP',this._value('st2110_rtp_packets','—')],['AVB packets',this._value('avb_packets','—')]];
+      const rows=[['Dante packets',this._value('dante_packets','—')],['Dante sources',this._value('dante_sources','—')],['Dante endpoints',this._value('dante_endpoints','—')],['Dante mDNS',this._value('dante_mdns_matches','—')],['Horloge PTP',this._truthy(this._value('ptp_clock_present','false'))?'PRÉSENTE':'NON OBSERVÉE'],['Grandmaster',this._value('ptp_grandmaster_identity','—')],['Domaine PTP',this._value('ptp_last_domain','—')],['PTP packets',this._value('ptp_packets','—')],['PTP sources',this._value('ptp_sources','—')],['AES67 SAP',this._value('aes67_sap_packets','—')],['ST2110 RTP',this._value('st2110_rtp_packets','—')],['AVB packets',this._value('avb_packets','—')]];
       const rx=this._state('protocol_rx_diagnostics','sensor.dmx_monitor_protocol_rx_diagnostics')?.attributes||{};const cfg=this._state('show_network_config','sensor.dmx_monitor_show_network_config')?.attributes||{};
       inner+=`<div class="card"><div class="title">AUDIO NETWORK — SYNTHÈSE</div><div class="notice">Lecture passive. Une valeur à 0 signifie qu’aucun trafic correspondant n’a été observé, pas que l’équipement est en panne.</div><div class="module-grid">${rows.map(([n,v])=>`<div class="card"><div class="title">${n}</div><div class="big">${v}</div></div>`).join('')}</div></div><details class="card" style="margin-top:12px"><summary style="cursor:pointer;font-weight:800">🧪 DANTE / PTP — GEEK DIAGNOSTICS</summary><div class="row"><span>Interface Dante</span><b>${esc(cfg.interface_dante||'—')}</b></div><div class="row"><span>Interface PTP</span><b>${esc(cfg.interface_ptp||'—')}</b></div><div class="row"><span>Interface audio</span><b>${esc(cfg.interface_audio||'—')}</b></div><pre style="white-space:pre-wrap;overflow:auto;max-height:420px;font-size:10px">${esc(JSON.stringify({dante:rx.dante||{},ptp:rx.ptp||{},audio:rx.audio||{}},null,2))}</pre></details>`;
     }

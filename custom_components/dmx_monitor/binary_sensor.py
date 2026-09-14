@@ -35,14 +35,25 @@ class PunchLightReady(CoordinatorEntity, BinarySensorEntity):
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    seen = {(x.protocol, x.universe) for x in coordinator.dmx_tracker.all()}
-    entities = [UniverseActive(coordinator, protocol, universe) for protocol, universe in sorted(seen, key=str)]
+    # Protocol labels may arrive with different casing (sACN/SACN). Normalize
+    # before entity creation so HA never receives duplicate unique IDs.
+    canonical = {}
+    for x in coordinator.dmx_tracker.all():
+        canonical[(str(x.protocol).strip().lower(), int(x.universe))] = (x.protocol, int(x.universe))
+    seen = set(canonical)
+    entities = [UniverseActive(coordinator, *canonical[key]) for key in sorted(seen, key=str)]
     entities.extend([PunchLightRecording(coordinator), PunchLightReady(coordinator)])
     entities.extend(projector_binary_entities(coordinator))
     entities.extend(BuilderBinarySensor(coordinator, item) for item in coordinator.ha_builder.items.values() if item.entity_type == "binary_sensor" and item.enabled)
     async_add_entities(entities)
     coordinator._dmx_universe_entity_keys = set(seen)
-    coordinator.dmx_universe_entity_callback = lambda protocol, universe: async_add_entities([UniverseActive(coordinator, protocol, universe)])
+    def _add_universe(protocol, universe):
+        key = (str(protocol).strip().lower(), int(universe))
+        if key in coordinator._dmx_universe_entity_keys:
+            return
+        coordinator._dmx_universe_entity_keys.add(key)
+        async_add_entities([UniverseActive(coordinator, protocol, universe)])
+    coordinator.dmx_universe_entity_callback = _add_universe
     coordinator.ha_builder_callbacks = getattr(coordinator, "ha_builder_callbacks", {})
     coordinator.ha_builder_callbacks["binary_sensor"] = lambda item: async_add_entities([BuilderBinarySensor(coordinator, item)])
     coordinator.ha_builder_remove_callbacks = getattr(coordinator, "ha_builder_remove_callbacks", {})

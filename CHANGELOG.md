@@ -144,3 +144,10 @@ Validation: static/unit/syntax only; no claim of real HA/network/hardware valida
 - Improve OSC reload/port-conflict state.
 - Improve read-only Luminex/SNMP and Dante DNS-SD discovery.
 - Reduce discovery frequency/concurrency and throttle frontend updates for HA performance.
+
+## 0.14.2
+- Stabilise l'UI temps réel: rafraîchissement du cockpit réduit et contrôles DMX non reconstruits pendant leur utilisation.
+- Corrige la déduplication des binary_sensors DMX par protocole/univers normalisé.
+- PTP: écoute multicast explicite 224.0.1.129 sur l'interface configurée, présence d'horloge, âge, domaine et Grandmaster exposés.
+- Dante/PTP: synthèse horloge ajoutée tout en conservant les diagnostics geek.
+- sACN: validation de régression du parseur E1.31 sur 512 slots et maintien réception multicast/unicast sur UDP 5568.
