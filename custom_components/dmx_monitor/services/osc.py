@@ -33,6 +33,18 @@ async def async_register(hass: HomeAssistant) -> None:
             c.security.require_unlocked()
             c.osc_output.send(target, str(call.data["address"]), args)
             c.publish_osc_status()
+        async def _start_osc_learn(call):
+            c = coordinator_for_call(hass, call)
+            c.osc_learn.start()
+            c.publish(osc_learn={"active": True, "suggestions": c.osc_learn.suggestions()})
+        async def _stop_osc_learn(call):
+            c = coordinator_for_call(hass, call)
+            c.osc_learn.stop()
+            c.publish(osc_learn={"active": False, "suggestions": c.osc_learn.suggestions()})
+        async def _clear_osc_learn(call):
+            c = coordinator_for_call(hass, call)
+            c.osc_learn.clear()
+            c.publish(osc_learn={"active": bool(c.osc_learn.active), "suggestions": []})
         async def _send_osc_profile_action(call):
             c = coordinator_for_call(hass, call)
             from ..osc_profiles import PROFILES
@@ -64,3 +76,6 @@ async def async_register(hass: HomeAssistant) -> None:
         hass.services.async_register(DOMAIN, "remove_osc_target", _remove_osc_target)
         hass.services.async_register(DOMAIN, "send_osc", _send_osc)
         hass.services.async_register(DOMAIN, "send_osc_profile_action", _send_osc_profile_action)
+        hass.services.async_register(DOMAIN, "start_osc_learn", _start_osc_learn)
+        hass.services.async_register(DOMAIN, "stop_osc_learn", _stop_osc_learn)
+        hass.services.async_register(DOMAIN, "clear_osc_learn", _clear_osc_learn)

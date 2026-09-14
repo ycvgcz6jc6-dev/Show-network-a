@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 
 from datetime import timedelta
 import logging
@@ -40,6 +41,7 @@ from .core.contracts import ServiceAction
 from .core.state_store import RuntimeStateStore
 from .host_metrics import snapshot as host_metrics_snapshot
 from .performance_manager import AdaptivePerformance
+from .osc_learn import OSCLearnSession
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -122,6 +124,7 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             self.dmx_ha_mapping_engine.add(_mapping)
         self.control_mapping_events = []
         self.osc_output = OSCOutput()
+        self.osc_learn = OSCLearnSession()
         self.osc_target_store = OSCTargetStore(hass.config.path("show_network_osc_targets.json"))
         self.osc_targets = {x.target_id: x for x in self.osc_target_store.load()}
         self.timecode = TimecodeMonitor()
@@ -153,6 +156,7 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             "control_mappings": list(self.control_mapping_engine.mappings),
             "control_mapping_events": [],
             "osc_input": {"enabled": False, "messages": 0, "last_address": None, "last_source": None, "last_error": None},
+            "osc_learn": {"active": False, "suggestions": []},
             "midi_input": {"enabled": False, "connected": False, "messages": 0, "port": None, "last_error": None},
             "ptp_packets": 0,
             "ptp_sources": 0,
@@ -290,7 +294,8 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         summary = self.inventory.summary()
         if self.gigacore:
             await self.gigacore.async_update()
-        await self.projector_monitor.async_update()
+        if getattr(self, "projector_monitor_enabled", True):
+            await self.projector_monitor.async_update()
         snapshot = dict(self.data)
         snapshot["security"] = self.security.snapshot()
         snapshot["network_interfaces"] = await self.hass.async_add_executor_job(network_interface_snapshot)
@@ -399,6 +404,7 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
                 "inter_arrival_ms": item.inter_arrival_ms,
                 "jitter_ms": item.jitter_ms,
                 "sequence_loss_pct": item.sequence_loss_pct,
+                "values_b64": base64.b64encode(item.values).decode("ascii"),
             }
             for item in self.dmx_tracker.all()
         ]
@@ -499,6 +505,7 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
                 "inter_arrival_ms": item.inter_arrival_ms,
                 "jitter_ms": item.jitter_ms,
                 "sequence_loss_pct": item.sequence_loss_pct,
+                "values_b64": base64.b64encode(item.values).decode("ascii"),
             } for item in self.dmx_tracker.all()
         ]
         self.data["dmx_publish_rate"] = self._dmx_publish_limiter.snapshot()

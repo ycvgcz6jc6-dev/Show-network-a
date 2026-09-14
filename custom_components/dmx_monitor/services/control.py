@@ -10,7 +10,7 @@ async def async_register(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, "create_control_mapping"):
         async def _create_control_mapping(call):
             coordinator = coordinator_for_call(hass, call)
-            from .osc_mapping import Mapping
+            from ..osc_mapping import Mapping
             data=call.data
             m=Mapping(
                 mapping_id=str(data["mapping_id"]), address=str(data["address"]),
@@ -31,7 +31,7 @@ async def async_register(hass: HomeAssistant) -> None:
             coordinator.publish(control_mappings=list(coordinator.control_mapping_engine.mappings))
         async def _remove_control_mapping(call):
             coordinator = coordinator_for_call(hass, call)
-            from .control_mapping import ControlMappingStore
+            from ..control_mapping import ControlMappingStore
             coordinator.control_mapping_engine.remove(str(call.data["mapping_id"]))
             coordinator.control_mapping_store.save([__import__("dataclasses").asdict(x) for x in coordinator.control_mapping_engine.mappings.values()])
             coordinator.publish(control_mappings=list(coordinator.control_mapping_engine.mappings))

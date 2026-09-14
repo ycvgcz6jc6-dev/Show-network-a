@@ -255,58 +255,42 @@ customElements.define("ma-inspector-panel",MaInspectorPanel);
 
 /* ===== osc-learn-panel.js ===== */
 class OscLearnPanel extends HTMLElement {
- connectedCallback(){this.innerHTML=`
- <style>
+  constructor(){super();this._hass=null;this._busy=false;}
+  set hass(h){this._hass=h;this.render();}
+  _state(){return Object.values(this._hass?.states||{}).find(x=>x.attributes?.osc_learn)?.attributes||{};}
+  async _call(service){if(!this._hass||this._busy)return;this._busy=true;try{await this._hass.callService('dmx_monitor',service,{});}catch(e){this._error=e?.message||String(e);}finally{this._busy=false;this.render();}}
+  connectedCallback(){this.render();}
+  render(){
+    const a=this._state(), learn=a.osc_learn||{}, input=a.osc_input||{}; const rows=learn.suggestions||[]; const active=!!learn.active;
+    this.innerHTML=`<style>
  :host{display:block;background:#0b0d10;color:#eee;font-family:Inter,system-ui,sans-serif;padding:18px}
  h2{margin:0}.sub{font-size:11px;color:#8d969f;margin:5px 0 14px}
- .toolbar{background:#15181c;border:1px solid #2c3239;border-radius:10px;padding:12px;display:flex;gap:8px;align-items:center}
- button{background:#252a30;border:1px solid #3a4148;color:#eee;border-radius:6px;padding:8px 12px}
- .learn{color:#65dc99;font-weight:700}.hint{color:#8d969f;font-size:10px}
- .row{display:grid;grid-template-columns:1.4fr .7fr .8fr .8fr 1fr;gap:8px;padding:10px;border-bottom:1px solid #282d33;font-size:11px}
- .table{margin-top:12px;background:#15181c;border:1px solid #2c3239;border-radius:10px;overflow:hidden}
- .head{color:#8d969f;font-size:9px;text-transform:uppercase}
- .tag{border:1px solid #3a4148;border-radius:4px;padding:3px 5px}
+ .toolbar{background:#15181c;border:1px solid #2c3239;border-radius:10px;padding:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+ button{background:#252a30;border:1px solid #3a4148;color:#eee;border-radius:6px;padding:8px 12px;cursor:pointer}.active{border-color:#2f9a65;color:#65dc99}.hint{color:#8d969f;font-size:10px}.err{color:#ef7777;font-size:10px}
+ .row{display:grid;grid-template-columns:1.5fr .6fr .7fr .7fr 1fr .8fr;gap:8px;padding:10px;border-bottom:1px solid #282d33;font-size:11px}.table{margin-top:12px;background:#15181c;border:1px solid #2c3239;border-radius:10px;overflow:hidden}.head{color:#8d969f;font-size:9px;text-transform:uppercase}
  </style>
- <h2>OSC LEARN</h2>
- <div class="sub">Bougez un fader ou appuyez sur un bouton : les messages reçus apparaissent automatiquement.</div>
- <div class="toolbar"><button>START LEARN</button><span class="hint">Aucune commande n'est envoyée. Les mappings appris ne sont pas activés automatiquement.</span></div>
- <div class="table">
-  <div class="row head"><span>ADDRESS</span><span>TYPE</span><span>MIN</span><span>MAX</span><span>SUGGESTION</span></div>
-  <div class="row"><span class="hint">Waiting for OSC…</span><span>—</span><span>—</span><span>—</span><span>—</span></div>
- </div>`}
+ <h2>OSC LEARN</h2><div class="sub">Apprentissage réel des messages reçus par l'entrée OSC. Aucune commande n'est envoyée.</div>
+ <div class="toolbar"><button id="learn" class="${active?'active':''}">${active?'STOP LEARN':'START LEARN'}</button><button id="clear">EFFACER</button><span class="hint">Entrée OSC: ${input.enabled?'ACTIVE':'INACTIVE'} · ${input.messages??0} msg · dernière adresse ${input.last_address||'—'} · source ${input.last_source||'—'}</span>${this._error?`<span class="err">${esc(this._error)}</span>`:''}</div>
+ <div class="table"><div class="row head"><span>ADDRESS</span><span>TYPE</span><span>MIN</span><span>MAX</span><span>SUGGESTION</span><span>SAMPLES</span></div>${rows.length?rows.map(x=>`<div class="row"><span>${esc(x.address||'—')}</span><span>${esc(x.value_type||'—')}</span><span>${x.observed_min??'—'}</span><span>${x.observed_max??'—'}</span><span>${esc((x.suggested_destination||'—')+' · '+(x.suggested_attribute||'—'))}</span><span>${x.samples??0}</span></div>`).join(''):`<div class="row"><span class="hint">${active?'En attente de messages OSC…':'Learn arrêté'}</span><span>—</span><span>—</span><span>—</span><span>—</span><span>—</span></div>`}</div>`;
+    this.querySelector('#learn')?.addEventListener('click',()=>this._call(active?'stop_osc_learn':'start_osc_learn'));
+    this.querySelector('#clear')?.addEventListener('click',()=>this._call('clear_osc_learn'));
+  }
 }
 customElements.define("osc-learn-panel",OscLearnPanel);
 
 
 /* ===== osc-mapping-panel.js ===== */
 class OscMappingPanel extends HTMLElement {
- connectedCallback(){this.innerHTML=`
- <style>
- :host{display:block;background:#0b0d10;color:#eee;font-family:Inter,system-ui,sans-serif;padding:18px}
- h2{margin:0}.sub{font-size:11px;color:#8d969f;margin:5px 0 15px}
- .map{background:#15181c;border:1px solid #2c3239;border-radius:10px;padding:14px;margin-bottom:10px}
- .path{font-family:ui-monospace,monospace;font-size:12px}.arrow{color:#65dc99;padding:0 8px}
- .chips{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}.chip{border:1px solid #353b42;border-radius:5px;padding:4px 7px;font-size:10px;color:#b9c0c7}
- .good{color:#65dc99}.warn{color:#e6bd67}
- </style>
- <h2>OSC MAPPING ENGINE</h2>
- <div class="sub">CONTROL transversal · OSC → HA / LIGHT / AUDIO / MA / autres cibles</div>
- <div class="map">
-  <div class="path">/show/lobby/color <span class="arrow">→</span> light.lobby <span class="arrow">→</span> rgb_color</div>
-  <div class="chips"><span class="chip">OSC</span><span class="chip">RGB</span><span class="chip">deadband</span><span class="chip">rate limit</span><span class="chip good">READ/WRITE TARGET</span></div>
- </div>
- <div class="map">
-  <div class="path">/show/lobby/brightness <span class="arrow">→</span> light.lobby <span class="arrow">→</span> brightness</div>
-  <div class="chips"><span class="chip">0–1 → 0–255</span><span class="chip">invert optional</span></div>
- </div>
- <div class="map">
-  <div class="path">/show/scene/01 <span class="arrow">→</span> scene.show_01</div>
-  <div class="chips"><span class="chip">trigger</span><span class="chip good">HA</span></div>
- </div>
- <div class="map">
-  <div class="path">/ma/... <span class="arrow">→</span> grandMA3 adapter</div>
-  <div class="chips"><span class="chip warn">separate opt-in output</span><span class="chip">/cmd / attributes / executor</span></div>
- </div>`}
+  constructor(){super();this._hass=null;this._msg='';}
+  set hass(h){this._hass=h;this.render();}
+  connectedCallback(){this.render();}
+  _state(){return Object.values(this._hass?.states||{}).find(x=>Array.isArray(x.attributes?.mappings)&&Array.isArray(x.attributes?.events))?.attributes||{};}
+  async _call(service,data){try{await this._hass.callService('dmx_monitor',service,data);this._msg='Action exécutée';}catch(e){this._msg=`Erreur: ${e?.message||e}`;}this.render();}
+  render(){if(!this._hass){this.innerHTML='';return;}const st=this._state(),maps=st.mappings||[];const entities=Object.values(this._hass.states||{}).filter(x=>!x.entity_id.startsWith('sensor.dmx_monitor')).sort((a,b)=>a.entity_id.localeCompare(b.entity_id));
+    this.innerHTML=`<style>:host{display:block;background:#0b0d10;color:#eee;font-family:Inter,system-ui,sans-serif;padding:18px}h2{margin:0}.sub{font-size:11px;color:#8d969f;margin:5px 0 15px}.card{background:#15181c;border:1px solid #2c3239;border-radius:10px;padding:14px;margin-bottom:10px}.grid{display:grid;grid-template-columns:1.2fr 1fr 1.2fr 1fr;gap:8px}input,select{background:#0e1115;color:#eee;border:1px solid #3a4148;border-radius:6px;padding:8px;min-width:0}.btn{background:#252a30;border:1px solid #3a4148;color:#eee;border-radius:6px;padding:8px 10px;cursor:pointer}.row{display:grid;grid-template-columns:1.4fr 1fr 1.4fr 1fr auto;gap:8px;padding:9px 0;border-top:1px solid #282d33;font-size:11px;align-items:center}.muted{color:#8d969f;font-size:10px}.msg{margin-top:8px;font-size:11px}</style><h2>OSC / MIDI MAPPING ENGINE</h2><div class="sub">Mappings réellement enregistrés. Aucune ligne de démonstration.</div><div class="card"><div class="grid"><input id="address" placeholder="/show/fader/1 ou midi/cc/1/7"><input id="dest" value="light.turn_on" placeholder="domaine.service"><select id="target"><option value="">Choisir une entité HA</option>${entities.map(x=>`<option value="${esc(x.entity_id)}">${esc(x.entity_id)}</option>`).join('')}</select><input id="attr" value="brightness" placeholder="attribut / clé service"></div><button class="btn" id="add" style="margin-top:10px">CRÉER LE MAPPING</button>${this._msg?`<div class="msg">${esc(this._msg)}</div>`:''}</div><div class="card"><b>${maps.length} mapping(s)</b>${maps.length?maps.map(m=>`<div class="row"><span>${esc(m.address)}</span><span>${esc(m.destination)}</span><span>${esc(m.target)}</span><span>${esc(m.attribute||'value')}</span><button class="btn" data-remove="${esc(m.mapping_id)}">Supprimer</button></div>`).join(''):'<div class="muted" style="margin-top:10px">Aucun mapping configuré.</div>'}</div>`;
+    this.querySelector('#add')?.addEventListener('click',()=>{const address=this.querySelector('#address').value.trim(),destination=this.querySelector('#dest').value.trim(),target=this.querySelector('#target').value,attribute=this.querySelector('#attr').value.trim()||'value';if(!address||!destination||!target){this._msg='Adresse, service et entité sont obligatoires.';this.render();return;}const mapping_id='map_'+address.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')+'_'+Date.now().toString(36);this._call('create_control_mapping',{mapping_id,address,destination,target,attribute,in_min:0,in_max:1,out_min:0,out_max:255,min_interval_ms:50,deadband:0});});
+    this.querySelectorAll('[data-remove]').forEach(b=>b.addEventListener('click',()=>this._call('remove_control_mapping',{mapping_id:b.dataset.remove})));
+  }
 }
 customElements.define("osc-mapping-panel",OscMappingPanel);
 
@@ -396,12 +380,13 @@ customElements.define('show-network-rule-builder',ShowNetworkRuleBuilder);
 class ShowNetworkArchivePanel extends HTMLElement {
   setConfig(c){this._config=c||{};}
   set hass(h){this._hass=h; this.render();}
+  async _call(service,data={}){this._msg='Action en cours…';this.render();try{await this._hass.callService('dmx_monitor',service,data);this._msg='Action exécutée';}catch(e){this._msg=`Erreur: ${e?.message||e}`;}this.render();}
   render(){
     const h=this._hass; if(!h)return;
-    const st=h.states?.['sensor.dmx_monitor_journal_archive']; const a=st?.attributes||{};
-    this.innerHTML=`<style>:host{display:block}.box{padding:15px;border:1px solid #30363d;border-radius:14px;background:#111519;color:#eee}.row{display:flex;justify-content:space-between;gap:15px;padding:8px 0;border-bottom:1px solid #252b31;font-size:12px}.row:last-of-type{border:0}.btn{margin:10px 6px 0 0;padding:9px 12px;border:1px solid #39414a;background:#181d22;color:#eee;border-radius:8px;cursor:pointer}.path{font-family:ui-monospace,monospace;word-break:break-all}.small{font-size:11px;color:#929ba4}</style><div class="box"><b>JOURNAL · BACKUPS</b><div class="row"><span>Destination</span><span class="path">${a.configured_destination||'—'}</span></div><div class="row"><span>Fichiers</span><span>${a.files??'—'}</span></div><div class="row"><span>Taille</span><span>${a.bytes??0} octets</span></div><div class="row"><span>Rétention</span><span>${a.retention_days??'—'} jours</span></div><div class="small">La destination peut être le stockage HA, un second disque monté ou un NAS/SMB déjà monté.</div><button class="btn" id="backup">Backup maintenant</button><button class="btn" id="export">Exporter</button><div class="small" style="margin-top:8px">Pour changer de destination : service <b>dmx_monitor.archive_set_destination</b>.</div></div>`;
-    this.querySelector('#backup')?.addEventListener('click',()=>h.callService?.('dmx_monitor','archive_backup',{}));
-    this.querySelector('#export')?.addEventListener('click',()=>h.callService?.('dmx_monitor','archive_export',{}));
+    const st=Object.values(h.states||{}).find(x=>x.attributes&&('recent_events' in x.attributes)&&('configured_destination' in x.attributes))||h.states?.['sensor.dmx_monitor_journal_archive']; const a=st?.attributes||{};const events=(a.recent_events||[]).slice().reverse().slice(0,30);
+    this.innerHTML=`<style>:host{display:block}.box{padding:15px;border:1px solid #30363d;border-radius:14px;background:#111519;color:#eee}.row{display:flex;justify-content:space-between;gap:15px;padding:8px 0;border-bottom:1px solid #252b31;font-size:12px}.btn{margin:10px 6px 0 0;padding:9px 12px;border:1px solid #39414a;background:#181d22;color:#eee;border-radius:8px;cursor:pointer}.path{font-family:ui-monospace,monospace;word-break:break-all}.small{font-size:11px;color:#929ba4}.event{padding:8px 0;border-top:1px solid #252b31;font-size:11px}.kind{display:inline-block;min-width:70px;color:#68df9a}.ts{color:#929ba4;font-family:ui-monospace,monospace}.msg{margin-top:10px;padding:8px;border:1px solid #39414a;border-radius:8px}</style><div class="box"><b>JOURNAL · BACKUPS</b><div class="row"><span>Destination</span><span class="path">${esc(a.configured_destination||a.destination||'—')}</span></div><div class="row"><span>Fichiers</span><span>${a.files??'—'}</span></div><div class="row"><span>Taille</span><span>${a.bytes??0} octets</span></div><div class="row"><span>Rétention</span><span>${a.retention_days??'—'} jours</span></div><button class="btn" id="backup">Backup maintenant</button><button class="btn" id="export">Exporter</button>${this._msg?`<div class="msg">${esc(this._msg)}</div>`:''}<h4>Événements récents</h4>${events.length?events.map(e=>`<div class="event"><span class="ts">${esc(e.ts||'—')}</span> · <span class="kind">${esc(e.kind||'general')}</span> <b>${esc(e.event||'—')}</b>${e.data&&Object.keys(e.data).length?`<div class="small path">${esc(JSON.stringify(e.data))}</div>`:''}</div>`).join(''):'<div class="small">Aucun événement en mémoire depuis le démarrage de cette version.</div>'}</div>`;
+    this.querySelector('#backup')?.addEventListener('click',()=>this._call('archive_backup',{}));
+    this.querySelector('#export')?.addEventListener('click',()=>this._call('archive_export',{}));
   }
 }
 customElements.define('show-network-archive-panel',ShowNetworkArchivePanel);
@@ -548,11 +533,23 @@ class ShowNetworkProDashboard extends HTMLElement {
     ['archive','Journal / Backups','Archive persistante et sauvegardes']
   ];}
   _renderModules(){
-    const cards=this._modules().map(([k,n,d])=>`<div class="card module" data-module="${k}"><div class="name">${n}</div><div class="desc">${d}</div></div>`).join('');
-    this.innerHTML=this._shell(`<button class="btn back" id="back">← PRO</button><div class="top"><div><div class="brand">MODULES SHOW NETWORK</div><div class="muted">Accès aux fonctions réellement présentes dans l’intégration</div></div></div><div class="footer"><button class="btn primary" id="ha-config">Configuration générale HA (interfaces, univers, Dante, projecteurs…)</button></div><div class="module-grid">${cards}</div>`);
+    const cfg=this._state('show_network_config','sensor.dmx_monitor_show_network_config')?.attributes||{};
+    const gate=(module,label,key)=>`<button class="btn ${cfg[key]?'primary':''}" data-module-toggle="${module}" data-enabled="${cfg[key]?'1':'0'}">${label}: ${cfg[key]?'ON':'OFF'}</button>`;
+    const extra={
+      dmx:`<div class="module-nav">${gate('artnet','Art-Net','dmx_artnet_enabled')}${gate('sacn','sACN','dmx_sacn_enabled')}</div>`,
+      osc:`<div class="module-nav">${gate('osc_input','OSC','osc_input_enabled')}${gate('midi_input','MIDI','midi_enabled')}${gate('punchlight','PunchLight','punchlight_enabled')}</div>`,
+      rules:`<div class="module-nav">${gate('watchdog','Watchdog','watchdog_enabled')}</div>`,
+      video:`<div class="module-nav">${gate('projector_monitor','Monitoring PJLink','projector_monitor_enabled')}</div>`,
+      ma:`<div class="module-nav">${gate('ma_net3','MA-Net3','ma_enabled')}</div>`,
+      builder:`<div class="module-nav">${gate('ha_builder','HA Builder','ha_builder_enabled')}</div>`,
+      reliability:`<div class="module-nav">${gate('diagnostics','Tests diagnostic','chaos_enabled')}</div>`,
+    };
+    const cards=this._modules().map(([k,n,d])=>`<div class="card module" data-module="${k}"><div class="name">${n}</div><div class="desc">${d}</div>${extra[k]||''}</div>`).join('');
+    this.innerHTML=this._shell(`<button class="btn back" id="back">← PRO</button><div class="top"><div><div class="brand">MODULES SHOW NETWORK</div><div class="muted">Activation rapide des moteurs qui nécessitent un opt-in. Les changements rechargent uniquement l'intégration.</div></div></div><div class="footer"><button class="btn primary" id="ha-config">Configuration générale HA (interfaces, univers, ports, projecteurs…)</button></div><div class="module-grid">${cards}</div>`);
     this.querySelector('#back')?.addEventListener('click',()=>this._setView('pro'));
     this.querySelector('#ha-config')?.addEventListener('click',()=>this._openIntegrationConfig());
-    this.querySelectorAll('[data-module]').forEach(x=>x.addEventListener('click',()=>this._setView(`module:${x.dataset.module}`)));
+    this.querySelectorAll('[data-module-toggle]').forEach(b=>b.addEventListener('click',async e=>{e.stopPropagation();const enabled=b.dataset.enabled==='1';b.disabled=true;this._notice=`${b.textContent} → ${enabled?'OFF':'ON'}…`;try{await this._hass.callService('dmx_monitor','set_module_enabled',{module:b.dataset.moduleToggle,enabled:!enabled});this._notice='Configuration enregistrée. Show Network recharge le module.';}catch(err){this._notice=`Erreur activation module: ${err?.message||err}`;}this.render();}));
+    this.querySelectorAll('[data-module]').forEach(x=>x.addEventListener('click',e=>{if(e.target.closest('[data-module-toggle]'))return;this._setView(`module:${x.dataset.module}`)}));
   }
   _mountPanels(keys){
     const host=this.querySelector('#module-content'); if(!host)return;
@@ -573,7 +570,7 @@ class ShowNetworkProDashboard extends HTMLElement {
     if(key==='security')inner+=this._securityHtml()+this._entityTable(['security_','osc_output','light_sync','projector_control'],'Les états de sécurité apparaîtront après chargement des entités.');
     if(key==='network'){const cfgState=this._state('show_network_config','sensor.dmx_monitor_show_network_config');const cfg=cfgState?.attributes||{};const yn=(k)=>cfgState?(cfg[k]===true?'Écouté':cfg[k]===false?'Désactivé':'Indisponible'):'État indisponible';inner+=`<div class="card"><div class="title">CONFIGURATION RÉSEAU SHOW CONTROL</div>${cfgState?'':`<div class="notice">Capteur de configuration indisponible : aucun état activé/désactivé n'est supposé.</div>`}<div class="row"><span>DMX / Art-Net / sACN</span><b>${cfg.interface_dmx??'—'}</b></div><div class="row"><span>grandMA3 / MA-Net3</span><b>${cfg.interface_ma??'—'}</b></div><div class="row"><span>Dante</span><b>${cfg.interface_dante??'—'}</b></div><div class="row"><span>PTP</span><b>${cfg.interface_ptp??'—'}</b></div><div class="row"><span>Audio AES67/ST2110</span><b>${cfg.interface_audio??'—'}</b></div><div class="row"><span>Art-Net</span><b>${yn('dmx_artnet_enabled')}</b></div><div class="row"><span>sACN</span><b>${yn('dmx_sacn_enabled')}</b></div><div class="row"><span>Source DMX</span><b>${cfgState?(cfg.dmx_source||'Toutes'):'—'}</b></div><div class="row"><span>Univers DMX</span><b>${cfg.universes??'—'}</b></div><div class="row"><span>MA-Net3</span><b>${yn('ma_enabled')}</b></div><div class="footer"><button class="btn primary" id="network-config">Modifier les interfaces / protocoles</button></div></div>`;}
     this.innerHTML=this._shell(inner);this.querySelector('#back')?.addEventListener('click',()=>this._setView('modules'));
-    const map={dmx:['dmx-monitor-panel','enttec-panel'],zones:['dmx-ha-zones-panel','dmx-ha-mapping-panel'],osc:['control-sources-panel','osc-learn-panel','osc-mapping-panel','osc-output-panel','osc-source-profiles','punchlight-network-panel'],rules:['show-network-rule-builder','signal-watchdog-panel'],network:['show-network-topology-panel','show-network-discovery','show-network-fingerprint'],ma:['ma-inspector-panel'],inventory:['show-network-inventory'],builder:['show-network-ha-builder-panel'],brands:['show-network-brand-catalog'],reliability:['show-network-reliability-panel','signal-watchdog-panel']};
+    const map={dmx:['dmx-monitor-panel','enttec-panel'],zones:['dmx-ha-zones-panel','dmx-ha-mapping-panel'],osc:['control-sources-panel','osc-learn-panel','osc-mapping-panel','osc-output-panel','osc-source-profiles','punchlight-network-panel'],rules:['show-network-rule-builder','signal-watchdog-panel'],network:['show-network-topology-panel','show-network-discovery','show-network-fingerprint'],ma:['ma-inspector-panel'],inventory:['show-network-inventory'],builder:['show-network-ha-builder-panel'],brands:['show-network-brand-catalog'],reliability:['show-network-reliability-panel','signal-watchdog-panel'],archive:['show-network-archive-panel']};
     if(map[key])this._mountPanels(map[key]);if(key==='security')this._wireSecurity();this.querySelector('#network-config')?.addEventListener('click',()=>this._openIntegrationConfig());
   }
   _renderClassic(){
@@ -582,13 +579,13 @@ class ShowNetworkProDashboard extends HTMLElement {
     this.innerHTML=this._shell(`<button class="btn back" id="back">← PRO</button><div class="top"><div><div class="brand">SHOW NETWORK / CLASSIC</div><div class="muted">Vue diagnostic synthétique</div></div></div><div class="classic-grid" style="margin-top:12px">${cards}</div>${this._securityHtml()}<div class="footer"><button class="btn primary" id="modules">Modules & configuration</button></div>`);this._wireSecurity();this.querySelector('#back')?.addEventListener('click',()=>this._setView('pro'));this.querySelector('#modules')?.addEventListener('click',()=>this._setView('modules'));
   }
   _renderArchive(){
-    const a=this._state('journal_archive','sensor.dmx_monitor_journal_archive')?.attributes||{};
-    this.innerHTML=this._shell(`<button class="btn back" id="back">← PRO</button><div class="top"><div><div class="brand">JOURNAL & BACKUPS</div><div class="muted">Archive persistante Show Network</div></div></div><div class="card" style="margin-top:12px"><div class="row"><span>Destination</span><span>${a.configured_destination??a.destination??'—'}</span></div><div class="row"><span>Fichiers</span><span>${a.files??'—'}</span></div><div class="row"><span>Taille</span><span>${a.bytes??0} octets</span></div><div class="row"><span>Rétention</span><span>${a.retention_days??'—'} jours</span></div><div class="row"><span>Dernier backup</span><span>${a.last_backup_success??'—'}</span></div><div class="footer"><button class="btn" id="backup">Backup maintenant</button><button class="btn" id="export">Exporter ZIP</button></div></div>`);
+    const a=this._state('journal_archive','sensor.dmx_monitor_journal_archive')?.attributes||{};const events=(a.recent_events||[]).slice().reverse().slice(0,40);
+    this.innerHTML=this._shell(`<button class="btn back" id="back">← PRO</button><div class="top"><div><div class="brand">JOURNAL & BACKUPS</div><div class="muted">Archive persistante Show Network + événements récents en mémoire</div></div></div><div class="card" style="margin-top:12px"><div class="row"><span>Destination</span><span>${a.configured_destination??a.destination??'—'}</span></div><div class="row"><span>Fichiers</span><span>${a.files??'—'}</span></div><div class="row"><span>Taille</span><span>${a.bytes??0} octets</span></div><div class="row"><span>Rétention</span><span>${a.retention_days??'—'} jours</span></div><div class="row"><span>Dernier backup</span><span>${a.last_backup_success??'—'}</span></div><div class="footer"><button class="btn" id="backup">Backup maintenant</button><button class="btn" id="export">Exporter ZIP</button></div></div><div class="card" style="margin-top:12px"><div class="title">ÉVÉNEMENTS RÉCENTS</div>${events.length?events.map(e=>`<div class="timeline-item"><b>${esc(e.event||'—')}</b> · ${esc(e.kind||'general')}<div class="muted">${esc(e.ts||'—')} ${e.data&&Object.keys(e.data).length?'· '+esc(JSON.stringify(e.data)):''}</div></div>`).join(''):'<div class="muted" style="margin-top:10px">Aucun événement en mémoire depuis le démarrage.</div>'}</div>`);
     this.querySelector('#back')?.addEventListener('click',()=>this._setView('pro'));this.querySelector('#backup')?.addEventListener('click',()=>this._call('archive_backup',{}));this.querySelector('#export')?.addEventListener('click',()=>this._call('archive_export',{}));
   }
   _renderTimeline(){
-    const a=this._state('journal_archive','sensor.dmx_monitor_journal_archive')?.attributes||{};
-    this.innerHTML=this._shell(`<button class="btn back" id="back">← PRO</button><div class="top"><div><div class="brand">SHOW TIMELINE</div><div class="muted">État du journal événementiel persistant</div></div></div><div class="card" style="margin-top:12px"><div class="timeline-item"><b>Journal actif</b><div class="muted">${a.timeline_file??'—'}</div></div><div class="timeline-item"><b>${a.files??'—'} fichier(s) journal</b><div class="muted">${a.bytes??0} octets enregistrés</div></div><div class="timeline-item"><b>Dernière sauvegarde</b><div class="muted">${a.last_backup_success??'—'}</div></div><div class="muted" style="margin-top:12px">Cette vue n'invente pas d'événements : l'intégration expose actuellement les métadonnées du journal, tandis que les événements détaillés restent dans le fichier timeline.</div></div>`);this.querySelector('#back')?.addEventListener('click',()=>this._setView('pro'));
+    const a=this._state('journal_archive','sensor.dmx_monitor_journal_archive')?.attributes||{};const events=(a.recent_events||[]).slice().reverse();
+    this.innerHTML=this._shell(`<button class="btn back" id="back">← PRO</button><div class="top"><div><div class="brand">SHOW TIMELINE</div><div class="muted">Événements récents observés par Show Network</div></div></div><div class="card" style="margin-top:12px"><div class="timeline-item"><b>Journal actif</b><div class="muted">${a.timeline_file??'—'}</div></div>${events.length?events.map(e=>`<div class="timeline-item"><b>${esc(e.event||'—')}</b> · ${esc(e.kind||'general')}<div class="muted">${esc(e.ts||'—')} ${e.data&&Object.keys(e.data).length?'· '+esc(JSON.stringify(e.data)):''}</div></div>`).join(''):'<div class="muted" style="margin-top:12px">Aucun événement en mémoire depuis le démarrage.</div>'}</div>`);this.querySelector('#back')?.addEventListener('click',()=>this._setView('pro'));
   }
   render(){if(this._view==='classic')return this._renderClassic();if(this._view==='archive')return this._renderArchive();if(this._view==='timeline')return this._renderTimeline();if(this._view==='modules')return this._renderModules();if(this._view.startsWith('module:'))return this._renderModule(this._view.slice(7));return this._renderPro();}
 }
@@ -598,7 +595,9 @@ customElements.define('show-network-pro-dashboard',ShowNetworkProDashboard);
 /* ===== show-network-reliability-panel.js ===== */
 class ShowNetworkReliabilityPanel extends HTMLElement {
   setConfig(c){this._config=c||{};}
-  set hass(h){this._hass=h; const st=h?.states?.['sensor.dmx_monitor_chaos_status']; const cap=h?.states?.['sensor.dmx_monitor_network_capacity_utilization']; const d=h?.states?.['sensor.dmx_monitor_dmx_universes']?.attributes?.network_health||{}; const badge=(n)=>n>0?'⚠️':'🟢'; this.innerHTML=`<style>:host{display:block;font-family:system-ui}.box{padding:14px;border:1px solid #30363d;border-radius:12px;background:#111519;color:#eee}.title{font-weight:800}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:10px}.b{padding:9px;border:1px solid #39414a;border-radius:8px;background:#181d22;color:#eee}.danger{border-color:#a85b5b}.small{font-size:11px;color:#929ba4}.health{margin-top:12px;padding:10px;border:1px solid #30363d;border-radius:9px;background:#151a1f}.row{display:flex;justify-content:space-between;gap:10px;padding:3px 0}</style><div class="box"><div class="title">RELIABILITY / NETWORK</div><div class="small">État: ${st?.state||'inactive'} · capacité: ${cap?.state||'—'}%</div><div class="health"><div class="row"><span>sACN queue</span><b>${badge(d.sacn_queue_drops||0)} ${d.sacn_queue_depth||0}/${d.queue_size||'—'} · drops ${d.sacn_queue_drops||0}</b></div><div class="row"><span>Art-Net queue</span><b>${badge(d.artnet_queue_drops||0)} ${d.artnet_queue_depth||0}/${d.queue_size||'—'} · drops ${d.artnet_queue_drops||0}</b></div><div class="row"><span>sACN reconnexions</span><b>${d.sacn_restarts||0}</b></div><div class="row"><span>Art-Net reconnexions</span><b>${d.artnet_restarts||0}</b></div></div><div class="grid"><button class="b danger" id="loss">Simuler perte watchdog</button><button class="b" id="restore">Restaurer signal</button><button class="b" id="ptp">PTP dérive +1 ms</button><button class="b" id="clear">Arrêter simulation</button></div></div>`; const call=(service,data={})=>h.callService?.('dmx_monitor',service,data); this.querySelector('#loss')?.addEventListener('click',()=>call('chaos_signal_loss')); this.querySelector('#restore')?.addEventListener('click',()=>call('chaos_signal_restore')); this.querySelector('#ptp')?.addEventListener('click',()=>call('chaos_ptp_drift',{offset_ms:1})); this.querySelector('#clear')?.addEventListener('click',()=>call('chaos_clear'));}
+  set hass(h){this._hass=h;this.render();}
+  async _call(service,data={}){this._message='Action en cours…';this.render();try{await this._hass.callService('dmx_monitor',service,data);this._message=`${service}: exécuté`; }catch(e){this._message=`Erreur ${service}: ${e?.message||e}`;}this.render();}
+  render(){const h=this._hass;if(!h)return;const st=h.states?.['sensor.dmx_monitor_chaos_status'];const cap=h.states?.['sensor.dmx_monitor_network_capacity_utilization'];const d=h.states?.['sensor.dmx_monitor_dmx_universes']?.attributes?.network_health||{};const cfg=Object.values(h.states||{}).find(x=>x.attributes&&('chaos_enabled' in x.attributes))?.attributes||{};const enabled=!!cfg.chaos_enabled;const badge=(n)=>n>0?'⚠️':'🟢';this.innerHTML=`<style>:host{display:block;font-family:system-ui}.box{padding:14px;border:1px solid #30363d;border-radius:12px;background:#111519;color:#eee}.title{font-weight:800}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:10px}.b{padding:9px;border:1px solid #39414a;border-radius:8px;background:#181d22;color:#eee;cursor:pointer}.b:disabled{opacity:.45;cursor:not-allowed}.danger{border-color:#a85b5b}.small{font-size:11px;color:#929ba4}.msg{margin-top:10px;padding:8px;border:1px solid #39414a;border-radius:8px;font-size:11px}.health{margin-top:12px;padding:10px;border:1px solid #30363d;border-radius:9px;background:#151a1f}.row{display:flex;justify-content:space-between;gap:10px;padding:3px 0}.ok{color:#68df9a}.warn{color:#e5bf6b}</style><div class="box"><div class="title">RELIABILITY / NETWORK</div><div class="small">État: ${st?.state||'inactive'} · capacité: ${cap?.state||'—'}% · tests diagnostic <b class="${enabled?'ok':'warn'}">${enabled?'ACTIVÉS':'DÉSACTIVÉS'}</b></div><div class="health"><div class="row"><span>sACN queue</span><b>${badge(d.sacn_queue_drops||0)} ${d.sacn_queue_depth||0}/${d.queue_size||'—'} · drops ${d.sacn_queue_drops||0}</b></div><div class="row"><span>Art-Net queue</span><b>${badge(d.artnet_queue_drops||0)} ${d.artnet_queue_depth||0}/${d.queue_size||'—'} · drops ${d.artnet_queue_drops||0}</b></div><div class="row"><span>sACN reconnexions</span><b>${d.sacn_restarts||0}</b></div><div class="row"><span>Art-Net reconnexions</span><b>${d.artnet_restarts||0}</b></div></div><div class="grid">${enabled?`<button class="b danger" id="loss">Simuler perte watchdog</button><button class="b" id="restore">Restaurer signal</button><button class="b" id="ptp">PTP dérive +1 ms</button><button class="b" id="clear">Arrêter simulation</button>`:`<button class="b" id="enable">Activer les tests diagnostic</button><button class="b" disabled>Les simulations sont protégées</button>`}</div>${this._message?`<div class="msg">${esc(this._message)}</div>`:''}</div>`;this.querySelector('#enable')?.addEventListener('click',()=>this._call('set_module_enabled',{module:'diagnostics',enabled:true}));this.querySelector('#loss')?.addEventListener('click',()=>this._call('chaos_signal_loss'));this.querySelector('#restore')?.addEventListener('click',()=>this._call('chaos_signal_restore'));this.querySelector('#ptp')?.addEventListener('click',()=>this._call('chaos_ptp_drift',{offset_ms:1}));this.querySelector('#clear')?.addEventListener('click',()=>this._call('chaos_clear'));}
 }
 customElements.define('show-network-reliability-panel',ShowNetworkReliabilityPanel);
 

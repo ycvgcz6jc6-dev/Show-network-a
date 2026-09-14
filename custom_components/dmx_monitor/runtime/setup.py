@@ -123,13 +123,16 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     if isinstance(raw_projectors, str):
         try: raw_projectors = json.loads(raw_projectors)
         except Exception: raw_projectors = []
-    coordinator.projector_monitor = PJLinkMonitor(raw_projectors if isinstance(raw_projectors, list) else [])
+    coordinator.projector_monitor_enabled = bool(settings.get(CONF_PROJECTOR_MONITOR_ENABLED, True))
+    coordinator.projector_monitor = PJLinkMonitor((raw_projectors if isinstance(raw_projectors, list) else []) if coordinator.projector_monitor_enabled else [])
+    coordinator.chaos_enabled = bool(settings.get(CONF_CHAOS_ENABLED, False))
 
     interface = settings.get(CONF_INTERFACE_DMX, settings.get(CONF_INTERFACE, "0.0.0.0"))
     interface_ma = settings.get(CONF_INTERFACE_MA, interface)
     interface_ptp = settings.get(CONF_INTERFACE_PTP, interface)
     interface_dante = settings.get(CONF_INTERFACE_DANTE, interface)
     interface_audio = settings.get(CONF_INTERFACE_AUDIO, interface)
+    interface_osc = settings.get(CONF_OSC_INPUT_INTERFACE, interface)
 
     # Publish the effective Show Network binding configuration so the custom
     # panel can show exactly which NIC each protocol is using.  This contains
@@ -141,6 +144,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
         "interface_ptp": interface_ptp,
         "interface_dante": interface_dante,
         "interface_audio": interface_audio,
+        "interface_osc": interface_osc,
         "universes": settings.get(CONF_UNIVERSES, "1-16"),
         "dmx_artnet_enabled": bool(settings.get(CONF_DMX_ARTNET_ENABLED, True)),
         "dmx_sacn_enabled": bool(settings.get(CONF_DMX_SACN_ENABLED, True)),
@@ -150,6 +154,11 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
         "osc_input_port": int(settings.get(CONF_OSC_INPUT_PORT, 8000)),
         "midi_enabled": bool(settings.get(CONF_MIDI_ENABLED, False)),
         "punchlight_enabled": bool(settings.get(CONF_PUNCHLIGHT_ENABLED, False)),
+        "watchdog_enabled": bool(settings.get(CONF_WATCHDOG_ENABLED, False)),
+        "ha_builder_enabled": bool(settings.get(CONF_HA_BUILDER_ENABLED, True)),
+        "notification_enabled": bool(settings.get(CONF_NOTIFICATION_ENABLED, False)),
+        "projector_monitor_enabled": coordinator.projector_monitor_enabled,
+        "chaos_enabled": coordinator.chaos_enabled,
     }
 
     ma_listener = None
@@ -237,14 +246,15 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
 
     osc_receiver=None
     if bool(settings.get(CONF_OSC_INPUT_ENABLED,False)):
-        osc_host=settings.get(CONF_OSC_INPUT_INTERFACE,interface) or "0.0.0.0"; osc_port=int(settings.get(CONF_OSC_INPUT_PORT,8000))
+        osc_host=interface_osc or "0.0.0.0"; osc_port=int(settings.get(CONF_OSC_INPUT_PORT,8000))
         def _osc_input(message):
             coordinator.data["osc_messages"]=int(coordinator.data.get("osc_messages",0))+1
             coordinator.data["osc_input"]={"enabled":True,"messages":coordinator.data["osc_messages"],"last_address":message.address,"last_source":message.source[0] if message.source else None,"last_error":None}
+            coordinator.data["osc_learn"]={"active":bool(coordinator.osc_learn.active),"suggestions":coordinator.osc_learn.suggestions()}
             for value in message.values:
                 if isinstance(value,(int,float)) and not isinstance(value,bool): coordinator.process_control_input(message.address,value)
             coordinator.async_set_updated_data(coordinator.data)
-        osc_receiver=_adapter("osc")(host=osc_host,port=osc_port,callback=_osc_input)
+        osc_receiver=_adapter("osc")(host=osc_host,port=osc_port,learn=coordinator.osc_learn,callback=_osc_input)
         try: await osc_receiver.start(); coordinator.data["osc_input"]={**coordinator.data.get("osc_input",{}),"enabled":True}
         except Exception as err: _LOGGER.warning("OSC input unavailable; continuing without it: %s",err); osc_receiver=None
 

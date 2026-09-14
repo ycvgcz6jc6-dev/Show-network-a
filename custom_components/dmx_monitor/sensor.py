@@ -210,6 +210,14 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return {"enabled": self.coordinator.data.get("notification", {}).get("enabled", False), "target_configured": bool(self.coordinator.data.get("notification", {}).get("target"))}
         if self._key == "punchlight_network":
             return {"devices": self.coordinator.data.get("punchlight_network", [])}
+        if self._key == "osc_messages":
+            return {"osc_input": dict(self.coordinator.data.get("osc_input", {})), "osc_learn": dict(self.coordinator.data.get("osc_learn", {}))}
+        if self._key == "control_mapping_events":
+            from dataclasses import asdict, is_dataclass
+            mappings=[]
+            for item in self.coordinator.control_mapping_engine.mappings.values():
+                mappings.append(asdict(item) if is_dataclass(item) else dict(item))
+            return {"mappings": mappings, "events": list(self.coordinator.data.get("control_mapping_events", []))}
         if self._key == "dmx_ha_zones_total":
             from .hue_catalog import snapshot as hue_catalog_snapshot
             return {"zones": self.coordinator.data.get("dmx_ha_zones", []), "rdm": self.coordinator.data.get("dmx_ha_rdm", {}), "hue_catalog": hue_catalog_snapshot()}

@@ -1018,3 +1018,44 @@ scan_network:
   name: Scan network
   description: Lance immédiatement la découverte réseau passive/mDNS Show Network.
 
+
+set_module_enabled:
+  name: Activer/désactiver un module Show Network
+  description: Modifie un gate booléen de module puis laisse l'intégration se recharger via son listener d'options.
+  fields:
+    module:
+      required: true
+      selector:
+        select:
+          options:
+            - artnet
+            - sacn
+            - ma_net3
+            - osc_input
+            - midi_input
+            - punchlight
+            - watchdog
+            - ha_builder
+            - notifications
+            - diagnostics
+            - projector_monitor
+    enabled:
+      required: true
+      selector:
+        boolean: {}
+    entry_id:
+      required: false
+      selector:
+        text: {}
+
+start_osc_learn:
+  name: Démarrer OSC Learn
+  description: Active l'apprentissage passif des messages OSC reçus. N'envoie aucune commande.
+
+stop_osc_learn:
+  name: Arrêter OSC Learn
+  description: Arrête l'apprentissage passif OSC en conservant les suggestions observées.
+
+clear_osc_learn:
+  name: Effacer OSC Learn
+  description: Efface les suggestions OSC apprises en mémoire.

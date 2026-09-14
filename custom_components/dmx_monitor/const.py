@@ -1,5 +1,5 @@
 DOMAIN = "dmx_monitor"
-VERSION = "0.13.3"
+VERSION = "0.13.4"
 
 CONF_INTERFACE = "interface"
 CONF_UNIVERSES = "universes"
@@ -76,6 +76,7 @@ CONF_MA_ENABLED = "ma_enabled"
 CONF_AES70_HOSTS = "aes70_hosts"
 CONF_AES70_PORT = "aes70_port"
 CONF_CHAOS_ENABLED = "chaos_enabled"
+CONF_PROJECTOR_MONITOR_ENABLED = "projector_monitor_enabled"
 
 CONF_NOTIFICATION_ENABLED = "notification_enabled"
 CONF_NOTIFICATION_TARGET = "notification_target"

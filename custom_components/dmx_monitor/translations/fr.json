@@ -56,7 +56,9 @@
           "capacity_other_mbps": "Capacité autre trafic (Mbit/s)",
           "projectors": "Configuration des projecteurs (JSON)",
           "aes70_hosts": "Hôtes AES70/OCA",
-          "aes70_port": "Port AES70/OCA"
+          "aes70_port": "Port AES70/OCA",
+          "projector_monitor_enabled": "Activer le monitoring PJLink",
+          "chaos_enabled": "Activer les tests de diagnostic"
         },
         "data_description": {
           "aes70_hosts": "Adresses IP/nom DNS AES70 à interroger, séparées par des virgules."
@@ -117,7 +119,9 @@
           "capacity_other_mbps": "Capacité autre trafic (Mbit/s)",
           "projectors": "Configuration des projecteurs (JSON)",
           "aes70_hosts": "Hôtes AES70/OCA",
-          "aes70_port": "Port AES70/OCA"
+          "aes70_port": "Port AES70/OCA",
+          "projector_monitor_enabled": "Activer le monitoring PJLink",
+          "chaos_enabled": "Activer les tests de diagnostic"
         }
       }
     }
@@ -176,7 +180,9 @@
           "capacity_cameras_mbps": "Capacité caméras (Mbit/s)",
           "capacity_st2110_mbps": "Capacité ST 2110 (Mbit/s)",
           "capacity_other_mbps": "Capacité autre trafic (Mbit/s)",
-          "projectors": "Configuration des projecteurs (JSON)"
+          "projectors": "Configuration des projecteurs (JSON)",
+          "projector_monitor_enabled": "Activer le monitoring PJLink",
+          "chaos_enabled": "Activer les tests de diagnostic"
         }
       }
     }

@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 import hashlib, json, os, shutil, asyncio
+from collections import deque
 from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -31,6 +32,7 @@ class EventArchive:
         self._queue: asyncio.Queue[tuple[str, str, dict[str, Any] | None] | None] = asyncio.Queue(maxsize=2000)
         self._worker: asyncio.Task | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._recent = deque(maxlen=100)
 
     def _resolve_root(self, destination: str) -> Path:
         value = str(destination or DEFAULT_DESTINATION).strip()
@@ -125,6 +127,7 @@ class EventArchive:
 
     def record(self, kind: str, event: str, data: dict[str, Any] | None = None) -> None:
         """Queue a journal event; never perform disk I/O on HA's event loop."""
+        self._recent.append({"ts": datetime.now(timezone.utc).isoformat(), "kind": str(kind)[:40], "event": str(event)[:200], "data": redact(self._json_safe(data or {}))})
         if self._worker and not self._worker.done():
             try:
                 self._queue.put_nowait((kind, event, data))
@@ -242,7 +245,8 @@ class EventArchive:
                 "storage_free_bytes": storage["free_bytes"],
                 "last_backup_success": last_success,
                 "last_backup_error": self._last_backup_error,
-                "last_backup_path": self._last_backup_path}
+                "last_backup_path": self._last_backup_path,
+                "recent_events": list(self._recent)}
 
     @staticmethod
     def _json_safe(value: Any) -> Any:

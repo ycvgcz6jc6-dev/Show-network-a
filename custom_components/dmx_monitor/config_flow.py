@@ -52,6 +52,7 @@ def _schema_for_hass(hass, data: dict | None, interfaces: list[str], enttec_port
         const.CONF_INTERFACE_PTP: vol.Optional(const.CONF_INTERFACE_PTP, default=data.get(const.CONF_INTERFACE_PTP, interface)),
         const.CONF_INTERFACE_MA: vol.Optional(const.CONF_INTERFACE_MA, default=data.get(const.CONF_INTERFACE_MA, interface)),
         const.CONF_INTERFACE_AUDIO: vol.Optional(const.CONF_INTERFACE_AUDIO, default=data.get(const.CONF_INTERFACE_AUDIO, interface)),
+        const.CONF_OSC_INPUT_INTERFACE: vol.Optional(const.CONF_OSC_INPUT_INTERFACE, default=data.get(const.CONF_OSC_INPUT_INTERFACE, interface)),
     }
     schema = {key: vol.In(interfaces) for key in interface_fields.values()}
     schema.update({
@@ -86,6 +87,8 @@ def _schema_for_hass(hass, data: dict | None, interfaces: list[str], enttec_port
         vol.Optional(const.CONF_NOTIFICATION_TARGET, default=data.get(const.CONF_NOTIFICATION_TARGET, "persistent")): vol.In(_notification_choices(hass, data.get(const.CONF_NOTIFICATION_TARGET, ""))),
         vol.Optional(const.CONF_NOTIFICATION_MODE, default=data.get(const.CONF_NOTIFICATION_MODE, "both")): vol.In(["notify", "persistent", "both"]),
         vol.Optional(const.CONF_HA_BUILDER_ENABLED, default=data.get(const.CONF_HA_BUILDER_ENABLED, True)): bool,
+        vol.Optional(const.CONF_PROJECTOR_MONITOR_ENABLED, default=data.get(const.CONF_PROJECTOR_MONITOR_ENABLED, True)): bool,
+        vol.Optional(const.CONF_CHAOS_ENABLED, default=data.get(const.CONF_CHAOS_ENABLED, False)): bool,
         vol.Optional(const.CONF_ARCHIVE_RETENTION_DAYS, default=data.get(const.CONF_ARCHIVE_RETENTION_DAYS, 30)): vol.All(vol.Coerce(int), vol.Range(min=1, max=3650)),
         vol.Optional(const.CONF_ARCHIVE_MAX_BYTES, default=data.get(const.CONF_ARCHIVE_MAX_BYTES, 5 * 1024 * 1024)): vol.All(vol.Coerce(int), vol.Range(min=256000, max=100 * 1024 * 1024)),
         vol.Optional(const.CONF_CAPACITY_LINK_MBPS, default=data.get(const.CONF_CAPACITY_LINK_MBPS, 1000)): vol.All(vol.Coerce(float), vol.Range(min=10, max=100000)),

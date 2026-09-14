@@ -1,3 +1,18 @@
+## 0.13.4 — Real module controls, DMX values, OSC Learn, Journal & Diagnostics
+
+- DMX live payload is now exposed to the frontend as `values_b64`; the 512-channel view can show the values actually received instead of staying at zero while packet counters increase.
+- Added a generic `set_module_enabled` service and quick ON/OFF controls in the Modules page for Art-Net, sACN, MA-Net3, OSC input, MIDI input, PunchLight, watchdogs, HA Builder, PJLink monitoring and diagnostic/chaos tests. Changes are stored in ConfigEntry options and applied through the existing reload listener.
+- Added an independent OSC input interface selector.
+- Wired the existing `OSCLearnSession` into the real OSC receiver. START/STOP/CLEAR Learn now call real services and learned addresses are exposed through HA sensor attributes.
+- Replaced the decorative OSC mapping examples with the mappings actually stored by the integration plus a minimal real mapping editor. Fixed bad relative imports in the control-mapping service path.
+- Journal/archive now keeps the last 100 event previews in memory and exposes them to Journal and Timeline views; no disk read is needed to display them.
+- Journal / Backups is now mounted from the Modules page instead of opening an empty module.
+- Reliability buttons now show explicit execution/error feedback. Fault-injection controls require the new diagnostic-tests opt-in gate.
+- Added PJLink monitor enable gate without weakening the separate protected projector-control gate.
+- Frontend cache/version bumped to 0.13.4.
+
+Validation: static/unit/syntax only; no claim of real HA/network/hardware validation.
+
 ## 0.13.3 — Raw RX visibility
 
 - Fixed E1.31/sACN multicast universe mapping (U1 -> 239.255.0.1).
