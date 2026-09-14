@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import socket
 from dataclasses import dataclass
-from time import monotonic
+from time import monotonic, time
 
 MA_NET3_PORT = 30020
 DEFAULT_GROUPS = ("236.4.1.0", "236.4.1.1", "236.4.1.2", "236.4.1.3", "236.4.1.4")
@@ -31,6 +31,13 @@ class MANet3Listener:
         self.bytes = 0
         self.sources: set[str] = set()
         self.groups_seen: set[str] = set()
+        self.state = "starting"
+        self.last_error: str | None = None
+        self.bound_endpoint: str | None = None
+        self.joined_groups: list[str] = []
+        self.join_errors: list[str] = []
+        self.last_source: str | None = None
+        self.last_packet_epoch: float | None = None
 
     async def start(self):
         if self.transports:
@@ -41,15 +48,27 @@ class MANet3Listener:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(("", self.port))
+            self.bound_endpoint = f"{sock.getsockname()[0]}:{sock.getsockname()[1]}"
+            self.joined_groups = []
+            self.join_errors = []
             for group in self.groups:
                 membership = socket.inet_aton(group) + socket.inet_aton(self.interface_ip)
-                sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
+                try:
+                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
+                    self.joined_groups.append(group)
+                except OSError as err:
+                    self.join_errors.append(f"{group}: {type(err).__name__}: {err}")
+                    raise
             sock.setblocking(False)
             transport, _ = await loop.create_datagram_endpoint(
                 lambda: _Protocol(self, "multi"), sock=sock
             )
             self.transports.append(transport)
-        except Exception:
+            self.state = "listening"
+            self.last_error = None
+        except Exception as err:
+            self.state = "error"
+            self.last_error = f"{type(err).__name__}: {err}"
             try:
                 if sock is not None:
                     sock.close()
@@ -69,6 +88,8 @@ class MANet3Listener:
         self.packet_count += 1
         self.bytes += len(data)
         self.last_seen = now
+        self.last_packet_epoch = time()
+        self.last_source = source
         self.sources.add(source)
         self.groups_seen.add(group)
         self.observations.append(MAObservation(source, group, len(data), now))
@@ -83,6 +104,13 @@ class MANet3Listener:
             "groups": len(self.groups_seen),
             "last_seen": self.last_seen,
             "observations": list(self.observations[-50:]),
+            "diagnostics": {
+                "state": self.state, "interface": self.interface_ip, "port": self.port,
+                "bound_endpoint": self.bound_endpoint, "configured_groups": list(self.groups),
+                "joined_groups": list(self.joined_groups), "join_errors": list(self.join_errors),
+                "last_error": self.last_error, "last_source": self.last_source,
+                "last_packet_epoch": self.last_packet_epoch,
+            },
         }
 
 class _Protocol(asyncio.DatagramProtocol):

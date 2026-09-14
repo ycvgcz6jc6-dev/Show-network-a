@@ -19,6 +19,7 @@ SENSORS = (
     ("devices_total", "Appareils découverts / Discovered devices", None),
     ("device_inventory", "Inventaire équipements / Device inventory", None),
     ("discovery_status", "État découverte / Discovery status", None),
+    ("protocol_rx_diagnostics", "Diagnostics réception protocoles / Protocol receive diagnostics", None),
     ("show_network_config", "Configuration réseau Show Network / Show Network network configuration", None),
     ("host_cpu_percent", "CPU hôte HA / HA host CPU", "%"),
     ("host_memory_percent", "RAM hôte HA / HA host memory", "%"),
@@ -220,6 +221,10 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return dict(self.coordinator.data.get("archive", {}))
         if self._key == "discovery_status":
             return dict(self.coordinator.data.get("discovery_status", {}))
+        if self._key == "protocol_rx_diagnostics":
+            return dict(self.coordinator.data.get("protocol_rx_diagnostics", {}))
+        if self._key in {"ma_packets", "ma_sources", "ma_groups", "ma_stations", "ma_live_stations", "ma_sessions"}:
+            return {"ma_remote": self.coordinator.data.get("ma_remote", {}), "rx_diagnostics": self.coordinator.data.get("protocol_rx_diagnostics", {}).get("ma_net3", {})}
         if self._key == "device_inventory":
             rows = self.coordinator.data.get("device_inventory", [])
             # Compact presentation data only; raw evidence stays available in the inventory panel.

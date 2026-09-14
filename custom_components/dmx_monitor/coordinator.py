@@ -134,7 +134,8 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             "devices_candidates": 0,
             "devices_unknown": 0,
             "device_inventory": [],
-            "discovery_status": {"state": "idle", "mdns_services": 0, "arp_neighbors": 0, "inventory_total": 0, "errors": []},
+            "discovery_status": {"state": "idle", "mdns_state": "idle", "mdns_services": 0, "mdns_detail": "not scanned yet", "arp_neighbors": 0, "inventory_total": 0, "errors": []},
+            "protocol_rx_diagnostics": {},
             "device_overrides": {},
             "ma_packets": 0,
             "ma_sources": 0,
@@ -405,15 +406,21 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         snapshot["network_capacity"] = capacity_snapshot(snapshot.get("dmx_universes", []), **self.capacity_config)
         if self.archive:
             self._archive_transitions(snapshot)
+        rx_diag = {"dmx": self.dmx_network.snapshot() if self.dmx_network else {"running": False, "error": "receiver unavailable"}}
         if self.ma_listener:
             ma = self.ma_listener.snapshot()
             snapshot.update(ma_packets=ma["packets"], ma_sources=ma["sources"], ma_groups=ma["groups"])
+            rx_diag["ma_net3"] = ma.get("diagnostics", {})
             for obs in ma.get("observations", [])[-50:]:
                 try:
                     self.ma_remote.observe(obs.source_ip, obs.destination_group)
                 except AttributeError:
                     self.ma_remote.observe(obs["source_ip"], obs["destination_group"])
             snapshot["ma_remote"] = self.ma_remote.snapshot()
+        else:
+            rx_diag["ma_net3"] = {"state": "disabled_or_unavailable", "interface": snapshot.get("show_network_config", {}).get("interface_ma")}
+        rx_diag["mdns"] = dict(snapshot.get("discovery_status", {}))
+        snapshot["protocol_rx_diagnostics"] = rx_diag
         self.data = snapshot
         return snapshot
 

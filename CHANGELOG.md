@@ -1,3 +1,15 @@
+## 0.13.2 — Protocol RX diagnostics
+
+- Added explicit receive diagnostics for Art-Net and sACN: listener state, bound interface/endpoint, packets received/parsed, last source, last universe, restart/error counters.
+- sACN now exposes the exact multicast groups successfully joined and any join error instead of silently looking idle.
+- Added MA-Net3 listener diagnostics: bind endpoint, configured/joined multicast groups, join errors, last source, last packet time and listener state.
+- Fixed MA inspector data wiring: the frontend previously searched for a `ma_remote` attribute that no sensor exposed, so the MA page could stay empty even when backend data existed. MA sensor attributes now expose both `ma_remote` and RX diagnostics.
+- Added a dedicated `protocol_rx_diagnostics` sensor with detailed attributes while keeping the HA state scalar.
+- mDNS discovery now distinguishes `scanning`, `observed`, `no_services_observed` and `error`, and explains that a zero result means no service was observed during the passive scan window rather than claiming the network has no mDNS devices.
+- DMX and MA panels now display low-level receive/bind/multicast diagnostics. Discovery view shows mDNS state/detail.
+- Frontend cache/version bumped to 0.13.2.
+- No transmit/control behavior was added. Receive-only posture preserved.
+
 ## 0.13.1 — DMX selection / sensor state / discovery
 
 - Preserve module instances during HA state refreshes so the DMX `protocol + universe + source` selector stays usable.

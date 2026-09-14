@@ -6,7 +6,7 @@ monitoring. It does not transmit, respond, merge, or alter DMX data.
 from __future__ import annotations
 from dataclasses import dataclass
 import struct
-from time import monotonic
+from time import monotonic, time
 from collections import deque
 import asyncio
 import logging
@@ -153,6 +153,13 @@ class DmxNetworkReceiver:
         self._packets_parsed = {"ARTNET": 0, "SACN": 0}
         self._last_error: dict[str, str | None] = {"ARTNET": None, "SACN": None}
         self._last_packet = {"ARTNET": None, "SACN": None}
+        self._last_packet_epoch = {"ARTNET": None, "SACN": None}
+        self._last_source = {"ARTNET": None, "SACN": None}
+        self._last_universe = {"ARTNET": None, "SACN": None}
+        self._listener_state = {"ARTNET": "disabled" if not self.artnet_enabled else "starting", "SACN": "disabled" if not self.sacn_enabled else "starting"}
+        self._bound_endpoint = {"ARTNET": None, "SACN": None}
+        self._joined_groups = {"ARTNET": [], "SACN": []}
+        self._join_errors = {"ARTNET": [], "SACN": []}
 
     async def start(self):
         self._stopping = False
@@ -183,9 +190,15 @@ class DmxNetworkReceiver:
             mreq = socket.inet_aton(target) + socket.inet_aton(self.interface if self.interface != "0.0.0.0" else "0.0.0.0")
             try:
                 sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-            except OSError:
-                if target == "239.255.0.1" and not hasattr(socket, "IP_MULTICAST_ALL"):
-                    raise
+                if target not in self._joined_groups[protocol]:
+                    self._joined_groups[protocol].append(target)
+            except OSError as err:
+                message = f"{target}: {type(err).__name__}: {err}"
+                self._join_errors[protocol].append(message)
+                # Joining a requested universe is part of listener setup: expose
+                # the failure and fail this socket instead of silently claiming
+                # that the universe is being monitored.
+                raise
 
     async def _open_socket(self, protocol, port, group):
         import socket
@@ -193,6 +206,9 @@ class DmxNetworkReceiver:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((self.interface, port))
+            self._bound_endpoint[protocol] = f"{sock.getsockname()[0]}:{sock.getsockname()[1]}"
+            self._joined_groups[protocol] = []
+            self._join_errors[protocol] = []
             self._join_groups(sock, protocol, group)
             sock.setblocking(False)
             self._sockets.append((sock, group))
@@ -215,6 +231,8 @@ class DmxNetworkReceiver:
             started_at = None
             try:
                 sock = await self._open_socket(protocol, port, group)
+                self._listener_state[protocol] = "listening"
+                self._last_error[protocol] = None
                 started_at = asyncio.get_running_loop().time()
                 parser_task = asyncio.create_task(self._parser_worker(protocol), name=f"show-network-{protocol.lower()}-parser")
                 await self._receive(sock, protocol)
@@ -224,6 +242,7 @@ class DmxNetworkReceiver:
                 self._restart_count[protocol] += 1
                 self._errors[protocol] += 1
                 self._last_error[protocol] = f"{type(err).__name__}: {err}"
+                self._listener_state[protocol] = "error"
                 _LOGGER.warning("%s listener restarted after error: %s", protocol, err)
             finally:
                 if parser_task:
@@ -258,6 +277,9 @@ class DmxNetworkReceiver:
                 continue
             self._packets_received[protocol] += 1
             self._last_packet[protocol] = monotonic()
+            self._last_packet_epoch[protocol] = time()
+            self._last_source[protocol] = addr[0]
+            self._last_universe[protocol] = self._packet_universe(protocol, data)
             # The packet is keyed by its source/universe after a minimal envelope
             # extraction.  Existing keys are overwritten instead of queued again.
             # This bounds parser work while retaining latest-state semantics.
@@ -363,4 +385,26 @@ class DmxNetworkReceiver:
             "sacn_last_packet": self._last_packet["SACN"],
             "queue_size": self.queue_size,
             "running": bool(self._tasks) and not self._stopping,
+            "interface": self.interface,
+            "source_filter": self.source_filter,
+            "configured_universes": list(self.multicast_universes),
+            "protocols": {
+                "ARTNET": {
+                    "enabled": self.artnet_enabled, "state": self._listener_state["ARTNET"],
+                    "interface": self.interface, "port": 6454, "bound_endpoint": self._bound_endpoint["ARTNET"],
+                    "packets_received": self._packets_received["ARTNET"], "packets_parsed": self._packets_parsed["ARTNET"],
+                    "last_source": self._last_source["ARTNET"], "last_universe": self._last_universe["ARTNET"],
+                    "last_packet_epoch": self._last_packet_epoch["ARTNET"], "last_error": self._last_error["ARTNET"],
+                    "restarts": self._restart_count["ARTNET"], "queue_drops": self._queue_drops["ARTNET"],
+                },
+                "SACN": {
+                    "enabled": self.sacn_enabled, "state": self._listener_state["SACN"],
+                    "interface": self.interface, "port": 5568, "bound_endpoint": self._bound_endpoint["SACN"],
+                    "packets_received": self._packets_received["SACN"], "packets_parsed": self._packets_parsed["SACN"],
+                    "last_source": self._last_source["SACN"], "last_universe": self._last_universe["SACN"],
+                    "last_packet_epoch": self._last_packet_epoch["SACN"], "last_error": self._last_error["SACN"],
+                    "joined_groups": list(self._joined_groups["SACN"]), "join_errors": list(self._join_errors["SACN"]),
+                    "restarts": self._restart_count["SACN"], "queue_drops": self._queue_drops["SACN"],
+                },
+            },
         }

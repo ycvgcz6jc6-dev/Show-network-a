@@ -280,13 +280,15 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     coordinator.data["notification"]={"enabled":coordinator.notifications.enabled,"target":coordinator.notifications.target,"mode":coordinator.notifications.mode}
 
     async def _vendor_discovery_tick(_now=None):
-        status = {"state": "running", "mdns_services": 0, "arp_neighbors": 0, "inventory_total": len(coordinator.inventory.devices), "errors": []}
+        status = {"state": "running", "mdns_state": "scanning", "mdns_services": 0, "mdns_detail": "using Home Assistant shared Zeroconf; passive DNS-SD scan in progress", "mdns_timeout_s": 2.0, "arp_neighbors": 0, "inventory_total": len(coordinator.inventory.devices), "errors": []}
         coordinator.publish(discovery_status=status)
         rows = []
         try:
             rows = await async_scan_vendor_discovery(hass, 2.0)
             coordinator.vendor_discovery = rows[-200:]
             status["mdns_services"] = len(rows)
+            status["mdns_state"] = "observed" if rows else "no_services_observed"
+            status["mdns_detail"] = (f"{len(rows)} mDNS service(s) observed via Home Assistant shared Zeroconf" if rows else "shared Zeroconf active; no mDNS service observed during the 2.0 s passive scan window")
             for row in rows:
                 addresses = row.get("addresses") or []
                 host = (addresses[0] if addresses else None) or row.get("host") or row.get("name")
@@ -297,6 +299,8 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                 elif row.get("vendor") == "elc":
                     coordinator.elc.observe(host, source="mdns", evidence=row.get("evidence"), last_seen=row.get("observed_at"))
         except Exception as err:
+            status["mdns_state"] = "error"
+            status["mdns_detail"] = f"{type(err).__name__}: {err}"
             status["errors"].append(f"mDNS: {err}")
             _LOGGER.warning("Show Network mDNS discovery failed: %s", err)
         try:
