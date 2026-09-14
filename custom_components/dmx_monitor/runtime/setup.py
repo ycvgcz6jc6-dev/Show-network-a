@@ -32,6 +32,7 @@ from ..signal_watchdog import SignalWatchdogRule
 from ..runtime_data import ShowNetworkRuntimeData
 from ..vendor_discovery import async_scan as async_scan_vendor_discovery
 from ..discovery_pipeline import DiscoveryPipeline
+from ..network_discovery import arp_neighbors
 from ..punchlight_network import async_scan as async_scan_punchlight_network
 from ..const import *
 from ..aes70_monitor import AES70Monitor
@@ -279,17 +280,45 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     coordinator.data["notification"]={"enabled":coordinator.notifications.enabled,"target":coordinator.notifications.target,"mode":coordinator.notifications.mode}
 
     async def _vendor_discovery_tick(_now=None):
+        status = {"state": "running", "mdns_services": 0, "arp_neighbors": 0, "inventory_total": len(coordinator.inventory.devices), "errors": []}
+        coordinator.publish(discovery_status=status)
+        rows = []
         try:
-            rows=await async_scan_vendor_discovery(hass, 2.0); coordinator.vendor_discovery=rows[-100:]
+            rows = await async_scan_vendor_discovery(hass, 2.0)
+            coordinator.vendor_discovery = rows[-200:]
+            status["mdns_services"] = len(rows)
             for row in rows:
-                addresses = row.get("addresses") or [row.get("host")]
-                host=(addresses[0] or row.get("host") or row.get("name"))
+                addresses = row.get("addresses") or []
+                host = (addresses[0] if addresses else None) or row.get("host") or row.get("name")
                 if host:
                     discovery_pipeline.mdns_result(host, row.get("service_type", ""), row.get("name", ""), row.get("properties") or {})
-                if row.get("vendor")=="green_go": coordinator.green_go.observe(host,source="mdns",evidence=row.get("evidence"),last_seen=row.get("observed_at"))
-                elif row.get("vendor")=="elc": coordinator.elc.observe(host,source="mdns",evidence=row.get("evidence"),last_seen=row.get("observed_at"))
-            coordinator.publish(vendor_discovery=coordinator.vendor_discovery,device_inventory=coordinator.inventory.public(include_hidden=True),green_go_inventory=coordinator.green_go.snapshot(),elc_inventory=coordinator.elc.snapshot())
-        except Exception as err: _LOGGER.debug("Vendor mDNS discovery failed: %s",err)
+                if row.get("vendor") == "green_go":
+                    coordinator.green_go.observe(host, source="mdns", evidence=row.get("evidence"), last_seen=row.get("observed_at"))
+                elif row.get("vendor") == "elc":
+                    coordinator.elc.observe(host, source="mdns", evidence=row.get("evidence"), last_seen=row.get("observed_at"))
+        except Exception as err:
+            status["errors"].append(f"mDNS: {err}")
+            _LOGGER.warning("Show Network mDNS discovery failed: %s", err)
+        try:
+            neighbors = await hass.async_add_executor_job(arp_neighbors)
+            status["arp_neighbors"] = len(neighbors)
+            for row in neighbors:
+                coordinator.inventory.upsert(
+                    ip=row.get("ip"), mac=row.get("mac"), protocols={"IPv4/ARP"},
+                    sources={"arp_cache"}, confidence="candidate", confidence_score=0.65,
+                    evidence=[{"field":"interface","value":row.get("interface"),"source":"arp_cache","confidence":0.9}],
+                    unique_id=f"candidate:{row.get('ip')}",
+                )
+        except Exception as err:
+            status["errors"].append(f"ARP: {err}")
+            _LOGGER.warning("Show Network ARP discovery failed: %s", err)
+        status["inventory_total"] = len(coordinator.inventory.devices)
+        status["state"] = "error" if status["errors"] and not (status["mdns_services"] or status["arp_neighbors"]) else "complete"
+        coordinator.publish(
+            discovery_status=status, vendor_discovery=coordinator.vendor_discovery,
+            device_inventory=coordinator.inventory.public(include_hidden=True),
+            green_go_inventory=coordinator.green_go.snapshot(), elc_inventory=coordinator.elc.snapshot(),
+        )
     coordinator.async_scan_network = _vendor_discovery_tick
     vendor_discovery_cancel=async_track_time_interval(hass,_vendor_discovery_tick,timedelta(seconds=60))
     # Run the first scan in the background instead of awaiting it inline: this

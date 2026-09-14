@@ -37,8 +37,6 @@ def _scan_sync(zc, timeout: float = 2.0) -> list[dict[str, Any]]:
                 label = str(name).lower()
                 haystack = " ".join([label, str(info.server or "").lower(), service_type.lower(), *props.keys(), *props.values()])
                 vendor = next((v for v, markers in MARKERS.items() if any(m in haystack for m in markers)), None)
-                if not vendor:
-                    return
                 found[(service_type, name)] = {
                     "vendor": vendor,
                     "name": str(name).rstrip("."),
@@ -46,7 +44,8 @@ def _scan_sync(zc, timeout: float = 2.0) -> list[dict[str, Any]]:
                     "host": str(info.server or "").rstrip(".") or None,
                     "addresses": addresses,
                     "port": int(info.port or 0),
-                    "evidence": [f"mDNS marker observed: {vendor}"],
+                    "properties": props,
+                    "evidence": ([f"mDNS vendor marker observed: {vendor}"] if vendor else [f"mDNS service observed: {service_type}" ]),
                     "observed_at": time.time(),
                 }
             except Exception:

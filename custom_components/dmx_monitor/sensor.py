@@ -18,6 +18,7 @@ from .projector_platform import sensor_entities as projector_sensor_entities
 SENSORS = (
     ("devices_total", "Appareils découverts / Discovered devices", None),
     ("device_inventory", "Inventaire équipements / Device inventory", None),
+    ("discovery_status", "État découverte / Discovery status", None),
     ("show_network_config", "Configuration réseau Show Network / Show Network network configuration", None),
     ("host_cpu_percent", "CPU hôte HA / HA host CPU", "%"),
     ("host_memory_percent", "RAM hôte HA / HA host memory", "%"),
@@ -138,6 +139,9 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return len(self.coordinator.data.get("punchlight_network", []))
         if self._key == "device_inventory":
             return len(self.coordinator.data.get("device_inventory", []))
+        if self._key == "discovery_status":
+            status = self.coordinator.data.get("discovery_status", {})
+            return status.get("state", "idle")
         if self._key == "network_capacity_utilization":
             return self.coordinator.data.get("network_capacity", {}).get("utilization_pct", 0)
         if self._key == "network_capacity_link_mbps":
@@ -187,6 +191,12 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return len(value or [])
         if self._key == "audio_sources":
             return sum((value or {}).values())
+        # HA entity states must be scalar and <=255 characters. Collections
+        # are represented by their item count; the full payload belongs in
+        # attributes below. This prevents catalog/inventory sensors becoming
+        # unknown because Home Assistant rejects oversized list/dict states.
+        if isinstance(value, (list, tuple, set, dict)):
+            return len(value)
         return value
 
     @property
@@ -208,14 +218,24 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return {"topology": self.coordinator.data.get("topology", {"nodes": [], "links": []})}
         if self._key == "journal_archive":
             return dict(self.coordinator.data.get("archive", {}))
+        if self._key == "discovery_status":
+            return dict(self.coordinator.data.get("discovery_status", {}))
         if self._key == "device_inventory":
             rows = self.coordinator.data.get("device_inventory", [])
             # Compact presentation data only; raw evidence stays available in the inventory panel.
             return {"devices": [{k: row.get(k) for k in (
                 "unique_id", "display_name", "display_manufacturer", "display_model",
-                "custom_role", "custom_location", "hidden", "ip", "mac", "serial",
-                "category", "protocols", "confidence"
+                "custom_role", "custom_location", "hidden", "ip", "ipv6", "hostname",
+                "mac", "serial", "category", "protocols", "sources", "confidence"
             )} for row in rows]}
+        if self._key == "etc_sensor_catalog":
+            return {"sensors": self.coordinator.data.get("etc_sensor_catalog", [])}
+        if self._key == "vendor_discovery":
+            return {"services": self.coordinator.data.get("vendor_discovery", [])}
+        if self._key == "switch_profiles":
+            return {"profiles": self.coordinator.data.get("switch_profiles", [])}
+        if self._key == "elc_inventory":
+            return {"devices": self.coordinator.data.get("elc_inventory", [])}
         if self._key in {"backup_storage", "backup_last_success", "backup_free_bytes"}:
             archive = self.coordinator.data.get("archive", {})
             return {

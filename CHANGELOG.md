@@ -1,3 +1,14 @@
+## 0.13.1 — DMX selection / sensor state / discovery
+
+- Preserve module instances during HA state refreshes so the DMX `protocol + universe + source` selector stays usable.
+- Prevent list/dict payloads from becoming invalid HA states; expose collection details through attributes.
+- Add discovery status telemetry with mDNS/ARP counts and errors.
+- Expand conservative mDNS discovery from vendor-only markers to all observed DNS-SD services.
+- Merge passive ARP cache, DMX source and MA-Net3 source evidence into the unified inventory.
+- Improve discovery/inventory UI diagnostics without inventing devices.
+- Version/cache bumped to 0.13.1.
+- Validation: compileall OK, JavaScript syntax OK, 90 tests passed.
+
 ## 0.13.0 — data truth / DMX monitor repair
 
 - Fixes the sensor tuple contract and preserves declared units.

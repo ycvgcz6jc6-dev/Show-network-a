@@ -137,11 +137,12 @@ class ShowNetworkDiscovery extends HTMLElement {
   set hass(h){this._hass=h;this.render();}
   connectedCallback(){this.render();}
   _inventory(){const e=Object.values(this._hass?.states||{}).find(x=>x.entity_id.endsWith('_device_inventory'));return e?.attributes?.devices||[];}
+  _status(){const e=Object.values(this._hass?.states||{}).find(x=>x.entity_id.endsWith('_discovery_status'));return e?.attributes||{};}
   render(){
-    const rows=this._inventory();
+    const rows=this._inventory(), ds=this._status();
     this.innerHTML=`<style>
     :host{display:block;background:#0b0d10;color:#eee;font-family:Inter,system-ui,sans-serif;padding:18px}h2{margin:0 0 5px}.sub{color:#8d969f;font-size:11px;margin-bottom:15px}.bar{display:flex;gap:8px;align-items:center;background:#15181c;border:1px solid #2c3239;border-radius:10px;padding:12px}button{background:#23282e;color:#eee;border:1px solid #3a4148;border-radius:7px;padding:8px 12px;cursor:pointer}.table{margin-top:12px;border:1px solid #2c3239;border-radius:10px;overflow:hidden}.row{display:grid;grid-template-columns:150px 1fr 130px 130px;gap:10px;padding:10px 12px;border-bottom:1px solid #282d33;font-size:12px}.head{color:#8d969f;background:#15181c;font-size:10px;text-transform:uppercase}.muted{color:#8d969f}</style>
-    <h2>AUTO DISCOVERY</h2><div class="sub">Découverte passive/mDNS et inventaire Show Network</div><div class="bar"><span class="muted" id="status">${rows.length} équipement(s) dans l’inventaire.</span><button id="scan">SCAN NETWORK</button></div><div class="table"><div class="row head"><span>IP</span><span>PROTOCOLES / FABRICANT</span><span>RÔLE</span><span>CONFIANCE</span></div>${rows.length?rows.map(r=>`<div class="row"><span>${esc(r.ip||'—')}</span><span>${esc((r.protocols||[]).join(', ')||r.display_manufacturer||'—')}</span><span>${esc(r.custom_role||r.category||'—')}</span><span>${esc(r.confidence??'—')}</span></div>`).join(''):'<div class="row"><span class="muted">Aucun équipement</span><span>—</span><span>—</span><span>—</span></div>'}</div>`;
+    <h2>AUTO DISCOVERY</h2><div class="sub">Découverte réelle en lecture seule : services mDNS, cache ARP et sources de protocoles observées.</div><div class="bar"><span class="muted" id="status">${rows.length} équipement(s) · état ${esc(ds.state||'idle')} · mDNS ${ds.mdns_services??0} · ARP ${ds.arp_neighbors??0}${(ds.errors||[]).length?' · erreurs '+esc((ds.errors||[]).join(' | ')):''}</span><button id="scan">SCAN NETWORK</button></div><div class="table"><div class="row head"><span>IP / HÔTE</span><span>PROTOCOLES / FABRICANT</span><span>RÔLE / SOURCE</span><span>CONFIANCE</span></div>${rows.length?rows.map(r=>`<div class="row"><span>${esc(r.ip||r.hostname||'—')}</span><span>${esc((r.protocols||[]).join(', ')||r.display_manufacturer||'—')}</span><span>${esc(r.custom_role||r.category||(r.sources||[]).join(', ')||'—')}</span><span>${esc(r.confidence??'—')}</span></div>`).join(''):'<div class="row"><span class="muted">Aucun équipement observé</span><span>—</span><span>—</span><span>—</span></div>'}</div>`;
     this.querySelector('#scan')?.addEventListener('click',async()=>{const b=this.querySelector('#scan'),st=this.querySelector('#status');b.disabled=true;st.textContent='Scan en cours…';try{await this._hass.callService('dmx_monitor','scan_network',{});st.textContent='Scan terminé. Les résultats vont se rafraîchir.';}catch(e){st.textContent='Erreur: '+(e?.message||e);}finally{b.disabled=false;}});
   }
 }
@@ -469,7 +470,7 @@ customElements.define('show-network-notification-panel',ShowNetworkNotificationP
 class ShowNetworkProDashboard extends HTMLElement {
   constructor(){super();this._view='pro';this._entityMap={};this._registryLoading=false;this._notice='';this._securityOverride=null;}
   setConfig(c){this._config=c||{}; this.render();}
-  set hass(h){this._hass=h; this._ensureRegistry(); if(this._raf)return; const run=()=>{this._raf=null;this.render();}; this._raf=(typeof requestAnimationFrame==="function"?requestAnimationFrame(run):setTimeout(run,100));}
+  set hass(h){this._hass=h; this._ensureRegistry(); if(this._view.startsWith('module:')){this.querySelectorAll('#module-content > *').forEach(el=>{try{el.hass=h}catch(e){}});return;} if(this._raf)return; const run=()=>{this._raf=null;this.render();}; this._raf=(typeof requestAnimationFrame==="function"?requestAnimationFrame(run):setTimeout(run,100));}
   connectedCallback(){this._ensureRegistry();this.render();}
   async _ensureRegistry(){
     if(!this._hass?.connection || this._registryLoading || Object.keys(this._entityMap).length)return;

@@ -18,11 +18,15 @@ class DiscoveryPipeline:
 
     def mdns_result(self, ip, service_type="", name="", properties=None):
         fp=fingerprint_mdns(service_type,name,properties)
+        protocol = fp.protocol or (f"mDNS:{service_type.rstrip('.')}" if service_type else "mDNS")
+        fallback = f"candidate:{ip}" if ip else f"mdns:{name or service_type}"
         return self.inventory.upsert(
-            ip=ip, hostname=name or None, manufacturer=fp.vendor,
-            model=fp.model, protocols={fp.protocol} if fp.protocol else set(),
-            sources={"zeroconf_fingerprint"}, confidence=fp.confidence,
-            unique_id=f"candidate:{ip}"
+            ip=ip or None, hostname=name or None, manufacturer=fp.vendor,
+            model=fp.model, protocols={protocol},
+            sources={"zeroconf"}, confidence=fp.confidence if fp.confidence != "unknown" else "candidate",
+            confidence_score=0.9 if fp.confidence == "confirmed" else 0.55,
+            evidence=[{"field":"service_type","value":service_type,"source":"zeroconf","confidence":0.8}],
+            unique_id=fallback
         )
 
     def protocol_result(self, ip, protocol, evidence=None, mac=None, serial=None):

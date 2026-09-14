@@ -134,6 +134,7 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             "devices_candidates": 0,
             "devices_unknown": 0,
             "device_inventory": [],
+            "discovery_status": {"state": "idle", "mdns_services": 0, "arp_neighbors": 0, "inventory_total": 0, "errors": []},
             "device_overrides": {},
             "ma_packets": 0,
             "ma_sources": 0,
@@ -324,7 +325,19 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
                                            ip=item.source if item.source else None,
                                            category="show_network_source", confidence=0.8,
                                            source="dmx_observation")
+            if item.source:
+                self.inventory.upsert(
+                    ip=item.source, protocols={item.protocol}, sources={"dmx_passive"},
+                    confidence="candidate", confidence_score=0.8, unique_id=f"candidate:{item.source}",
+                    evidence=[{"field":"universe","value":item.universe,"source":"dmx_passive","confidence":0.9}],
+                )
             self.network_health.observe_packet(item.interface or "unknown", item.protocol)
+        # MA-Net3 station sources are also genuine passive discovery evidence.
+        for station in self.ma_remote.snapshot().get("stations", []):
+            ip = station.get("ip")
+            if ip:
+                self.inventory.upsert(ip=ip, protocols={"MA-Net3"}, sources={"ma_net3_passive"},
+                                      confidence="candidate", confidence_score=0.8, unique_id=f"candidate:{ip}")
         snapshot["device_inventory"] = self.inventory.public(include_hidden=True)
         snapshot["device_overrides"] = dict(self.inventory.overrides)
         snapshot["topology"] = self.topology.snapshot()
