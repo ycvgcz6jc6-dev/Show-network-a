@@ -317,11 +317,18 @@ class DmxUniverseSensor(ShowNetworkEntity, SensorEntity):
                 "packet_rate", "active_channels", "last_change", "interface",
                 "inter_arrival_ms", "jitter_ms", "sequence_loss_pct"
             )}
-            values = item.get("values") or []
-            try:
-                row["values_b64"] = base64.b64encode(bytes(values[:512])).decode("ascii")
-            except (TypeError, ValueError):
-                row["values_b64"] = ""
+            # Coordinator already publishes the live 512-byte frame as base64.
+            # Do not re-encode from the removed ``values`` list: doing so turned
+            # every valid live frame into an empty payload in HA attributes.
+            packed = item.get("values_b64")
+            if isinstance(packed, str) and packed:
+                row["values_b64"] = packed
+            else:
+                values = item.get("values") or []
+                try:
+                    row["values_b64"] = base64.b64encode(bytes(values[:512])).decode("ascii")
+                except (TypeError, ValueError):
+                    row["values_b64"] = ""
             compact.append(row)
         return {
             "universes": compact,
