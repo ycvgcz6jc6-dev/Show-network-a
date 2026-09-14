@@ -102,10 +102,15 @@ SENSORS = (
 
 
 class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
-    def __init__(self, coordinator, key, name):
+    def __init__(self, coordinator, key, name, unit=None):
         ShowNetworkEntity.__init__(self, coordinator, f"{key}")
         self._key = key
         self._attr_name = name
+        # SENSORS entries are (key, name, unit).  Keep the tuple contract
+        # explicit so platform setup cannot fail when a unit is present.
+        self._declared_unit = unit
+        if unit is not None:
+            self._attr_native_unit_of_measurement = unit
         if key == "backup_last_success":
             self._attr_device_class = SensorDeviceClass.TIMESTAMP
 
@@ -133,6 +138,14 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return len(self.coordinator.data.get("punchlight_network", []))
         if self._key == "device_inventory":
             return len(self.coordinator.data.get("device_inventory", []))
+        if self._key == "network_capacity_utilization":
+            return self.coordinator.data.get("network_capacity", {}).get("utilization_pct", 0)
+        if self._key == "network_capacity_link_mbps":
+            return self.coordinator.data.get("network_capacity", {}).get("link_mbps", 0)
+        if self._key == "network_capacity_total_mbps":
+            return self.coordinator.data.get("network_capacity", {}).get("total_mbps", 0)
+        if self._key == "network_capacity_headroom_mbps":
+            return self.coordinator.data.get("network_capacity", {}).get("headroom_mbps", 0)
         if self._key.startswith("network_"):
             return self.coordinator.data.get("network_health", {}).get(self._key.removeprefix("network_"), 0)
         if self._key == "ma_stations":
@@ -155,14 +168,6 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return len(self.coordinator.data.get("dmx_ha_mappings", []))
         if self._key == "dmx_ha_zones_total":
             return len(self.coordinator.data.get("dmx_ha_zones", []))
-        if self._key == "network_capacity_utilization":
-            return self.coordinator.data.get("network_capacity", {}).get("utilization_pct", 0)
-        if self._key == "network_capacity_link_mbps":
-            return self.coordinator.data.get("network_capacity", {}).get("link_mbps", 0)
-        if self._key == "network_capacity_total_mbps":
-            return self.coordinator.data.get("network_capacity", {}).get("total_mbps", 0)
-        if self._key == "network_capacity_headroom_mbps":
-            return self.coordinator.data.get("network_capacity", {}).get("headroom_mbps", 0)
         if self._key == "chaos_status":
             return "active" if self.coordinator.data.get("chaos", {}).get("active") else "inactive"
         if self._key == "journal_archive":
@@ -197,6 +202,12 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
         if self._key == "dmx_ha_zones_total":
             from .hue_catalog import snapshot as hue_catalog_snapshot
             return {"zones": self.coordinator.data.get("dmx_ha_zones", []), "rdm": self.coordinator.data.get("dmx_ha_rdm", {}), "hue_catalog": hue_catalog_snapshot()}
+        if self._key == "dmx_ha_mappings_total":
+            return {"mappings": self.coordinator.data.get("dmx_ha_mappings", [])}
+        if self._key in {"topology_nodes", "topology_links"}:
+            return {"topology": self.coordinator.data.get("topology", {"nodes": [], "links": []})}
+        if self._key == "journal_archive":
+            return dict(self.coordinator.data.get("archive", {}))
         if self._key == "device_inventory":
             rows = self.coordinator.data.get("device_inventory", [])
             # Compact presentation data only; raw evidence stays available in the inventory panel.
@@ -220,6 +231,8 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
 
     @property
     def native_unit_of_measurement(self):
+        if self._declared_unit is not None:
+            return self._declared_unit
         if self._key in {"network_capacity_utilization"}: return "%"
         if self._key in {"network_capacity_link_mbps", "network_capacity_total_mbps", "network_capacity_headroom_mbps"}: return "Mbit/s"
         if self._key in {"audio_amplifier_temperature_max"}: return "°C"
@@ -277,7 +290,15 @@ class DmxUniverseSensor(ShowNetworkEntity, SensorEntity):
             except (TypeError, ValueError):
                 row["values_b64"] = ""
             compact.append(row)
-        return {"universes": compact, "network_health": self.coordinator.data.get("dmx_network_health", {})}
+        return {
+            "universes": compact,
+            "network_health": self.coordinator.data.get("dmx_network_health", {}),
+            "configured_universes": self.coordinator.data.get("show_network_config", {}).get("universes", ""),
+            "configured_interface": self.coordinator.data.get("show_network_config", {}).get("interface_dmx"),
+            "artnet_enabled": self.coordinator.data.get("show_network_config", {}).get("dmx_artnet_enabled"),
+            "sacn_enabled": self.coordinator.data.get("show_network_config", {}).get("dmx_sacn_enabled"),
+            "source_filter": self.coordinator.data.get("show_network_config", {}).get("dmx_source", ""),
+        }
 
 
 # Temperature entities are dynamically created later when a GigaCore is confirmed.

@@ -163,59 +163,57 @@ class DmxHaMappingPanel extends HTMLElement {
 customElements.define('dmx-ha-mapping-panel',DmxHaMappingPanel)
 
 
-/* ===== dmx-live-view.js ===== */
-class DmxLiveView extends HTMLElement {
- connectedCallback(){this.innerHTML=`
- <style>
- :host{display:block;background:#090b0e;color:#eee;font-family:Inter,system-ui,sans-serif;padding:16px}
- h2{margin:0}.sub{font-size:10px;color:#8d969f;margin:4px 0 12px}
- .bar{display:flex;gap:8px;flex-wrap:wrap}.pill{background:#15181c;border:1px solid #2c3239;border-radius:6px;padding:7px 10px;font-size:10px}
- .grid{display:grid;grid-template-columns:repeat(16,1fr);gap:3px;margin-top:12px}
- .ch{height:34px;background:#252a30;border-radius:3px;text-align:center;font-size:9px;padding-top:3px;box-sizing:border-box}
- .active{background:#1d5c3a;color:#fff}.num{display:block;font-size:10px;font-weight:700;margin-top:5px}
- </style>
- <h2>DMX VIEW</h2><div class="sub">LIVE RECEIVE · sACN / Art-Net · NO OUTPUT</div>
- <div class="bar"><span class="pill">Universe —</span><span class="pill">Source —</span><span class="pill">Rate —</span><span class="pill">Active —/512</span><span class="pill">Selection: 1-8,12</span></div>
- <div class="grid">${Array.from({length:128},(_,i)=>`<div class="ch ${i%11===0?'active':''}">${i+1}<span class="num">${i%11===0?Math.floor((i*7)%256):0}</span></div>`).join('')}</div>`}
-}
-customElements.define("dmx-live-view",DmxLiveView);
-
+/* Removed in v0.13.0: the former dmx-live-view rendered synthetic demo values. */
 
 /* ===== dmx-monitor-panel.js ===== */
 class DmxMonitorPanel extends HTMLElement {
-  constructor(){super();this.attachShadow({mode:"open"});this.universe=null;this.values=Array(512).fill(0);this.source="—";this.protocol="—";this.rate=0;this.active=0;this.priority=null;this.sequence=null;this.selected=new Set();this._framePending=false;this._lastSig="";this._renderTimer=null;}
+  constructor(){super();this.attachShadow({mode:"open"});this.selectionKey="";this.values=Array(512).fill(0);this.source="—";this.protocol="—";this.rate=0;this.active=0;this.priority=null;this.sequence=null;this.selected=new Set();this._framePending=false;this._lastSig="";}
   connectedCallback(){this.render();}
   set hass(hass){this._hass=hass;this.syncLive();}
+  _parseUniverses(raw){
+    const out=new Set();
+    for(const part of String(raw||'').replace(/\s+/g,'').split(',')){
+      if(!part)continue;
+      if(part.includes('-')){const [a,b]=part.split('-').map(Number);if(Number.isInteger(a)&&Number.isInteger(b)){for(let x=Math.min(a,b);x<=Math.max(a,b)&&x<=63999;x++)out.add(x)}}
+      else {const n=Number(part);if(Number.isInteger(n)&&n>0)out.add(n)}
+    }
+    return [...out].sort((a,b)=>a-b);
+  }
+  _findDmxState(){return Object.values(this._hass?.states||{}).find(s=>Array.isArray(s.attributes?.universes));}
+  _findConfig(){return Object.values(this._hass?.states||{}).find(s=>s.attributes && ('interface_dmx' in s.attributes || 'dmx_artnet_enabled' in s.attributes))?.attributes||{};}
+  _observed(){return this._findDmxState()?.attributes?.universes||[];}
+  _choices(){
+    const observed=this._observed();
+    const cfg=this._findConfig();
+    const choices=observed.map((u,i)=>({key:`obs:${i}:${u.protocol||''}:${u.universe||''}:${u.source||''}`,observed:true,data:u,label:`U${Number(u.universe)||'?'} · ${u.protocol||'?'} · ${u.source||'source ?'}`}));
+    const observedNumbers=new Set(observed.map(u=>Number(u.universe)));
+    for(const u of this._parseUniverses(cfg.universes||this._findDmxState()?.attributes?.configured_universes||'')){
+      if(!observedNumbers.has(u))choices.push({key:`cfg:${u}`,observed:false,data:{universe:u,protocol:'—',source:'—',packet_rate:0,active_channels:0},label:`U${u} · configuré · aucun trafic`});
+    }
+    return choices;
+  }
   syncLive(){
-    if(this._framePending)return;
-    this._framePending=true;
+    if(this._framePending)return;this._framePending=true;
     const run=()=>{this._framePending=false;this._syncLiveNow();};
-    if(typeof requestAnimationFrame==="function") requestAnimationFrame(run); else this._renderTimer=setTimeout(run,100);
+    if(typeof requestAnimationFrame==='function')requestAnimationFrame(run);else setTimeout(run,100);
   }
   _syncLiveNow(){
-    const states=this._hass?.states||{};
-    const state=Object.values(states).find(s=>Array.isArray(s.attributes?.universes));
-    const list=state?.attributes?.universes||[];
-    if(!list.length){this.render();return;}
-    if(this.universe==null || !list.some(x=>Number(x.universe)===Number(this.universe))) this.universe=Number(list[0].universe)||1;
-    const u=list.find(x=>Number(x.universe)===Number(this.universe))||list[0];
-    this.universe=Number(u.universe)||1; this.source=u.source||"—"; this.protocol=u.protocol||"—";
-    this.rate=Number(u.packet_rate||0); this.active=Number(u.active_channels||0); this.priority=u.priority; this.sequence=u.sequence;
-    if(Array.isArray(u.values)) this.values=u.values.slice(0,512).concat(Array(512)).slice(0,512);
-    else if(u.values_b64){try{const bin=atob(u.values_b64);this.values=Array.from(bin, c=>c.charCodeAt(0)).slice(0,512).concat(Array(512)).slice(0,512)}catch(e){this.values=Array(512).fill(0)}}
+    const choices=this._choices();
+    if(!choices.length){this.selectionKey='';this.values=Array(512).fill(0);this.source='—';this.protocol='—';this.rate=0;this.active=0;this.render();return;}
+    let choice=choices.find(x=>x.key===this.selectionKey)||choices[0];this.selectionKey=choice.key;
+    const u=choice.data||{};this.universe=Number(u.universe)||null;this.source=u.source||'—';this.protocol=u.protocol||'—';this.rate=Number(u.packet_rate||0);this.active=Number(u.active_channels||0);this.priority=u.priority;this.sequence=u.sequence;
+    if(choice.observed&&Array.isArray(u.values))this.values=u.values.slice(0,512).concat(Array(512)).slice(0,512);
+    else if(choice.observed&&u.values_b64){try{const bin=atob(u.values_b64);this.values=Array.from(bin,c=>c.charCodeAt(0)).slice(0,512).concat(Array(512)).slice(0,512)}catch(e){this.values=Array(512).fill(0)}}
     else this.values=Array(512).fill(0);
-    this._universes=list;
-    const sig=`${this.universe}|${this.source}|${this.protocol}|${this.rate}|${this.active}|${this.priority}|${this.sequence}|${u.values_b64||JSON.stringify(u.values||[])}`;
-    if(sig===this._lastSig)return;
-    this._lastSig=sig; this.render();
+    const sig=`${this.selectionKey}|${this.rate}|${this.active}|${this.priority}|${this.sequence}|${u.values_b64||JSON.stringify(u.values||[])}`;if(sig===this._lastSig)return;this._lastSig=sig;this.render();
   }
   render(){
-    const css=`:host{display:block;background:#0c0e10;color:#e8eaed;min-height:100vh;font-family:Inter,system-ui,sans-serif}.top{background:#171a1e;border-bottom:1px solid #30353b;padding:16px 20px;position:sticky;top:0;z-index:5}.title{font-size:22px;font-weight:700}.sub{color:#8f98a3;font-size:11px;margin-top:3px}.tools{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}.pill{background:#20242a;border:1px solid #343a41;border-radius:7px;padding:7px 10px;font-size:11px}.ok{border-color:#2d714b}.select{background:#20242a;color:#eee;border:1px solid #343a41;border-radius:7px;padding:7px}.body{padding:14px}.card{background:#15181c;border:1px solid #292e34;border-radius:9px;margin-bottom:12px;overflow:hidden}.bar{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 14px;background:#191c20;border-bottom:1px solid #292e34}.muted{color:#8d969f;font-size:11px}.grid{display:grid;grid-template-columns:repeat(32,minmax(23px,1fr));gap:2px;padding:10px}.cell{height:45px;border-radius:3px;background:#292e34;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;user-select:none}.cell.active{background:#12472f}.cell.low{background:#303326}.num{font-size:12px;font-weight:700}.ch{font-size:8px;color:#8e969f;margin-top:2px}.active .num{color:#6ae59e}.selected{outline:2px solid #e5e7eb}.foot{padding:10px 14px;color:#8f98a3;font-size:11px}@media(max-width:950px){.grid{grid-template-columns:repeat(16,minmax(23px,1fr));}}`;
-    let cells=""; for(let i=1;i<=512;i++){const v=Number(this.values[i-1]||0),cls=v>10?"active":(v>0?"low":""),sel=this.selected.has(i)?" selected":"";cells+=`<div class="cell ${cls}${sel}" data-ch="${i}"><span class="num">${v}</span><span class="ch">CH ${i}</span></div>`;}
-    const opts=(this._universes||[]).map(u=>`<option value="${Number(u.universe)}">U${Number(u.universe)} · ${u.protocol||"?"} · ${u.source||"?"}</option>`).join("");
-    this.shadowRoot.innerHTML=`<style>${css}</style><header class="top"><div class="title">DMX View</div><div class="sub">LIGHT / DMX MONITOR · RECEIVE ONLY · FR / EN</div><div class="tools"><select class="select" id="uni">${opts||'<option>—</option>'}</select><span class="pill ok">● LIVE</span><span class="pill">${this.protocol}</span><span class="pill">Source ${this.source}</span><span class="pill">${this.rate.toFixed(1)} pkt/s</span><span class="pill">${this.active} active</span><span class="pill">Priority ${this.priority??"—"}</span><span class="pill">Seq ${this.sequence??"—"}</span></div></header><main class="body"><section class="card"><div class="bar"><div><b>Universe ${this.universe||"—"} · DMX 1–512</b><div class="muted">Cliquez sur les canaux pour les sélectionner · Click channels to select</div></div></div><div class="grid">${cells}</div><div class="foot">Sélection : ${[...this.selected].sort((a,b)=>a-b).join(", ")||"—"} · Aucun paquet n'est émis.</div></section></main>`;
-    const uni=this.shadowRoot.querySelector('#uni'); if(uni) uni.value=String(this.universe||"");
-    uni?.addEventListener('change',e=>{this.universe=Number(e.target.value);this.syncLive();});
+    const choices=this._choices();const current=choices.find(x=>x.key===this.selectionKey);const isLive=Boolean(current?.observed&&this.rate>0);const hasObserved=Boolean(current?.observed);
+    const css=`:host{display:block;background:#0c0e10;color:#e8eaed;font-family:Inter,system-ui,sans-serif}.top{background:#171a1e;border-bottom:1px solid #30353b;padding:16px 20px}.title{font-size:22px;font-weight:700}.sub{color:#8f98a3;font-size:11px;margin-top:3px}.tools{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}.pill{background:#20242a;border:1px solid #343a41;border-radius:7px;padding:7px 10px;font-size:11px}.ok{border-color:#2d714b}.warn{border-color:#8a6a2f}.off{color:#9aa3ac}.select{background:#20242a;color:#eee;border:1px solid #343a41;border-radius:7px;padding:7px}.body{padding:14px}.card{background:#15181c;border:1px solid #292e34;border-radius:9px;margin-bottom:12px;overflow:hidden}.bar{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 14px;background:#191c20;border-bottom:1px solid #292e34}.muted{color:#8d969f;font-size:11px}.grid{display:grid;grid-template-columns:repeat(32,minmax(23px,1fr));gap:2px;padding:10px}.cell{height:45px;border-radius:3px;background:#292e34;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;user-select:none}.cell.active{background:#12472f}.cell.low{background:#303326}.num{font-size:12px;font-weight:700}.ch{font-size:8px;color:#8e969f;margin-top:2px}.active .num{color:#6ae59e}.selected{outline:2px solid #e5e7eb}.foot{padding:10px 14px;color:#8f98a3;font-size:11px}@media(max-width:950px){.grid{grid-template-columns:repeat(16,minmax(23px,1fr));}}`;
+    let cells='';for(let i=1;i<=512;i++){const v=Number(this.values[i-1]||0),cls=v>10?'active':(v>0?'low':''),sel=this.selected.has(i)?' selected':'';cells+=`<div class="cell ${cls}${sel}" data-ch="${i}"><span class="num">${v}</span><span class="ch">CH ${i}</span></div>`;}
+    const opts=choices.map(x=>`<option value="${esc(x.key)}">${esc(x.label)}</option>`).join('');const status=isLive?'● LIVE':(hasObserved?'● SILENCIEUX':'○ CONFIGURÉ / PAS DE TRAFIC');
+    this.shadowRoot.innerHTML=`<style>${css}</style><header class="top"><div class="title">DMX View</div><div class="sub">RÉCEPTION UNIQUEMENT · données observées réelles · aucune valeur de démonstration</div><div class="tools"><select class="select" id="uni">${opts||'<option value="">Aucun univers configuré/observé</option>'}</select><span class="pill ${isLive?'ok':hasObserved?'warn':'off'}">${status}</span><span class="pill">${esc(this.protocol)}</span><span class="pill">Source ${esc(this.source)}</span><span class="pill">${this.rate.toFixed(1)} pkt/s</span><span class="pill">${this.active} actifs</span><span class="pill">Priority ${this.priority??'—'}</span><span class="pill">Seq ${this.sequence??'—'}</span></div></header><main class="body"><section class="card"><div class="bar"><div><b>Universe ${this.universe||'—'} · DMX 1–512</b><div class="muted">${hasObserved?'Valeurs reçues du listener sélectionné.':'Univers configuré mais aucun paquet correspondant observé.'}</div></div></div><div class="grid">${cells}</div><div class="foot">Sélection : ${[...this.selected].sort((a,b)=>a-b).join(', ')||'—'} · Aucun paquet n'est émis.</div></section></main>`;
+    const sel=this.shadowRoot.querySelector('#uni');if(sel)sel.value=this.selectionKey;sel?.addEventListener('change',e=>{this.selectionKey=e.target.value;this._lastSig='';this.syncLive();});
     this.shadowRoot.querySelectorAll('.cell').forEach(c=>c.addEventListener('click',()=>{const ch=Number(c.dataset.ch);this.selected.has(ch)?this.selected.delete(ch):this.selected.add(ch);c.classList.toggle('selected',this.selected.has(ch));this.dispatchEvent(new CustomEvent('dmx-channel-selected',{detail:{channel:ch,universe:this.universe,source:this.source,protocol:this.protocol},bubbles:true,composed:true}));this.shadowRoot.querySelector('.foot').textContent=`Sélection : ${[...this.selected].sort((a,b)=>a-b).join(', ')||'—'} · Aucun paquet n'est émis.`;}));
   }
 }
@@ -569,9 +567,9 @@ class ShowNetworkProDashboard extends HTMLElement {
     if(key==='audio')inner+=this._entityTable(['dante','aes67','st2110','avb','ptp','audio_'],'Aucune donnée audio réseau observée pour le moment.');
     if(key==='video')inner+=this._entityTable(['projector','pjlink','video'],'Aucune entité vidéo/projecteur configurée pour le moment.');
     if(key==='security')inner+=this._securityHtml()+this._entityTable(['security_','osc_output','light_sync','projector_control'],'Les états de sécurité apparaîtront après chargement des entités.');
-    if(key==='network'){const cfg=this._state('show_network_config','sensor.dmx_monitor_show_network_config')?.attributes||{};inner+=`<div class="card"><div class="title">CONFIGURATION RÉSEAU SHOW CONTROL</div><div class="row"><span>DMX / Art-Net / sACN</span><b>${cfg.interface_dmx??'—'}</b></div><div class="row"><span>grandMA3 / MA-Net3</span><b>${cfg.interface_ma??'—'}</b></div><div class="row"><span>Dante</span><b>${cfg.interface_dante??'—'}</b></div><div class="row"><span>PTP</span><b>${cfg.interface_ptp??'—'}</b></div><div class="row"><span>Audio AES67/ST2110</span><b>${cfg.interface_audio??'—'}</b></div><div class="row"><span>Art-Net</span><b>${cfg.dmx_artnet_enabled?'Écouté':'Désactivé'}</b></div><div class="row"><span>sACN</span><b>${cfg.dmx_sacn_enabled?'Écouté':'Désactivé'}</b></div><div class="row"><span>Source DMX</span><b>${cfg.dmx_source||'Toutes'}</b></div><div class="row"><span>Univers DMX</span><b>${cfg.universes??'—'}</b></div><div class="row"><span>MA-Net3</span><b>${cfg.ma_enabled?'Écouté':'Désactivé'}</b></div><div class="footer"><button class="btn primary" id="network-config">Modifier les interfaces / protocoles</button></div></div>`;}
+    if(key==='network'){const cfgState=this._state('show_network_config','sensor.dmx_monitor_show_network_config');const cfg=cfgState?.attributes||{};const yn=(k)=>cfgState?(cfg[k]===true?'Écouté':cfg[k]===false?'Désactivé':'Indisponible'):'État indisponible';inner+=`<div class="card"><div class="title">CONFIGURATION RÉSEAU SHOW CONTROL</div>${cfgState?'':`<div class="notice">Capteur de configuration indisponible : aucun état activé/désactivé n'est supposé.</div>`}<div class="row"><span>DMX / Art-Net / sACN</span><b>${cfg.interface_dmx??'—'}</b></div><div class="row"><span>grandMA3 / MA-Net3</span><b>${cfg.interface_ma??'—'}</b></div><div class="row"><span>Dante</span><b>${cfg.interface_dante??'—'}</b></div><div class="row"><span>PTP</span><b>${cfg.interface_ptp??'—'}</b></div><div class="row"><span>Audio AES67/ST2110</span><b>${cfg.interface_audio??'—'}</b></div><div class="row"><span>Art-Net</span><b>${yn('dmx_artnet_enabled')}</b></div><div class="row"><span>sACN</span><b>${yn('dmx_sacn_enabled')}</b></div><div class="row"><span>Source DMX</span><b>${cfgState?(cfg.dmx_source||'Toutes'):'—'}</b></div><div class="row"><span>Univers DMX</span><b>${cfg.universes??'—'}</b></div><div class="row"><span>MA-Net3</span><b>${yn('ma_enabled')}</b></div><div class="footer"><button class="btn primary" id="network-config">Modifier les interfaces / protocoles</button></div></div>`;}
     this.innerHTML=this._shell(inner);this.querySelector('#back')?.addEventListener('click',()=>this._setView('modules'));
-    const map={dmx:['dmx-monitor-panel','dmx-live-view','enttec-panel'],zones:['dmx-ha-zones-panel','dmx-ha-mapping-panel'],osc:['control-sources-panel','osc-learn-panel','osc-mapping-panel','osc-output-panel','osc-source-profiles','punchlight-network-panel'],rules:['show-network-rule-builder','signal-watchdog-panel'],network:['show-network-topology-panel','show-network-discovery','show-network-fingerprint'],ma:['ma-inspector-panel'],inventory:['show-network-inventory'],builder:['show-network-ha-builder-panel'],brands:['show-network-brand-catalog'],reliability:['show-network-reliability-panel','signal-watchdog-panel']};
+    const map={dmx:['dmx-monitor-panel','enttec-panel'],zones:['dmx-ha-zones-panel','dmx-ha-mapping-panel'],osc:['control-sources-panel','osc-learn-panel','osc-mapping-panel','osc-output-panel','osc-source-profiles','punchlight-network-panel'],rules:['show-network-rule-builder','signal-watchdog-panel'],network:['show-network-topology-panel','show-network-discovery','show-network-fingerprint'],ma:['ma-inspector-panel'],inventory:['show-network-inventory'],builder:['show-network-ha-builder-panel'],brands:['show-network-brand-catalog'],reliability:['show-network-reliability-panel','signal-watchdog-panel']};
     if(map[key])this._mountPanels(map[key]);if(key==='security')this._wireSecurity();this.querySelector('#network-config')?.addEventListener('click',()=>this._openIntegrationConfig());
   }
   _renderClassic(){
