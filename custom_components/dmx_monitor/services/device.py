@@ -15,7 +15,7 @@ async def async_register(hass: HomeAssistant) -> None:
             coordinator.inventory.set_override(
                 uid, name=call.data.get("name"), manufacturer=call.data.get("manufacturer"),
                 model=call.data.get("model"), location=call.data.get("location"),
-                role=call.data.get("role"), hidden=call.data.get("hidden"),
+                role=call.data.get("role"), hidden=call.data.get("hidden"), monitor_mode=call.data.get("monitor_mode"),
             )
             coordinator.publish(device_inventory=coordinator.inventory.public())
 

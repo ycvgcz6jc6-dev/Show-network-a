@@ -45,12 +45,23 @@ class AES67Monitor:
                 try:port=int(parts[1])
                 except ValueError:pass
             if len(parts)>=4: payload_type=parts[3]
-        rtpmap=None; clock=None
+        rtpmap=None; clock=None; ptime=None; sync_time=None
         for a in fields.get('a',[]):
             if a.startswith('rtpmap:'):rtpmap=a
+            elif a.startswith('ptime:'):ptime=a.split(':',1)[1]
             elif a.startswith('ts-refclk:') or a.startswith('mediaclk:'): clock=(clock+' | ' if clock else '')+a
+            elif a.startswith('sync-time:'):sync_time=a.split(':',1)[1]
+        encoding=None;sample_rate=None;channels=None
+        if rtpmap:
+            parts=rtpmap.split(None,1); codec=parts[1] if len(parts)>1 else ''
+            bits=codec.split('/')
+            encoding=bits[0] if bits else None
+            try:sample_rate=int(bits[1]) if len(bits)>1 else None
+            except ValueError:sample_rate=None
+            try:channels=int(bits[2]) if len(bits)>2 else None
+            except ValueError:channels=None
         key=f"{source}|{origin or name or dest or port}"
-        return key,{"source":source,"name":name,"origin":origin,"destination":dest,"port":port,"payload_type":payload_type,"rtpmap":rtpmap,"clock":clock,"last_seen":now}
+        return key,{"source":source,"name":name,"origin":origin,"destination":dest,"port":port,"payload_type":payload_type,"rtpmap":rtpmap,"encoding":encoding,"sample_rate":sample_rate,"channels":channels,"ptime_ms":ptime,"clock":clock,"sync_time":sync_time,"last_seen":now}
 
     async def _receive(self):
         loop=asyncio.get_running_loop(); assert self._sock is not None

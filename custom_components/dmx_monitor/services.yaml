@@ -703,6 +703,12 @@ set_device_override:
       selector: {text: {}}
     hidden:
       selector: {boolean: {}}
+    monitor_mode:
+      name: Mode de surveillance
+      description: Auto = Show Network décide selon les capacités; Surveiller = conserver l'équipement; Ignorer = pas de sondes actives/enrichissement pour cet appareil.
+      selector:
+        select:
+          options: [auto, monitor, ignore]
 clear_device_override:
   name: Clear device override
   description: Restore detected device metadata.
@@ -1069,3 +1075,89 @@ set_dmx_universes:
       example: "1-16,21,42"
       selector:
         text:
+
+power_manager_upsert_button:
+  name: Power Manager — créer/modifier un bouton
+  description: Crée ou modifie un bouton de séquence DMX active. La configuration seule n'envoie aucun DMX.
+  fields:
+    button_id:
+      name: ID bouton
+      required: false
+      selector: {text: {}}
+    name:
+      name: Nom personnalisé
+      required: true
+      selector: {text: {}}
+    icon:
+      name: Icône MDI
+      required: false
+      selector: {text: {}}
+    output:
+      name: Sortie JSON
+      description: "Ex. {\"output\":\"sacn\",\"universe\":10,\"host\":\"\",\"priority\":100}"
+      required: true
+      selector: {object: {}}
+    channels:
+      name: Circuits
+      description: Liste channel/name/on_value/off_value/on_delay_s/off_delay_s.
+      required: true
+      selector: {object: {multiple: true}}
+    enabled:
+      name: Activé
+      selector: {boolean: {}}
+    confirm:
+      name: Confirmation UI
+      selector: {boolean: {}}
+
+power_manager_remove_button:
+  name: Power Manager — supprimer un bouton
+  fields:
+    button_id:
+      required: true
+      selector: {text: {}}
+
+power_manager_run:
+  name: Power Manager — exécuter
+  description: Sortie DMX active protégée par le verrou Show Network.
+  fields:
+    button_id:
+      required: true
+      selector: {text: {}}
+    on:
+      name: ON
+      required: true
+      selector: {boolean: {}}
+
+dmx_circuit_monitor_upsert:
+  name: DMX Circuit Monitor — créer/modifier
+  description: Surveillance receive-only de plusieurs circuits DMX; aucune sortie n'est envoyée.
+  fields:
+    group_id:
+      required: false
+      selector: {text: {}}
+    name:
+      required: true
+      selector: {text: {}}
+    protocol:
+      required: true
+      selector:
+        select:
+          options: [sACN, Art-Net, ENTTEC]
+    universe:
+      required: true
+      selector: {number: {min: 1, max: 63999, mode: box}}
+    source:
+      required: false
+      selector: {text: {}}
+    circuits:
+      required: true
+      selector: {object: {multiple: true}}
+    enabled:
+      selector: {boolean: {}}
+
+dmx_circuit_monitor_remove:
+  name: DMX Circuit Monitor — supprimer
+  fields:
+    group_id:
+      required: true
+      selector: {text: {}}

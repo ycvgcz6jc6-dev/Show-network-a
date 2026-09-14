@@ -1,8 +1,30 @@
-## 0.14.4
-- Dante source freshness and richer audio UI.
-- AES67 SDP session observation.
-- SNMP sysObjectID decoder fix for switch qualification.
-- Conservative MA-Net3 labelled metadata/session evidence.
+# Changelog
+
+## 0.14.7 — UI state, discovery repair, Power Manager
+- Fixed SNMP BER request encoding and response value parsing (including sysObjectID).
+- Added Luminex MAC-prefix evidence, bounded HTTP read-only fingerprints and standard IF-MIB switch telemetry.
+- Added persistent Auto / Surveiller / Ignorer device monitoring mode.
+- Added persistent multi-button Power Manager with custom names/icons and staged sACN/Art-Net/ENTTEC output behind Show Network security.
+- Split Rule Builder, Signal Watchdogs, DMX Circuit Monitor and Power Manager into distinct pages with explanations.
+- Added receive-only DMX Circuit Monitor groups.
+- Expanded Dante/PTP Geek diagnostics and AES67 SDP detail/freshness.
+- Added conservative MA station type hints from explicit payload markers only.
+- Restored ETC Sensor3/CEM3 catalogue page with clear catalogue-vs-live status.
+- Preserved expanded menus/details and protected active forms from live refresh rebuilds.
+- Replaced browser prompt() security flow with an in-panel password form.
+- Integrated cleaned transparent Show Network logo/icon assets.
+
+# v0.14.5
+
+- MA-Net3: passive session-index observation from official multicast group mapping on UDP 30020, default 236.4.1.x and alternate 239.4.1.x bases; no session join/control.
+- MA UI: session indexes/members displayed only when multicast evidence exists; session name/location/master remain unknown without payload evidence.
+- PTP/Dante: listener now joins 224.0.1.129-132; exposes PTP presence/age/version and distinguishes observed PTPv1 vs PTPv2 without applying PTPv2 field offsets to PTPv1.
+- AES67: SAP listener now extracts safe SDP metadata (session name, source, destination, RTP port/payload, clock attributes) and freshness without storing audio.
+- Audio UI: richer Dante/PTP/AES67 page plus a dedicated amplifier telemetry page.
+- Amplifier catalogue: L-Acoustics, d&b, Lab Gruppen/Lake, Adamson, Powersoft, QSC, Crown, Yamaha and Meyer Sound identification hints; telemetry remains unknown until observed.
+- Network discovery: bounded read-only SNMP diagnostics per ARP host, manufacturer identification for Luminex, ELC, Green-GO, Cisco, Aruba, NETGEAR, Ubiquiti, MikroTik, TP-Link, Allied Telesis and Juniper; generic responders are not automatically labelled as switches without evidence.
+- Video UI: projector exploitation view for online/power/input/lamp/temperature/errors when PJLink entities provide them.
+- DMX receive/value path intentionally unchanged from the validated v0.14.3 baseline.
 
 ## 0.13.5 — Cockpit, DMX live publication, local module controls, Dante cleanup
 

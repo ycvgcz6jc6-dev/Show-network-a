@@ -47,6 +47,7 @@ class DeviceRecord:
     custom_location: str | None = None
     custom_role: str | None = None
     hidden: bool = False
+    monitor_mode: str = "auto"  # auto | monitor | ignore
 
     def display_name(self):
         return self.custom_name or self.hostname or self.model or self.manufacturer or self.unique_id
@@ -106,7 +107,9 @@ class DeviceInventory:
     def set_override(self, unique_id: str, **values):
         allowed = {"name": "custom_name", "manufacturer": "custom_manufacturer",
                    "model": "custom_model", "location": "custom_location",
-                   "role": "custom_role", "hidden": "hidden"}
+                   "role": "custom_role", "hidden": "hidden", "monitor_mode": "monitor_mode"}
+        if "monitor_mode" in values and values.get("monitor_mode") not in (None, "auto", "monitor", "ignore"):
+            raise ValueError("monitor_mode must be auto, monitor or ignore")
         current = self.overrides.setdefault(unique_id, {})
         for key, value in values.items():
             if key in allowed and value is not None:
@@ -124,7 +127,7 @@ class DeviceInventory:
         override = self.overrides.get(unique_id, {})
         if not device:
             return
-        for key in ("custom_name", "custom_manufacturer", "custom_model", "custom_location", "custom_role", "hidden"):
+        for key in ("custom_name", "custom_manufacturer", "custom_model", "custom_location", "custom_role", "hidden", "monitor_mode"):
             if key in override:
                 setattr(device, key, override[key])
 

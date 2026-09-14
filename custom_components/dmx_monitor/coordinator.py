@@ -27,6 +27,8 @@ from .projector_monitor import PJLinkMonitor
 from .network_health import NetworkHealth
 from .ma_remote import MARemoteInventory
 from .audio_amplifiers import AudioAmplifierInventory
+from .power_manager import PowerManager
+from .dmx_circuit_monitor import DmxCircuitMonitor
 from .dmx_ha_mapping import DmxHAMappingEngine
 from .dmx_ha_mapping_storage import DmxHAMappingStore
 from .dmx_ha_zones import DmxHAZoneEngine, DmxHAZone
@@ -90,6 +92,8 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         self.topology = ShowTopology()
         self.network_health = NetworkHealth()
         self.audio_amplifiers = AudioAmplifierInventory()
+        self.power_manager = PowerManager(hass.config.path("show_network_power_manager.json"))
+        self.dmx_circuit_monitor = DmxCircuitMonitor(hass.config.path("show_network_dmx_circuit_monitor.json"))
         self.archive = None
         self.chaos = ChaosSimulator()
         self.capacity_config = {"link_mbps": 1000.0, "dante_mbps": 0.0, "cameras_mbps": 0.0, "st2110_mbps": 0.0, "other_mbps": 0.0}
@@ -378,6 +382,8 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
                     if marker in text:
                         self.audio_amplifiers.observe(key=f"{manufacturer}:{row.get("source")}", manufacturer=manufacturer, host=row.get("source"), protocol="Dante/mDNS", evidence=marker)
         snapshot.update(self.audio_amplifiers.snapshot())
+        snapshot.update(self.power_manager.snapshot())
+        snapshot.update(self.dmx_circuit_monitor.snapshot())
         if self.enttec_input:
             snapshot.update(self.enttec_input.snapshot())
         if self.punchlight:
@@ -421,15 +427,23 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             ma = self.ma_listener.snapshot()
             snapshot.update(ma_packets=ma["packets"], ma_sources=ma["sources"], ma_groups=ma["groups"])
             rx_diag["ma_net3"] = ma.get("diagnostics", {})
+            source_hints={x.get("source_ip"):x.get("identity_hints",[]) for x in ma.get("diagnostics",{}).get("raw_sources",[])}
             for obs in ma.get("observations", [])[-50:]:
                 try:
-                    self.ma_remote.observe(obs.source_ip, obs.destination_group, session_index=getattr(obs, "session_index", None))
+                    self.ma_remote.observe(obs.source_ip, obs.destination_group, session_index=getattr(obs, "session_index", None), identity_hints=source_hints.get(obs.source_ip))
                 except AttributeError:
-                    self.ma_remote.observe(obs["source_ip"], obs["destination_group"], session_index=obs.get("session_index"))
+                    self.ma_remote.observe(obs["source_ip"], obs["destination_group"], session_index=obs.get("session_index"), identity_hints=source_hints.get(obs.get("source_ip")))
             snapshot["ma_remote"] = self.ma_remote.snapshot()
         else:
             rx_diag["ma_net3"] = {"state": "disabled_or_unavailable", "interface": snapshot.get("show_network_config", {}).get("interface_ma")}
         rx_diag["mdns"] = dict(snapshot.get("discovery_status", {}))
+        rx_diag["dante"] = self.dante_monitor.snapshot() if self.dante_monitor else {"state":"disabled_or_unavailable"}
+        rx_diag["ptp"] = self.ptp_monitor.snapshot() if self.ptp_monitor else {"state":"disabled_or_unavailable"}
+        rx_diag["audio"] = {
+            "aes67": self.aes67_monitor.snapshot() if self.aes67_monitor else {"state":"disabled_or_unavailable"},
+            "st2110": self.st2110_monitor.snapshot() if self.st2110_monitor else {},
+            "avb": self.avb_monitor.snapshot() if self.avb_monitor else {},
+        }
         snapshot["protocol_rx_diagnostics"] = rx_diag
         self.data = snapshot
         return snapshot
@@ -472,6 +486,7 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
                 })
                 self._timeline_dmx_hashes[timeline_key] = compact_hash
         self.watchdogs.observe(protocol, universe, source)
+        self.dmx_circuit_monitor.observe(protocol, universe, source, values)
         # Rules and HA mappings use the bounded pipeline; reception and watchdog
         # observation remain synchronous and cheap. HA state publication is also
         # coalesced to <=20 Hz to protect the event bus.

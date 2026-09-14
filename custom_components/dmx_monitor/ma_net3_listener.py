@@ -7,6 +7,7 @@ carried it.  It does not join an MA session and it never sends MA commands.
 from __future__ import annotations
 import asyncio
 import socket
+import re
 from dataclasses import dataclass
 from time import monotonic, time
 
@@ -138,13 +139,19 @@ class MANet3Listener:
         prefix = bytes(data[:24])
         self.last_packet_prefix_hex = prefix.hex(" ")
         self.last_packet_prefix_ascii = "".join(chr(b) if 32 <= b < 127 else "." for b in prefix)
-        stats = self.source_stats.setdefault(source, {"packets": 0, "bytes": 0, "last_packet_epoch": None, "last_size": 0, "prefix_hex": "", "prefix_ascii": "", "session_indexes": set()})
+        stats = self.source_stats.setdefault(source, {"packets": 0, "bytes": 0, "last_packet_epoch": None, "last_size": 0, "prefix_hex": "", "prefix_ascii": "", "session_indexes": set(), "identity_hints": set()})
         stats["packets"] += 1
         stats["bytes"] += len(data)
         stats["last_packet_epoch"] = self.last_packet_epoch
         stats["last_size"] = len(data)
         stats["prefix_hex"] = self.last_packet_prefix_hex
         stats["prefix_ascii"] = self.last_packet_prefix_ascii
+        if stats["packets"] <= 10 or stats["packets"] % 100 == 0:
+            for raw in re.findall(rb"[A-Za-z][A-Za-z0-9_. +&()\-]{3,63}", data):
+                hint=raw.decode("utf-8","ignore").strip()
+                low=hint.lower()
+                if any(x in low for x in ("grandma", "onpc", "xport", "node", "processing", "npu", "rpu", "pu ", "command wing", "fader wing")):
+                    stats["identity_hints"].add(hint)
         if session_index is not None and self._precise_group_routing:
             stats["session_indexes"].add(session_index)
             self.session_indexes_seen.add(session_index)
@@ -161,8 +168,9 @@ class MANet3Listener:
     def snapshot(self) -> dict:
         raw_sources=[]
         for ip, stats in sorted(self.source_stats.items()):
-            row={k:v for k,v in stats.items() if k != "session_indexes"}
+            row={k:v for k,v in stats.items() if k not in ("session_indexes","identity_hints")}
             row["session_indexes"] = sorted(stats.get("session_indexes", set()))
+            row["identity_hints"] = sorted(stats.get("identity_hints", set()))[:20]
             raw_sources.append({"source_ip": ip, **row})
         sessions=[]
         for idx, stats in sorted(self.session_stats.items()):

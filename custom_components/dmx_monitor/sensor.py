@@ -72,6 +72,7 @@ SENSORS = (
     ("vendor_discovery", "Découvertes fabricants / Vendor discoveries", None),
     ("etc_sensor_catalog", "Capteurs ETC documentés / ETC documented sensors", None),
     ("switch_profiles", "Profils switches disponibles (catalogue) / Available switch profiles (catalogue)", None),
+    ("switch_telemetry", "Télémétrie switches / Switch telemetry", None),
     ("projectors_total", "Projecteurs PJLink / PJLink projectors", None),
     ("projectors_online", "Projecteurs PJLink en ligne / Online PJLink projectors", None),
     ("projectors_errors", "Projecteurs PJLink en erreur / PJLink projectors with errors", None),
@@ -110,6 +111,14 @@ SENSORS = (
     ("ha_builder", "Éléments HA Builder / HA Builder items", None),
     ("notification", "Notifications Show Network / Show Network notifications", None),
     ("punchlight_network", "PunchLight réseau / PunchLight network", None),
+    ("power_manager_button_count", "Boutons Power Manager / Power Manager buttons", None),
+    ("power_manager_active", "Power Manager actifs / Active Power Manager buttons", None),
+    ("power_manager_sent", "Trames Power Manager envoyées / Power Manager frames sent", None),
+    ("power_manager_errors", "Erreurs Power Manager / Power Manager errors", None),
+    ("dmx_circuit_group_count", "Groupes DMX surveillés / Monitored DMX circuit groups", None),
+    ("dmx_circuit_groups_alert", "Alertes circuits DMX / DMX circuit alerts", None),
+    ("watchdog_active", "Watchdogs en alerte / Active watchdogs", None),
+    ("watchdog_rules", "Règles Signal Watchdog / Signal watchdog rules", None),
 )
 
 
@@ -220,6 +229,12 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return {"enabled": self.coordinator.data.get("notification", {}).get("enabled", False), "target_configured": bool(self.coordinator.data.get("notification", {}).get("target"))}
         if self._key == "punchlight_network":
             return {"devices": self.coordinator.data.get("punchlight_network", [])}
+        if self._key.startswith("power_manager_"):
+            return {"buttons": self.coordinator.data.get("power_manager_buttons", []), "outputs": self.coordinator.data.get("power_manager_outputs", []), "last_error": self.coordinator.data.get("power_manager_last_error")}
+        if self._key.startswith("dmx_circuit_"):
+            return {"groups": self.coordinator.data.get("dmx_circuit_groups", [])}
+        if self._key in {"watchdog_active", "watchdog_rules"}:
+            return {"rules": self.coordinator.data.get("watchdog_rules", [])}
         if self._key == "osc_messages":
             return {"osc_input": dict(self.coordinator.data.get("osc_input", {})), "osc_learn": dict(self.coordinator.data.get("osc_learn", {}))}
         if self._key == "control_mapping_events":
@@ -250,7 +265,7 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             # Compact presentation data only; raw evidence stays available in the inventory panel.
             return {"devices": [{k: row.get(k) for k in (
                 "unique_id", "display_name", "display_manufacturer", "display_model",
-                "custom_role", "custom_location", "hidden", "ip", "ipv6", "hostname",
+                "custom_role", "custom_location", "hidden", "monitor_mode", "ip", "ipv6", "hostname",
                 "mac", "serial", "category", "protocols", "sources", "confidence"
             )} for row in rows]}
         if self._key == "etc_sensor_catalog":
@@ -259,6 +274,8 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return {"services": self.coordinator.data.get("vendor_discovery", [])}
         if self._key == "switch_profiles":
             return {"profiles": self.coordinator.data.get("switch_profiles", [])}
+        if self._key == "switch_telemetry":
+            return {"switches": self.coordinator.data.get("switch_telemetry", [])}
         if self._key in {"audio_amplifiers_total", "audio_amplifiers_online", "audio_amplifiers_errors", "audio_amplifier_temperature_max"}:
             return {"amplifiers": self.coordinator.data.get("audio_amplifiers", []), "stale_timeout_s": self.coordinator.data.get("audio_amplifier_stale_timeout_s")}
         if self._key in {"aes67_sap_packets", "aes67_sap_sources", "aes67_session_count", "aes67_fresh_sessions"}:

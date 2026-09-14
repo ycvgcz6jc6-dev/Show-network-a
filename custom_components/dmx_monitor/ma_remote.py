@@ -14,6 +14,8 @@ class MAStation:
     session_index: int | None = None
     session_name: str | None = None
     model: str | None = None
+    device_type: str | None = None
+    classification_evidence: str | None = None
     version: str | None = None
     showfile: str | None = None
     uptime: str | None = None
@@ -38,12 +40,24 @@ class MARemoteInventory:
     """Correlates passive MA-Net3 source addresses and multicast session indexes."""
     def __init__(self): self.stations: dict[str, MAStation] = {}
 
-    def observe(self, source_ip: str, group: str, packet_count: int = 1, session_index: int | None = None):
+    @staticmethod
+    def _classify(hints):
+        text=" ".join(str(x) for x in (hints or [])).lower()
+        checks=(("grandMA3 onPC",("onpc","on pc")),("grandMA3 xPort Node",("xport node","xport")),("grandMA3 Processing Unit",("processing unit","grandma3 pu")),("MA NPU",(" npu","npu ")), ("MA RPU",(" rpu","rpu ")), ("grandMA3 Node",("grandma3 node","ma3 node")), ("grandMA3 Console",("grandma3 full-size","grandma3 light","grandma3 compact","grandma3 console")))
+        for kind,markers in checks:
+            marker=next((m for m in markers if m in text),None)
+            if marker:return kind,marker
+        return None,None
+
+    def observe(self, source_ip: str, group: str, packet_count: int = 1, session_index: int | None = None, identity_hints=None):
         station = self.stations.get(source_ip)
         if station is None:
             station = MAStation(name=f"MA station non classifiée {source_ip}", ip=source_ip)
             self.stations[source_ip] = station
         station.last_seen = monotonic(); station.packets += packet_count; station.ma_net3_active = True; station.web_remote = "not_probed"
+        kind,evidence=self._classify(identity_hints)
+        if kind:
+            station.device_type=kind;station.model=kind;station.classification_evidence=f"payload marker: {evidence}";station.name=f"{kind} {source_ip}"
         if session_index is not None:
             # Multicast group membership proves the session index, but not the
             # session name, station type, master role, location or showfile.
@@ -65,5 +79,6 @@ class MARemoteInventory:
             "sessions_note": "Session index inferred only from observed MA-Net3 session multicast groups; name/location/master remain unknown without payload evidence.",
             "web_remote_port": MA_WEB_REMOTE_PORT, "web_remote_candidates": [],
             "osc": {"default_port": MA_OSC_DEFAULT_PORT, "transport": "UDP/TCP", "observed": False, "control_enabled": False},
-            "diagnostics": {"receive_only": True, "session_join": False, "ma_commands_sent": False, "web_remote_probe": False, "classification_policy": "unknown_until_evidence", "osc_commands_sent": False},
+            "device_types": {kind: sum(1 for x in rows if x.get("device_type")==kind) for kind in sorted({x.get("device_type") for x in rows if x.get("device_type")})},
+            "diagnostics": {"receive_only": True, "session_join": False, "ma_commands_sent": False, "web_remote_probe": False, "classification_policy": "payload_marker_only_unknown_until_evidence", "osc_commands_sent": False},
         }

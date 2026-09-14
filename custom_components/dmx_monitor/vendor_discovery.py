@@ -10,10 +10,16 @@ import time
 from typing import Any
 
 MARKERS = {
+    "l_acoustics": ("l-acoustics", "l acoustics", "la network"),
+    "d_and_b": ("d&b", "dbaudio", "db audiotechnik"),
+    "powersoft": ("powersoft",),
+    "lab_gruppen_lake": ("lab gruppen", "lake"),
+    "qsc": ("qsc", "q-sys"),
+    "yamaha": ("yamaha",),
     "green_go": ("green-go", "greengo"),
     "elc": ("dmxlan", "elc lighting"),
-    "dante": ("_netaudio-", "dante", "audinate"),
     "luminex": ("luminex", "gigacore"),
+    "dante": ("_netaudio-", "dante", "audinate"),
 }
 
 
@@ -67,7 +73,7 @@ def _scan_sync(zc, timeout: float = 2.0) -> list[dict[str, Any]]:
         # Also browse the known Dante DNS-SD service types directly.  Some
         # networks/devices do not repeat the DNS-SD meta-service often enough
         # for a short passive scan, while the actual service records are cached.
-        for known_type in ("_netaudio-arc._udp.local.", "_netaudio-dante._udp.local."):
+        for known_type in ("_netaudio-arc._udp.local.", "_netaudio-dante._udp.local.", "_http._tcp.local.", "_https._tcp.local."):
             try:
                 browsers.append(ServiceBrowser(zc, known_type, listener))
             except Exception:

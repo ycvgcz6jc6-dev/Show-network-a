@@ -24,7 +24,7 @@ class PTPMonitor:
         self.follow_up_packets=0; self.delay_packets=0; self.version_counts={}; self.domain_counts={}
         self.last_source_identity=None; self.last_grandmaster_identity=None; self.grandmaster_priority1=None
         self.grandmaster_clock_class=None; self.grandmaster_accuracy=None; self.grandmaster_priority2=None
-        self._tasks=[]; self._sockets=[]
+        self._tasks=[]; self._sockets=[]; self.source_stats={}
 
     async def start(self):
         if self._tasks: return
@@ -85,10 +85,16 @@ class PTPMonitor:
                         self.grandmaster_priority2=data[52]; self.last_grandmaster_identity=data[53:61].hex()
             self.packets+=1; self.event_packets += int(port==PTP_EVENT_PORT); self.general_packets += int(port==PTP_GENERAL_PORT)
             self.sources.add(addr[0]); self.ports.add(port); self.last=PTPObservation(addr[0],port,msg_type,version,domain,len(data),now)
+            stat=self.source_stats.setdefault(addr[0],{"packets":0,"versions":set(),"domains":set(),"ports":set(),"last_seen":now})
+            stat["packets"]+=1;stat["ports"].add(port);stat["last_seen"]=now
+            if version is not None:stat["versions"].add(version)
+            if domain is not None:stat["domains"].add(domain)
 
     def snapshot(self):
         last=self.last; age=(time.time()-self._last_time) if self._last_time else None
         versions=sorted(self.version_counts)
+        source_rows=[{"source":ip,"packets":x["packets"],"versions":sorted(x["versions"]),"domains":sorted(x["domains"]),"ports":sorted(x["ports"]),"age_s":round(max(0,time.time()-x["last_seen"]),3),"fresh":(time.time()-x["last_seen"])<5} for ip,x in sorted(self.source_stats.items())]
+        msg_names={0:"Sync",1:"Delay_Req",2:"Pdelay_Req",3:"Pdelay_Resp",8:"Follow_Up",9:"Delay_Resp",10:"Pdelay_Resp_Follow_Up",11:"Announce",12:"Signaling",13:"Management"}
         return {
             "ptp_packets":self.packets,"ptp_sources":len(self.sources),"ptp_event_packets":self.event_packets,"ptp_general_packets":self.general_packets,
             "ptp_ports":sorted(self.ports),"ptp_last_source":last.source if last else None,"ptp_last_message_type":last.message_type if last else None,
