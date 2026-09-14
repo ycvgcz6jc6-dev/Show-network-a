@@ -367,7 +367,18 @@ class ShowNetworkRuleBuilder extends HTMLElement {
   detail(){const q=id=>this.q(id)?.value||'',on=this.json('#data'),off=this.json('#offdata');const channels=[...this.selected].sort((a,b)=>a-b);if(on===null||off===null){this.setTrace('JSON invalide.');return null}if(!channels.length){this.setTrace('Sélectionne au moins un canal.');return null}if(q('#mode')==='x_of_y'&&(+q('#x')<1||+q('#x')>channels.length)){this.setTrace('X doit être compris entre 1 et le nombre de canaux.');return null}return {name:q('#name').trim(),universe:+q('#universe'),source:q('#source')||null,channels,mode:q('#mode'),x:+q('#x'),threshold_on:+q('#ton'),threshold_off:+q('#toff'),on_delay_ms:+q('#on'),off_delay_ms:+q('#off'),enabled:false,test_mode:false,action:{domain:q('#domain'),entity_id:q('#entity')||null,service:q('#service'),data:on},off_action:{domain:q('#offdomain'),entity_id:q('#offentity')||null,service:q('#offservice'),data:off}}}
   async save(){const d=this.detail();if(!d||!d.name){this.setTrace('Nom obligatoire.');return}const service=this.editing?'update_rule':'create_rule',payload=this.editing?{old_name:this.editing,...d}:d;if(await this.call(service,payload)){this.editing=d.name;this.setTrace('Règle enregistrée. Activation explicite requise.')}}
   async test(){const d=this.detail();if(!d)return;const ok=await this.call('test_rule',{name:this.editing||d.name,values:this.currentValues()});if(ok)this.setTrace('Test exécuté sans action HA et sans modifier l’état de la règle.')}
-  currentValues(){const u=+this.q('#universe').value,s=this.q('#source').value;const states=this._hass?.states||{};for(const st of Object.values(states)){const us=st.attributes?.universes;if(!Array.isArray(us))continue;for(const x of us){if(+x.universe===u&&(!s||x.source===s||x.protocol===s))return x.values||[]}}return undefined}
+  currentValues(){
+    const u=+this.q('#universe').value,s=this.q('#source').value;const states=this._hass?.states||{};
+    for(const st of Object.values(states)){
+      const us=st.attributes?.universes;if(!Array.isArray(us))continue;
+      for(const x of us){
+        if(+x.universe!==u||!(!s||x.source===s||x.protocol===s))continue;
+        if(Array.isArray(x.values))return x.values;
+        if(x.values_b64){try{const bin=atob(x.values_b64);return Array.from(bin,c=>c.charCodeAt(0))}catch(e){return undefined}}
+      }
+    }
+    return undefined;
+  }
   refreshTargets(){if(!this._hass)return;this.refreshServices('#domain','#service','#entity');this.refreshServices('#offdomain','#offservice','#offentity')}
   refreshServices(domainSel,serviceSel,entitySel){const d=this.q(domainSel),s=this.q(serviceSel),e=this.q(entitySel);if(!d||!s||!e)return;const services=this._hass?.services||{}, domains=Object.keys(services).sort();const prevD=d.value;d.innerHTML=domains.map(x=>`<option value="${x}">${x}</option>`).join('');if(domains.includes(prevD))d.value=prevD;const domain=services[d.value]||{}, names=Object.keys(domain).sort(),prevS=s.value;s.innerHTML=names.map(x=>`<option value="${x}">${x}</option>`).join('');if(names.includes(prevS))s.value=prevS;const entities=Object.values(this._hass.states||{}).filter(x=>x.entity_id?.startsWith(`${d.value}.`));const prevE=e.value;e.innerHTML='<option value="">Aucune / service global</option>'+entities.map(x=>`<option value="${x.entity_id}">${x.entity_id} — ${x.attributes?.friendly_name||''}</option>`).join('');if(entities.some(x=>x.entity_id===prevE))e.value=prevE}
   renderList(){const l=this.q('#list');if(!l)return;l.innerHTML='<b>Règles Home Assistant</b>';if(!this.rules.length){l.innerHTML+='<div class="pill">Aucune règle.</div>';return}this.rules.forEach(r=>{const d=document.createElement('div');d.className='rule';d.innerHTML=`<strong>${r.name}</strong><span class="pill">U${r.universe} · ${r.source||'toutes'} · ${(r.channels||[]).length} ch · ${r.enabled?'ACTIVE':'INACTIVE'} · ${r.test_mode?'TEST':''}</span><div class="actions"><button class="action" data-a="toggle">${r.enabled?'Désactiver':'Activer'}</button><button class="action" data-a="testmode">${r.test_mode?'Quitter test':'Mode test'}</button><button class="action" data-a="edit">Éditer</button><button class="action" data-a="duplicate">Dupliquer</button><button class="action danger" data-a="delete">Supprimer</button></div>`;d.querySelectorAll('button').forEach(b=>b.onclick=()=>this.ruleAction(r,b.dataset.a));l.appendChild(d)})}
@@ -500,14 +511,28 @@ class ShowNetworkProDashboard extends HTMLElement {
     const cap=this._value('network_capacity_utilization','—','sensor.dmx_monitor_network_capacity_utilization');
     const nodes=this._value('topology_nodes','—','sensor.dmx_monitor_topology_nodes');
     const links=this._value('topology_links','—','sensor.dmx_monitor_topology_links');
-    const chaos=this._value('chaos_status','—','sensor.dmx_monitor_chaos_status');
     const archive=this._state('journal_archive','sensor.dmx_monitor_journal_archive')?.attributes||{};
+    const cfg=this._state('show_network_config','sensor.dmx_monitor_show_network_config')?.attributes||{};
+    const dmx=this._state('dmx_universes','sensor.dmx_monitor_dmx_universes');
+    const dmxRows=dmx?.attributes?.universes||[];
+    const rx=this._state('protocol_rx_diagnostics','sensor.dmx_monitor_protocol_rx_diagnostics')?.attributes||{};
+    const drx=rx.dmx||{}, maRx=rx.ma_net3||{};
+    const sacn=drx.protocols?.SACN||{}, art=drx.protocols?.ARTNET||{};
+    const enttec=Object.values(this._hass?.states||{}).find(s=>s.entity_id.includes('enttec')&&s.entity_id.startsWith('switch.'));
+    const discovery=this._state('discovery_status','sensor.dmx_monitor_discovery_status')?.attributes||{};
     const pct=parseFloat(cap); const status=Number.isFinite(pct)?(pct>=90?'critical':pct>=75?'warning':'ok'):'off';
-    const content=`<div class="top"><div><div class="brand">SHOW NETWORK / PRO</div><div class="muted">IP · FLOW · TOPOLOGY · TIMELINE · RELIABILITY</div></div><div class="badge ${status}">CAPACITY ${cap}%</div></div>
-<div class="grid"><div class="card"><div class="title">NETWORK CAPACITY</div><div class="big ${status}">${cap}%</div><div class="row"><span>Link</span><span>${this._value('network_capacity_link_mbps','—','sensor.dmx_monitor_network_capacity_link_mbps')} Mb/s</span></div><div class="row"><span>Utilisé</span><span>${this._value('network_capacity_total_mbps','—','sensor.dmx_monitor_network_capacity_total_mbps')} Mb/s</span></div><div class="row"><span>Marge</span><span>${this._value('network_capacity_headroom_mbps','—','sensor.dmx_monitor_network_capacity_headroom_mbps')} Mb/s</span></div></div>
-<div class="card"><div class="title">TOPOLOGY</div><div class="big">${nodes}</div><div class="muted">NŒUDS</div><div class="row"><span>Liens</span><span>${links}</span></div></div>
-<div class="card"><div class="title">RELIABILITY</div><div class="big ${chaos==='inactive'?'ok':'warning'}">${chaos}</div><div class="muted">CHAOS / FAULT INJECTION</div><div class="row"><span>Archive</span><span>${archive.files??'—'} fichiers</span></div><div class="row"><span>Destination</span><span>${archive.configured_destination??archive.destination??'—'}</span></div></div></div>
-<div class="card topology"><div class="node">NIC<br><span class="muted">${this._value('network_interfaces_up','—','sensor.dmx_monitor_network_interfaces_up')} UP</span></div><div class="arrow">→</div><div class="node">SWITCH<br><span class="muted">${nodes} nodes</span></div><div class="arrow">→</div><div class="node">SHOW DEVICES<br><span class="muted">${this._value('devices_total','—','sensor.dmx_monitor_devices_total')} devices</span></div></div>${this._securityHtml()}
+    const card=(title,value,sub,rows='')=>`<div class="card"><div class="title">${title}</div><div class="big">${value}</div><div class="muted">${sub}</div>${rows}</div>`;
+    const content=`<div class="top"><div><div class="brand">SHOW NETWORK / PRO</div><div class="muted">COCKPIT LIVE · LIGHT · MA · AUDIO · CONTROL · DISCOVERY</div></div><div class="badge ${status}">CAPACITY ${cap}%</div></div>
+<div class="module-grid">
+${card('DMX NETWORK',dmxRows.length,`${(sacn.packets_received??0)+(art.packets_received??0)} paquets RX`, `<div class="row"><span>sACN RX / parsed</span><span>${sacn.packets_received??0} / ${sacn.packets_parsed??0}</span></div><div class="row"><span>Art-Net RX / parsed</span><span>${art.packets_received??0} / ${art.packets_parsed??0}</span></div><div class="row"><span>Univers live</span><span>${dmxRows.filter(x=>Number(x.packet_rate||0)>0).length}</span></div>`) }
+${card('DMX IN / ENTTEC',enttec?.state==='on'?'ON':enttec?'OFF':'—',enttec?.attributes?.friendly_name||'Entrée USB', `<div class="row"><span>État</span><span>${enttec?.state||'indisponible'}</span></div>`) }
+${card('MA-NET3',this._value('ma_live_stations','—'), 'stations live', `<div class="row"><span>Paquets bruts</span><span>${maRx.packets_received??this._value('ma_packets','—')}</span></div><div class="row"><span>Sessions observées</span><span>${this._value('ma_sessions','—')}</span></div><div class="row"><span>Sources brutes</span><span>${(maRx.raw_sources||[]).length}</span></div>`) }
+${card('DANTE / PTP',this._value('dante_sources','—'),'sources Dante', `<div class="row"><span>Dante packets</span><span>${this._value('dante_packets','—')}</span></div><div class="row"><span>PTP packets</span><span>${this._value('ptp_packets','—')}</span></div><div class="row"><span>AES67 SAP</span><span>${this._value('aes67_sap_packets','—')}</span></div>`) }
+${card('DISCOVERY',this._value('devices_total','—'),'équipements inventoriés', `<div class="row"><span>ARP</span><span>${discovery.arp_neighbors??'—'}</span></div><div class="row"><span>mDNS</span><span>${discovery.mdns_services??'—'}</span></div><div class="row"><span>État</span><span>${esc(discovery.state||'—')}</span></div>`) }
+${card('PROFILS / CONSTRUCTEURS',this._value('vendor_discovery','—'),'services fabricants observés', `<div class="row"><span>Green-GO observés</span><span>${this._value('green_go_devices','—')}</span></div><div class="row"><span>ELC observés</span><span>${this._value('elc_inventory','—')}</span></div><div class="row"><span>Profils switch actifs</span><span>${this._value('switch_profiles','—')}</span></div><div class="row"><span>Catalogue ETC</span><span>${this._value('etc_sensor_catalog','—')}</span></div>`) }
+${card('TOPOLOGY',nodes,'nœuds', `<div class="row"><span>Liens</span><span>${links}</span></div><div class="row"><span>Interfaces UP</span><span>${this._value('network_interfaces_up','—')}</span></div>`) }
+${card('JOURNAL',archive.recent_events?.length??0,'événements récents', `<div class="row"><span>Fichiers</span><span>${archive.files??'—'}</span></div><div class="row"><span>Dernier backup</span><span>${archive.last_backup_success??'—'}</span></div>`) }
+</div>${this._securityHtml()}
 <div class="footer"><button class="btn primary" id="modules">Modules & configuration</button><button class="btn" id="ha-config">Configuration générale HA</button><button class="btn" id="classic">Vue classique</button><button class="btn" id="timeline">Show Timeline</button><button class="btn" id="archive">Journal & backups</button></div>`;
     this.innerHTML=this._shell(content);this._wireSecurity();
     this.querySelector('#modules')?.addEventListener('click',()=>this._setView('modules'));
@@ -534,27 +559,24 @@ class ShowNetworkProDashboard extends HTMLElement {
   ];}
   _renderModules(){
     const cfg=this._state('show_network_config','sensor.dmx_monitor_show_network_config')?.attributes||{};
-    const gate=(module,label,key)=>`<button class="btn ${cfg[key]?'primary':''}" data-module-toggle="${module}" data-enabled="${cfg[key]?'1':'0'}">${label}: ${cfg[key]?'ON':'OFF'}</button>`;
-    const extra={
-      dmx:`<div class="module-nav">${gate('artnet','Art-Net','dmx_artnet_enabled')}${gate('sacn','sACN','dmx_sacn_enabled')}</div>`,
-      osc:`<div class="module-nav">${gate('osc_input','OSC','osc_input_enabled')}${gate('midi_input','MIDI','midi_enabled')}${gate('punchlight','PunchLight','punchlight_enabled')}</div>`,
-      rules:`<div class="module-nav">${gate('watchdog','Watchdog','watchdog_enabled')}</div>`,
-      video:`<div class="module-nav">${gate('projector_monitor','Monitoring PJLink','projector_monitor_enabled')}</div>`,
-      ma:`<div class="module-nav">${gate('ma_net3','MA-Net3','ma_enabled')}</div>`,
-      builder:`<div class="module-nav">${gate('ha_builder','HA Builder','ha_builder_enabled')}</div>`,
-      reliability:`<div class="module-nav">${gate('diagnostics','Tests diagnostic','chaos_enabled')}</div>`,
-    };
-    const cards=this._modules().map(([k,n,d])=>`<div class="card module" data-module="${k}"><div class="name">${n}</div><div class="desc">${d}</div>${extra[k]||''}</div>`).join('');
-    this.innerHTML=this._shell(`<button class="btn back" id="back">← PRO</button><div class="top"><div><div class="brand">MODULES SHOW NETWORK</div><div class="muted">Activation rapide des moteurs qui nécessitent un opt-in. Les changements rechargent uniquement l'intégration.</div></div></div><div class="footer"><button class="btn primary" id="ha-config">Configuration générale HA (interfaces, univers, ports, projecteurs…)</button></div><div class="module-grid">${cards}</div>`);
+    const stateFor=(k)=>cfg[k]===true?'ON':cfg[k]===false?'OFF':'—';
+    const stateMap={dmx:`Art-Net ${stateFor('dmx_artnet_enabled')} · sACN ${stateFor('dmx_sacn_enabled')}`,osc:`OSC ${stateFor('osc_input_enabled')} · MIDI ${stateFor('midi_enabled')} · PunchLight ${stateFor('punchlight_enabled')}`,rules:`Watchdog ${stateFor('watchdog_enabled')}`,video:`PJLink ${stateFor('projector_monitor_enabled')}`,ma:`MA-Net3 ${stateFor('ma_enabled')}`,builder:`HA Builder ${stateFor('ha_builder_enabled')}`,reliability:`Tests ${stateFor('chaos_enabled')}`};
+    const cards=this._modules().map(([k,n,d])=>`<div class="card module" data-module="${k}"><div class="name">${n}</div><div class="desc">${d}</div>${stateMap[k]?`<div class="muted" style="margin-top:10px">${stateMap[k]}</div>`:''}</div>`).join('');
+    this.innerHTML=this._shell(`<button class="btn back" id="back">← PRO</button><div class="top"><div><div class="brand">MODULES SHOW NETWORK</div><div class="muted">Vue synthèse. L’activation se fait maintenant dans la page du module concerné.</div></div></div><div class="footer"><button class="btn primary" id="ha-config">Configuration générale HA (interfaces, univers, ports, projecteurs…)</button></div><div class="module-grid">${cards}</div>`);
     this.querySelector('#back')?.addEventListener('click',()=>this._setView('pro'));
     this.querySelector('#ha-config')?.addEventListener('click',()=>this._openIntegrationConfig());
-    this.querySelectorAll('[data-module-toggle]').forEach(b=>b.addEventListener('click',async e=>{e.stopPropagation();const enabled=b.dataset.enabled==='1';b.disabled=true;this._notice=`${b.textContent} → ${enabled?'OFF':'ON'}…`;try{await this._hass.callService('dmx_monitor','set_module_enabled',{module:b.dataset.moduleToggle,enabled:!enabled});this._notice='Configuration enregistrée. Show Network recharge le module.';}catch(err){this._notice=`Erreur activation module: ${err?.message||err}`;}this.render();}));
-    this.querySelectorAll('[data-module]').forEach(x=>x.addEventListener('click',e=>{if(e.target.closest('[data-module-toggle]'))return;this._setView(`module:${x.dataset.module}`)}));
+    this.querySelectorAll('[data-module]').forEach(x=>x.addEventListener('click',()=>this._setView(`module:${x.dataset.module}`)));
   }
   _mountPanels(keys){
     const host=this.querySelector('#module-content'); if(!host)return;
     for(const tag of keys){const el=document.createElement(tag);el.setConfig?.({});host.appendChild(el);if('hass' in el)el.hass=this._hass;else try{el.hass=this._hass}catch(e){}}
   }
+  _moduleGate(module,label,key){
+    const cfg=this._state('show_network_config','sensor.dmx_monitor_show_network_config')?.attributes||{};
+    const enabled=cfg[key]===true;
+    return `<button class="btn ${enabled?'primary':''}" data-local-toggle="${module}" data-key="${key}" data-enabled="${enabled?'1':'0'}">${label}: ${enabled?'ON':'OFF'}</button>`;
+  }
+  _wireLocalGates(){this.querySelectorAll('[data-local-toggle]').forEach(b=>b.addEventListener('click',async()=>{const enabled=b.dataset.enabled==='1';b.disabled=true;try{await this._hass.callService('dmx_monitor','set_module_enabled',{module:b.dataset.localToggle,enabled:!enabled});this._notice='Configuration enregistrée. Le module est rechargé.';}catch(err){this._notice=`Erreur activation: ${err?.message||err}`;}this.render();}));}
   _entityRows(patterns){
     const out=[];const seen=new Set();
     for(const [unique,id] of Object.entries(this._entityMap)){if(patterns.some(p=>unique.toLowerCase().includes(p))){const st=this._hass?.states?.[id];if(st){out.push([unique,id,st.state]);seen.add(id);}}}
@@ -564,14 +586,29 @@ class ShowNetworkProDashboard extends HTMLElement {
   _entityTable(patterns,empty){const rows=this._entityRows(patterns);return `<div class="card"><table class="entity-table"><thead><tr><th>Entité</th><th>Entity ID</th><th>État</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join(''):`<tr><td colspan="3" class="muted">${empty}</td></tr>`}</tbody></table></div>`;}
   _renderModule(key){
     const meta=this._modules().find(x=>x[0]===key)||[key,key,''];
-    let inner=`<button class="btn back" id="back">← MODULES</button><div class="top"><div><div class="brand">${meta[1]}</div><div class="muted">${meta[2]}</div></div></div><div class="panel-stack" id="module-content"></div>`;
-    if(key==='audio')inner+=this._entityTable(['dante','aes67','st2110','avb','ptp','audio_'],'Aucune donnée audio réseau observée pour le moment.');
-    if(key==='video')inner+=this._entityTable(['projector','pjlink','video'],'Aucune entité vidéo/projecteur configurée pour le moment.');
+    let controls='';
+    if(key==='dmx')controls=`<div class="module-nav">${this._moduleGate('artnet','Art-Net','dmx_artnet_enabled')}${this._moduleGate('sacn','sACN','dmx_sacn_enabled')}<button class="btn" id="open-network-config">Interfaces / univers</button></div>`;
+    if(key==='osc')controls=`<div class="module-nav">${this._moduleGate('osc_input','OSC IN','osc_input_enabled')}${this._moduleGate('midi_input','MIDI IN','midi_enabled')}${this._moduleGate('punchlight','PunchLight','punchlight_enabled')}</div>`;
+    if(key==='rules')controls=`<div class="module-nav">${this._moduleGate('watchdog','Watchdog','watchdog_enabled')}</div>`;
+    if(key==='video')controls=`<div class="module-nav">${this._moduleGate('projector_monitor','Monitoring PJLink','projector_monitor_enabled')}<button class="btn" id="open-network-config">Configurer les projecteurs</button></div>`;
+    if(key==='ma')controls=`<div class="module-nav">${this._moduleGate('ma_net3','MA-Net3','ma_enabled')}<button class="btn" id="open-network-config">Interface MA</button></div>`;
+    if(key==='builder')controls=`<div class="module-nav">${this._moduleGate('ha_builder','HA Builder','ha_builder_enabled')}</div>`;
+    if(key==='reliability')controls=`<div class="module-nav">${this._moduleGate('diagnostics','Tests diagnostic','chaos_enabled')}</div>`;
+    let inner=`<button class="btn back" id="back">← MODULES</button><div class="top"><div><div class="brand">${meta[1]}</div><div class="muted">${meta[2]}</div></div></div>${controls}<div class="panel-stack" id="module-content"></div>`;
+    if(key==='audio'){
+      const rows=[['Dante packets',this._value('dante_packets','—')],['Dante sources',this._value('dante_sources','—')],['Dante endpoints',this._value('dante_endpoints','—')],['Dante mDNS',this._value('dante_mdns_matches','—')],['PTP packets',this._value('ptp_packets','—')],['PTP sources',this._value('ptp_sources','—')],['AES67 SAP',this._value('aes67_sap_packets','—')],['ST2110 RTP',this._value('st2110_rtp_packets','—')],['AVB packets',this._value('avb_packets','—')]];
+      inner+=`<div class="card"><div class="title">AUDIO NETWORK — SYNTHÈSE</div><div class="notice">Lecture passive. Une valeur à 0 signifie qu’aucun trafic correspondant n’a été observé, pas que l’équipement est en panne.</div><div class="module-grid">${rows.map(([n,v])=>`<div class="card"><div class="title">${n}</div><div class="big">${v}</div></div>`).join('')}</div></div>`;
+    }
+    if(key==='video'){
+      const cfg=this._state('show_network_config','sensor.dmx_monitor_show_network_config')?.attributes||{};const enabled=cfg.projector_monitor_enabled===true;
+      const entities=this._entityRows(['projector','pjlink','video']);
+      inner+=`<div class="card"><div class="title">PJLINK / PROJECTEURS</div><div class="big ${enabled?'ok':'off'}">${enabled?'MONITORING ACTIVÉ':'DÉSACTIVÉ'}</div>${enabled&&!entities.length?'<div class="notice">Monitoring activé, mais aucun projecteur n’est configuré/découvert. Ajoute les projecteurs dans Configuration générale HA : activer le module seul ne crée pas de cible.</div>':''}</div>`+this._entityTable(['projector','pjlink','video'],'Aucune entité vidéo/projecteur configurée.');
+    }
     if(key==='security')inner+=this._securityHtml()+this._entityTable(['security_','osc_output','light_sync','projector_control'],'Les états de sécurité apparaîtront après chargement des entités.');
-    if(key==='network'){const cfgState=this._state('show_network_config','sensor.dmx_monitor_show_network_config');const cfg=cfgState?.attributes||{};const yn=(k)=>cfgState?(cfg[k]===true?'Écouté':cfg[k]===false?'Désactivé':'Indisponible'):'État indisponible';inner+=`<div class="card"><div class="title">CONFIGURATION RÉSEAU SHOW CONTROL</div>${cfgState?'':`<div class="notice">Capteur de configuration indisponible : aucun état activé/désactivé n'est supposé.</div>`}<div class="row"><span>DMX / Art-Net / sACN</span><b>${cfg.interface_dmx??'—'}</b></div><div class="row"><span>grandMA3 / MA-Net3</span><b>${cfg.interface_ma??'—'}</b></div><div class="row"><span>Dante</span><b>${cfg.interface_dante??'—'}</b></div><div class="row"><span>PTP</span><b>${cfg.interface_ptp??'—'}</b></div><div class="row"><span>Audio AES67/ST2110</span><b>${cfg.interface_audio??'—'}</b></div><div class="row"><span>Art-Net</span><b>${yn('dmx_artnet_enabled')}</b></div><div class="row"><span>sACN</span><b>${yn('dmx_sacn_enabled')}</b></div><div class="row"><span>Source DMX</span><b>${cfgState?(cfg.dmx_source||'Toutes'):'—'}</b></div><div class="row"><span>Univers DMX</span><b>${cfg.universes??'—'}</b></div><div class="row"><span>MA-Net3</span><b>${yn('ma_enabled')}</b></div><div class="footer"><button class="btn primary" id="network-config">Modifier les interfaces / protocoles</button></div></div>`;}
-    this.innerHTML=this._shell(inner);this.querySelector('#back')?.addEventListener('click',()=>this._setView('modules'));
+    if(key==='network'){const cfgState=this._state('show_network_config','sensor.dmx_monitor_show_network_config');const cfg=cfgState?.attributes||{};const yn=(k)=>cfgState?(cfg[k]===true?'Écouté':cfg[k]===false?'Désactivé':'Indisponible'):'État indisponible';inner+=`<div class="card"><div class="title">CONFIGURATION RÉSEAU SHOW CONTROL</div>${cfgState?'':`<div class="notice">Capteur de configuration indisponible : aucun état activé/désactivé n'est supposé.</div>`}<div class="row"><span>DMX / Art-Net / sACN</span><b>${cfg.interface_dmx??'—'}</b></div><div class="row"><span>grandMA3 / MA-Net3</span><b>${cfg.interface_ma??'—'}</b></div><div class="row"><span>Dante</span><b>${cfg.interface_dante??'—'}</b></div><div class="row"><span>PTP</span><b>${cfg.interface_ptp??'—'}</b></div><div class="row"><span>Audio AES67/ST2110</span><b>${cfg.interface_audio??'—'}</b></div><div class="row"><span>Art-Net</span><b>${yn('dmx_artnet_enabled')}</b></div><div class="row"><span>sACN</span><b>${yn('dmx_sacn_enabled')}</b></div><div class="row"><span>Univers DMX</span><b>${cfg.universes??'—'}</b></div><div class="row"><span>MA-Net3</span><b>${yn('ma_enabled')}</b></div><div class="footer"><button class="btn primary" id="network-config">Modifier les interfaces / protocoles</button></div></div>`;}
+    this.innerHTML=this._shell(inner);this.querySelector('#back')?.addEventListener('click',()=>this._setView('modules'));this._wireLocalGates();
     const map={dmx:['dmx-monitor-panel','enttec-panel'],zones:['dmx-ha-zones-panel','dmx-ha-mapping-panel'],osc:['control-sources-panel','osc-learn-panel','osc-mapping-panel','osc-output-panel','osc-source-profiles','punchlight-network-panel'],rules:['show-network-rule-builder','signal-watchdog-panel'],network:['show-network-topology-panel','show-network-discovery','show-network-fingerprint'],ma:['ma-inspector-panel'],inventory:['show-network-inventory'],builder:['show-network-ha-builder-panel'],brands:['show-network-brand-catalog'],reliability:['show-network-reliability-panel','signal-watchdog-panel'],archive:['show-network-archive-panel']};
-    if(map[key])this._mountPanels(map[key]);if(key==='security')this._wireSecurity();this.querySelector('#network-config')?.addEventListener('click',()=>this._openIntegrationConfig());
+    if(map[key])this._mountPanels(map[key]);if(key==='security')this._wireSecurity();this.querySelector('#network-config')?.addEventListener('click',()=>this._openIntegrationConfig());this.querySelector('#open-network-config')?.addEventListener('click',()=>this._openIntegrationConfig());
   }
   _renderClassic(){
     const rows=[['LIGHT','DMX / sACN / Art-Net',this._value('network_packets_observed','—')],['AUDIO','Dante / AES67 / ST2110 / AVB',this._value('audio_protocols_active','—')],['NETWORK','Interfaces actives',this._value('network_interfaces_up','—')],['MA','Stations actives',this._value('ma_live_stations','—')]];
@@ -695,7 +732,7 @@ class PunchLightNetworkPanel extends HTMLElement {
         <div style="margin-top:10px"><button id="scan">🔎 Rechercher les PunchLight</button></div>
         <div style="margin-top:10px">${list}</div>
       </div></ha-card>`;
-    this.querySelector('#scan')?.addEventListener('click',()=>this._hass.callService('dmx_monitor','discover_punchlight',{timeout:2}));
+    this.querySelector('#scan')?.addEventListener('click',async()=>{const b=this.querySelector('#scan');b.disabled=true;b.textContent='Recherche…';try{const cfg=Object.values(this._hass.states||{}).find(x=>x.attributes&&('interface_dmx' in x.attributes))?.attributes||{};await this._hass.callService('dmx_monitor','discover_punchlight',{interface:cfg.interface_dmx||'0.0.0.0',timeout:3});b.textContent='Recherche terminée';setTimeout(()=>this.render(),250);}catch(e){b.textContent='Erreur: '+(e?.message||e)}finally{setTimeout(()=>{b.disabled=false;if(b.textContent==='Recherche terminée')b.textContent='🔎 Rechercher les PunchLight'},1200)}});
   }
 }
 customElements.define('punchlight-network-panel',PunchLightNetworkPanel);

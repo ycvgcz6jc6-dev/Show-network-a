@@ -1,4 +1,15 @@
-## 0.13.4 — Real module controls, DMX values, OSC Learn, Journal & Diagnostics
+## 0.13.5 — Cockpit, DMX live publication, local module controls, Dante cleanup
+
+- Fixed the DMX live publication path: the rate limiter was queued with `None`, which is also its internal “no pending value” sentinel; DMX tracker updates could therefore never be published to HA. It now queues the actual source/universe key.
+- Main PRO dashboard now summarizes DMX network RX, ENTTEC DMX IN, MA-Net3, Dante/PTP, discovery, manufacturer/profile evidence, topology and journal.
+- Module enable/disable controls moved into the relevant module pages; Modules remains a summary/navigation page.
+- Video/PJLink page now explicitly distinguishes “monitor enabled” from “no projector configured/discovered”.
+- Dante/audio page replaced the loose entity dump with a bounded protocol summary.
+- PunchLight discovery button now reports progress/errors and uses the configured DMX/control interface when available.
+- Rule Builder can decode compact `values_b64` DMX frames.
+- No site-specific IP/subnet is hard-coded; the user-provided MA subnet is not embedded.
+
+## 0.13.5 — Real module controls, DMX values, OSC Learn, Journal & Diagnostics
 
 - DMX live payload is now exposed to the frontend as `values_b64`; the 512-channel view can show the values actually received instead of staying at zero while packet counters increase.
 - Added a generic `set_module_enabled` service and quick ON/OFF controls in the Modules page for Art-Net, sACN, MA-Net3, OSC input, MIDI input, PunchLight, watchdogs, HA Builder, PJLink monitoring and diagnostic/chaos tests. Changes are stored in ConfigEntry options and applied through the existing reload listener.
@@ -9,7 +20,7 @@
 - Journal / Backups is now mounted from the Modules page instead of opening an empty module.
 - Reliability buttons now show explicit execution/error feedback. Fault-injection controls require the new diagnostic-tests opt-in gate.
 - Added PJLink monitor enable gate without weakening the separate protected projector-control gate.
-- Frontend cache/version bumped to 0.13.4.
+- Frontend cache/version bumped to 0.13.5.
 
 Validation: static/unit/syntax only; no claim of real HA/network/hardware validation.
 

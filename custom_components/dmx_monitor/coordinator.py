@@ -472,7 +472,7 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         # observation remain synchronous and cheap. HA state publication is also
         # coalesced to <=20 Hz to protect the event bus.
         self._dmx_flow.push_nowait(key, bytes(values[:512]))
-        self._dmx_publish_limiter.push_nowait(None, self._publish_dmx_snapshot)
+        self._dmx_publish_limiter.push_nowait(key, self._publish_dmx_snapshot)
 
     async def _process_dmx_snapshot(self, key, values: bytes) -> None:
         protocol, universe, source = key
