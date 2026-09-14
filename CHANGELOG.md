@@ -136,3 +136,11 @@ Validation: static/unit/syntax only; no claim of real HA/network/hardware valida
 - Inventaire: édition manuelle plus pratique avec catalogue constructeurs et rafraîchissement après sauvegarde.
 - Constructeurs: modal d'ajout remontée dans le composant pour corriger positionnement/styles.
 - Aucun plan IP utilisateur n'est codé en dur.
+
+## 0.14.1
+- Fix duplicate DMX universe binary sensor IDs when several sources feed one universe.
+- Add direct DMX listen-universe update control.
+- Remove speculative MA console classification.
+- Improve OSC reload/port-conflict state.
+- Improve read-only Luminex/SNMP and Dante DNS-SD discovery.
+- Reduce discovery frequency/concurrency and throttle frontend updates for HA performance.

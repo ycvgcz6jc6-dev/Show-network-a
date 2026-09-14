@@ -54,7 +54,7 @@ class UniverseActive(CoordinatorEntity, BinarySensorEntity):
     def __init__(self, coordinator, protocol, universe):
         super().__init__(coordinator)
         self._key = (protocol, universe)
-        safe = f"{protocol}_{universe}".replace(" ", "_").replace(":", "_")
+        safe = f"{str(protocol).strip().lower()}_{int(universe)}".replace(" ", "_").replace(":", "_")
         self._attr_unique_id = f"dmx_universe_{safe}_active"
         self._attr_extra_state_attributes = {}
 

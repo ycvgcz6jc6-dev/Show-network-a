@@ -1059,3 +1059,13 @@ stop_osc_learn:
 clear_osc_learn:
   name: Effacer OSC Learn
   description: Efface les suggestions OSC apprises en mémoire.
+
+set_dmx_universes:
+  name: Définir les univers DMX écoutés
+  description: Met à jour la liste/range d'univers Art-Net/sACN puis recharge l'intégration.
+  fields:
+    universes:
+      required: true
+      example: "1-16,21,42"
+      selector:
+        text:

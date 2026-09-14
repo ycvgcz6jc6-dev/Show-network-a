@@ -449,8 +449,9 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
     def observe_dmx(self, protocol: str, universe: int, source: str, values: bytes, priority=None, sequence=None, interface=None) -> None:
         """Register a DMX frame without propagating every packet to HA entities."""
         key = (str(protocol), int(universe), str(source or ""))
-        if key not in self._dmx_universe_entity_keys:
-            self._dmx_universe_entity_keys.add(key)
+        entity_key = (str(protocol), int(universe))
+        if entity_key not in self._dmx_universe_entity_keys:
+            self._dmx_universe_entity_keys.add(entity_key)
             if self.dmx_universe_entity_callback:
                 try:
                     self.dmx_universe_entity_callback(protocol, int(universe))

@@ -256,8 +256,26 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                 if isinstance(value,(int,float)) and not isinstance(value,bool): coordinator.process_control_input(message.address,value)
             coordinator.async_set_updated_data(coordinator.data)
         osc_receiver=_adapter("osc")(host=osc_host,port=osc_port,learn=coordinator.osc_learn,callback=_osc_input)
-        try: await osc_receiver.start(); coordinator.data["osc_input"]={**coordinator.data.get("osc_input",{}),"enabled":True}
-        except Exception as err: _LOGGER.warning("OSC input unavailable; continuing without it: %s",err); osc_receiver=None
+        try:
+            await osc_receiver.start()
+            coordinator.data["osc_input"]={**coordinator.data.get("osc_input",{}),"enabled":True,"state":"listening","host":osc_host,"port":osc_port,"last_error":None}
+        except OSError as err:
+            # A config-entry reload can briefly overlap kernel UDP teardown. Retry
+            # once, then expose the conflict instead of pretending OSC is enabled.
+            if getattr(err, "errno", None) == 98:
+                await asyncio.sleep(0.5)
+                try:
+                    await osc_receiver.start()
+                    coordinator.data["osc_input"]={**coordinator.data.get("osc_input",{}),"enabled":True,"state":"listening","host":osc_host,"port":osc_port,"last_error":None}
+                except Exception as retry_err:
+                    coordinator.data["osc_input"]={"enabled":False,"state":"port_in_use","host":osc_host,"port":osc_port,"last_error":str(retry_err)}
+                    _LOGGER.warning("OSC input unavailable after retry; port %s is in use: %s",osc_port,retry_err); osc_receiver=None
+            else:
+                coordinator.data["osc_input"]={"enabled":False,"state":"error","host":osc_host,"port":osc_port,"last_error":str(err)}
+                _LOGGER.warning("OSC input unavailable; continuing without it: %s",err); osc_receiver=None
+        except Exception as err:
+            coordinator.data["osc_input"]={"enabled":False,"state":"error","host":osc_host,"port":osc_port,"last_error":str(err)}
+            _LOGGER.warning("OSC input unavailable; continuing without it: %s",err); osc_receiver=None
 
     midi_runtime=None; midi_controller=None
     if bool(settings.get(CONF_MIDI_ENABLED,False)) and str(settings.get(CONF_MIDI_DEVICE,"")).strip():
@@ -344,8 +362,13 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
             # uses only the community explicitly configured by the user.  A timeout is
             # not evidence that the host is not a switch.
             community = str(settings.get(CONF_GIGACORE_COMMUNITY, "") or "").strip()
+            # Luminex documents read-only SNMP v1/v2c with default community "Public".
+            # Use that conservative read-only probe when no community was configured;
+            # a timeout remains unknown, never evidence that a host is not a switch.
+            community = community or "Public"
+            status["snmp_probe_mode"] = "configured" if settings.get(CONF_GIGACORE_COMMUNITY) else "readonly_default_public"
             if community:
-                sem = asyncio.Semaphore(8)
+                sem = asyncio.Semaphore(4)
                 async def _snmp_identity(row):
                     ip = row.get("ip")
                     if not ip: return
@@ -394,7 +417,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
             green_go_inventory=coordinator.green_go.snapshot(), elc_inventory=coordinator.elc.snapshot(),
         )
     coordinator.async_scan_network = _vendor_discovery_tick
-    vendor_discovery_cancel=async_track_time_interval(hass,_vendor_discovery_tick,timedelta(seconds=60))
+    vendor_discovery_cancel=async_track_time_interval(hass,_vendor_discovery_tick,timedelta(seconds=180))
     # Run the first scan in the background instead of awaiting it inline: this
     # scan takes >=2s and was previously blocking async_setup_entry directly,
     # contributing to slow/timed-out config entry bootstraps.

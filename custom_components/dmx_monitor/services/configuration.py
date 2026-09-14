@@ -20,6 +20,7 @@ from ..const import (
     CONF_NOTIFICATION_ENABLED,
     CONF_CHAOS_ENABLED,
     CONF_PROJECTOR_MONITOR_ENABLED,
+    CONF_UNIVERSES,
 )
 
 MODULE_KEYS = {
@@ -64,4 +65,30 @@ async def async_register(hass: HomeAssistant) -> None:
         new_options[key] = bool(call.data.get("enabled", False))
         hass.config_entries.async_update_entry(entry, options=new_options)
 
+    async def _set_dmx_universes(call):
+        raw = str(call.data.get("universes", "")).strip()
+        if not raw:
+            raise ValueError("universes is required")
+        values = set()
+        for part in raw.replace(" ", "").split(","):
+            if not part:
+                continue
+            if "-" in part:
+                a, b = (int(x) for x in part.split("-", 1))
+                if a > b: a, b = b, a
+                if a < 1 or b > 63999 or b-a > 2048:
+                    raise ValueError("invalid universe range")
+                values.update(range(a, b + 1))
+            else:
+                n = int(part)
+                if n < 1 or n > 63999: raise ValueError("invalid universe")
+                values.add(n)
+        if not values or len(values) > 2048:
+            raise ValueError("invalid universe selection")
+        entry = _entry_for_call(hass, call)
+        new_options = dict(entry.options)
+        new_options[CONF_UNIVERSES] = raw
+        hass.config_entries.async_update_entry(entry, options=new_options)
+
     hass.services.async_register(DOMAIN, "set_module_enabled", _set_module_enabled)
+    hass.services.async_register(DOMAIN, "set_dmx_universes", _set_dmx_universes)

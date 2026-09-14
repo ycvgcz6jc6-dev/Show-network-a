@@ -35,5 +35,7 @@ class DanteInventory:
     def snapshot(self) -> dict:
         rows=[]
         for e in sorted(self.endpoints.values(), key=lambda x:x.source):
+            if not e.markers and not any("netaudio" in svc for svc in e.services):
+                continue
             rows.append({"source":e.source,"packets":e.packets,"services":sorted(e.services),"markers":sorted(e.markers),"last_seen":e.last_seen})
         return {"dante_endpoints":len(rows),"dante_inventory":rows}

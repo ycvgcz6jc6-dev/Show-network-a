@@ -64,6 +64,14 @@ def _scan_sync(zc, timeout: float = 2.0) -> list[dict[str, Any]]:
             def update_service(self, zc_, service_type, name): pass
             def remove_service(self, zc_, service_type, name): pass
         type_browser = ServiceBrowser(zc, "_services._dns-sd._udp.local.", TypeListener())
+        # Also browse the known Dante DNS-SD service types directly.  Some
+        # networks/devices do not repeat the DNS-SD meta-service often enough
+        # for a short passive scan, while the actual service records are cached.
+        for known_type in ("_netaudio-arc._udp.local.", "_netaudio-dante._udp.local."):
+            try:
+                browsers.append(ServiceBrowser(zc, known_type, listener))
+            except Exception:
+                pass
         deadline = time.monotonic() + max(0.5, min(timeout, 5.0))
         while time.monotonic() < deadline:
             time.sleep(0.05)

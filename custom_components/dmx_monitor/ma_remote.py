@@ -47,12 +47,12 @@ class MARemoteInventory:
     def observe(self, source_ip: str, group: str, packet_count: int = 1):
         station = self.stations.get(source_ip)
         if station is None:
-            station = MAStation(name=f"MA {source_ip}", ip=source_ip)
+            station = MAStation(name=f"MA station non classifiée {source_ip}", ip=source_ip)
             self.stations[source_ip] = station
         station.last_seen = monotonic()
         station.packets += packet_count
         station.ma_net3_active = True
-        station.web_remote = "observed_candidate"
+        station.web_remote = "not_probed"
 
     def snapshot(self) -> dict:
         rows = [s.snapshot() for s in self.stations.values()]
@@ -71,13 +71,14 @@ class MARemoteInventory:
             "session_count": 0,
             "sessions_note": "Session index/name require MA session metadata; passive listener does not join sessions.",
             "web_remote_port": MA_WEB_REMOTE_PORT,
-            "web_remote_candidates": [x["web_remote_url"] for x in rows],
+            "web_remote_candidates": [],
             "osc": {"default_port": MA_OSC_DEFAULT_PORT, "transport": "UDP/TCP", "observed": False, "control_enabled": False},
             "diagnostics": {
                 "receive_only": True,
                 "session_join": False,
                 "ma_commands_sent": False,
                 "web_remote_probe": False,
+                "classification_policy": "unknown_until_evidence",
                 "osc_commands_sent": False,
             },
         }
