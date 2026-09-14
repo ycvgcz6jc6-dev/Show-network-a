@@ -12,7 +12,6 @@ async def async_register(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, "create_dmx_ha_mapping"):
         async def _create_dmx_ha_mapping(call):
             coordinator = coordinator_for_call(hass, call)
-            from .dmx_ha_mapping import DmxHAMapping
             from ..dmx_ha_mapping_storage import DmxHAMappingStore
             import dataclasses
             data = call.data
@@ -37,7 +36,6 @@ async def async_register(hass: HomeAssistant) -> None:
 
         async def _create_dmx_ha_zone(call):
             coordinator = coordinator_for_call(hass, call)
-            from .dmx_ha_zones import DmxHAZone
             data = call.data
             zone = DmxHAZone(
                 zone_id=str(data["zone_id"]),

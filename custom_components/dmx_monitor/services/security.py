@@ -13,11 +13,11 @@ async def async_register(hass: HomeAssistant) -> None:
                 current = str(call.data.get("current_password", ""))
                 if not c.security.verify(current):
                     raise PermissionError("Current Show Network password is invalid")
-            c.security.set_password(str(call.data["password"]))
+            await hass.async_add_executor_job(c.security.set_password, str(call.data["password"]))
             c.publish(security=c.security.snapshot())
         async def _unlock_security(call):
             c = coordinator_for_call(hass, call)
-            c.security.unlock(str(call.data["password"]))
+            await hass.async_add_executor_job(c.security.unlock, str(call.data["password"]))
             c.publish(security=c.security.snapshot())
         async def _lock_security(call):
             c = coordinator_for_call(hass, call)

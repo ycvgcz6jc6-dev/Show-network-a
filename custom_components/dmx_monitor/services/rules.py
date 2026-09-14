@@ -17,7 +17,7 @@ async def async_register(hass: HomeAssistant) -> None:
                 action = DmxAction(**action_data) if action_data else None
                 off_action = DmxAction(**off_action_data) if off_action_data else None
                 condition = DmxCondition(
-                    channels=parse_channel_selection(str(data["channels"])),
+                    channels=parse_channel_selection(data["channels"]),
                     mode=str(data.get("mode", "any")),
                     threshold_on=int(data.get("threshold_on", 10)),
                     threshold_off=(int(data["threshold_off"]) if data.get("threshold_off") is not None else None),
@@ -47,7 +47,7 @@ async def async_register(hass: HomeAssistant) -> None:
                 rule = DmxRule(
                     name=str(data["name"]), universe=int(data["universe"]), source=data.get("source") or None,
                     condition=DmxCondition(
-                        channels=parse_channel_selection(str(data["channels"])),
+                        channels=parse_channel_selection(data["channels"]),
                         mode=str(data.get("mode", "any")), threshold_on=int(data.get("threshold_on", 10)),
                         threshold_off=(int(data["threshold_off"]) if data.get("threshold_off") is not None else None),
                         x=int(data.get("x", 1)),

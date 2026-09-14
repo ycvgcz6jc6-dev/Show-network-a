@@ -25,4 +25,13 @@ async def async_register(hass: HomeAssistant) -> None:
             coordinator.publish(device_inventory=coordinator.inventory.public())
 
         hass.services.async_register(DOMAIN, "set_device_override", _set_device_override)
+        async def _scan_network(call):
+            coordinator = coordinator_for_call(hass, call)
+            scan = getattr(coordinator, "async_scan_network", None)
+            if scan is None:
+                raise ValueError("Network discovery is not available")
+            await scan()
+            coordinator.publish(device_inventory=coordinator.inventory.public(include_hidden=True))
+
         hass.services.async_register(DOMAIN, "clear_device_override", _clear_device_override)
+        hass.services.async_register(DOMAIN, "scan_network", _scan_network)

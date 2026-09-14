@@ -17,6 +17,8 @@ from .projector_platform import sensor_entities as projector_sensor_entities
 
 SENSORS = (
     ("devices_total", "Appareils découverts / Discovered devices", None),
+    ("device_inventory", "Inventaire équipements / Device inventory", None),
+    ("show_network_config", "Configuration réseau Show Network / Show Network network configuration", None),
     ("host_cpu_percent", "CPU hôte HA / HA host CPU", "%"),
     ("host_memory_percent", "RAM hôte HA / HA host memory", "%"),
     ("host_memory_used_bytes", "RAM utilisée / Memory used", "B"),
@@ -121,6 +123,8 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return self.coordinator.data.get("performance", {}).get("level", "normal")
         if self._key == "performance_interval_s":
             return self.coordinator.data.get("performance", {}).get("telemetry_interval_s", 5.0)
+        if self._key == "show_network_config":
+            return "configured"
         if self._key == "ha_builder":
             return len(self.coordinator.data.get("ha_builder", []))
         if self._key == "notification":
@@ -182,6 +186,8 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
+        if self._key == "show_network_config":
+            return dict(self.coordinator.data.get("show_network_config", {}))
         if self._key == "ha_builder":
             return {"items": self.coordinator.data.get("ha_builder", [])}
         if self._key == "notification":

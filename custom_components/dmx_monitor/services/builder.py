@@ -11,13 +11,15 @@ async def async_register(hass: HomeAssistant) -> None:
             c = coordinator_for_call(hass, call)
             if not c.ha_builder_enabled:
                 raise ValueError("HA Builder est désactivé")
-            item = c.ha_builder.create(
+            import functools
+            item = await hass.async_add_executor_job(functools.partial(
+                c.ha_builder.create,
                 name=str(call.data["name"]), entity_type=str(call.data.get("entity_type", "switch")),
                 item_id=call.data.get("item_id"), device_class=call.data.get("device_class"),
                 unit=call.data.get("unit"), icon=call.data.get("icon"), area=call.data.get("area"),
                 enabled=bool(call.data.get("enabled", True)), state=call.data.get("state"),
                 min_value=call.data.get("min_value"), max_value=call.data.get("max_value"), step=call.data.get("step"),
-            )
+            ))
             c.data["ha_builder"] = c.ha_builder.snapshot()
             c.publish(ha_builder=c.data["ha_builder"])
             c.archive.record("ha", "builder_entity_created", {"item_id": item.item_id, "entity_type": item.entity_type, "name": item.name}) if c.archive else None
@@ -29,7 +31,7 @@ async def async_register(hass: HomeAssistant) -> None:
             c = coordinator_for_call(hass, call)
             item_id = str(call.data["item_id"])
             item = c.ha_builder.items.get(item_id)
-            c.ha_builder.remove(item_id)
+            await hass.async_add_executor_job(c.ha_builder.remove, item_id)
             c.data["ha_builder"] = c.ha_builder.snapshot()
             c.publish(ha_builder=c.data["ha_builder"])
             if c.archive:
@@ -39,7 +41,7 @@ async def async_register(hass: HomeAssistant) -> None:
                 cb(item_id)
         async def _ha_builder_set_state(call):
             c = coordinator_for_call(hass, call)
-            c.ha_builder.set_state(str(call.data["item_id"]), call.data.get("state"))
+            await hass.async_add_executor_job(c.ha_builder.set_state, str(call.data["item_id"]), call.data.get("state"))
             c.data["ha_builder"] = c.ha_builder.snapshot()
             c.publish(ha_builder=c.data["ha_builder"])
         hass.services.async_register(DOMAIN, "ha_builder_create", _ha_builder_create)

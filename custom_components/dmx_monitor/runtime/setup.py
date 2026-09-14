@@ -31,6 +31,7 @@ from ..resource_registry import ProtocolDriver, ResourceRegistry, RuntimeResourc
 from ..signal_watchdog import SignalWatchdogRule
 from ..runtime_data import ShowNetworkRuntimeData
 from ..vendor_discovery import async_scan as async_scan_vendor_discovery
+from ..discovery_pipeline import DiscoveryPipeline
 from ..punchlight_network import async_scan as async_scan_punchlight_network
 from ..const import *
 from ..aes70_monitor import AES70Monitor
@@ -68,6 +69,8 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     community = settings.get(CONF_GIGACORE_COMMUNITY, "public")
     gigacore = GigaCoreMonitor(hosts, community)
     coordinator = ShowNetworkCoordinator(hass, inventory, gigacore)
+    await hass.async_add_executor_job(coordinator.security.load)
+    discovery_pipeline = DiscoveryPipeline(inventory)
     profile = str(settings.get(CONF_PERFORMANCE_PROFILE, "auto")).lower()
     # Auto adapts non-critical work to CPU/RAM pressure; protocol reception remains independent.
     coordinator.performance_manager = AdaptivePerformance(profile)
@@ -106,6 +109,23 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     interface_ptp = settings.get(CONF_INTERFACE_PTP, interface)
     interface_dante = settings.get(CONF_INTERFACE_DANTE, interface)
     interface_audio = settings.get(CONF_INTERFACE_AUDIO, interface)
+
+    # Publish the effective Show Network binding configuration so the custom
+    # panel can show exactly which NIC each protocol is using.  This contains
+    # no credentials.
+    coordinator.data["show_network_config"] = {
+        "interface_default": settings.get(CONF_INTERFACE, "0.0.0.0"),
+        "interface_dmx": interface,
+        "interface_ma": interface_ma,
+        "interface_ptp": interface_ptp,
+        "interface_dante": interface_dante,
+        "interface_audio": interface_audio,
+        "universes": settings.get(CONF_UNIVERSES, "1-16"),
+        "osc_input_enabled": bool(settings.get(CONF_OSC_INPUT_ENABLED, False)),
+        "osc_input_port": int(settings.get(CONF_OSC_INPUT_PORT, 8000)),
+        "midi_enabled": bool(settings.get(CONF_MIDI_ENABLED, False)),
+        "punchlight_enabled": bool(settings.get(CONF_PUNCHLIGHT_ENABLED, False)),
+    }
 
     ma_listener = None
     if interface_ma != "0.0.0.0":
@@ -233,11 +253,15 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
         try:
             rows=await async_scan_vendor_discovery(hass, 2.0); coordinator.vendor_discovery=rows[-100:]
             for row in rows:
-                host=(row.get("addresses",[row.get("host")])[0] or row.get("host") or row.get("name"))
+                addresses = row.get("addresses") or [row.get("host")]
+                host=(addresses[0] or row.get("host") or row.get("name"))
+                if host:
+                    discovery_pipeline.mdns_result(host, row.get("service_type", ""), row.get("name", ""), row.get("properties") or {})
                 if row.get("vendor")=="green_go": coordinator.green_go.observe(host,source="mdns",evidence=row.get("evidence"),last_seen=row.get("observed_at"))
                 elif row.get("vendor")=="elc": coordinator.elc.observe(host,source="mdns",evidence=row.get("evidence"),last_seen=row.get("observed_at"))
-            coordinator.publish(vendor_discovery=coordinator.vendor_discovery,green_go_inventory=coordinator.green_go.snapshot(),elc_inventory=coordinator.elc.snapshot())
+            coordinator.publish(vendor_discovery=coordinator.vendor_discovery,device_inventory=coordinator.inventory.public(include_hidden=True),green_go_inventory=coordinator.green_go.snapshot(),elc_inventory=coordinator.elc.snapshot())
         except Exception as err: _LOGGER.debug("Vendor mDNS discovery failed: %s",err)
+    coordinator.async_scan_network = _vendor_discovery_tick
     vendor_discovery_cancel=async_track_time_interval(hass,_vendor_discovery_tick,timedelta(seconds=60))
     # Run the first scan in the background instead of awaiting it inline: this
     # scan takes >=2s and was previously blocking async_setup_entry directly,

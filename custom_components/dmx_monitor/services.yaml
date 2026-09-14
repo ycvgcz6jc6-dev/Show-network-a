@@ -1013,3 +1013,8 @@ observe_dmx_ha_rdm:
     fixture_type:
       required: false
       selector: {text: {}}
+
+scan_network:
+  name: Scan network
+  description: Lance immédiatement la découverte réseau passive/mDNS Show Network.
+

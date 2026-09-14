@@ -133,24 +133,17 @@ customElements.define('show-network-inventory',ShowNetworkInventory);
 
 /* ===== discovery-panel.js ===== */
 class ShowNetworkDiscovery extends HTMLElement {
-  connectedCallback(){this.innerHTML=`
-  <style>
-  :host{display:block;background:#0b0d10;color:#eee;font-family:Inter,system-ui,sans-serif;padding:18px}
-  h2{margin:0 0 5px}.sub{color:#8d969f;font-size:11px;margin-bottom:15px}
-  .bar{display:flex;gap:8px;align-items:center;background:#15181c;border:1px solid #2c3239;border-radius:10px;padding:12px}
-  button{background:#23282e;color:#eee;border:1px solid #3a4148;border-radius:7px;padding:8px 12px}
-  button:hover{background:#30363d}.table{margin-top:12px;border:1px solid #2c3239;border-radius:10px;overflow:hidden}
-  .row{display:grid;grid-template-columns:150px 1fr 130px 130px;gap:10px;padding:10px 12px;border-bottom:1px solid #282d33;font-size:12px}
-  .head{color:#8d969f;background:#15181c;font-size:10px;text-transform:uppercase}
-  .good{color:#65dc99}.muted{color:#8d969f}
-  </style>
-  <h2>AUTO DISCOVERY</h2>
-  <div class="sub">Recherche multi-source · DHCP · mDNS/Zeroconf · sondes TCP prudentes</div>
-  <div class="bar"><span class="muted">No IP list required.</span><button>SCAN NETWORK</button></div>
-  <div class="table">
-   <div class="row head"><span>IP</span><span>SERVICES</span><span>SOURCE</span><span>CONFIDENCE</span></div>
-   <div class="row"><span class="muted">Waiting…</span><span>—</span><span>—</span><span>—</span></div>
-  </div>`}
+  setConfig(c){this._config=c||{};}
+  set hass(h){this._hass=h;this.render();}
+  connectedCallback(){this.render();}
+  _inventory(){const e=Object.values(this._hass?.states||{}).find(x=>x.entity_id.endsWith('_device_inventory'));return e?.attributes?.devices||[];}
+  render(){
+    const rows=this._inventory();
+    this.innerHTML=`<style>
+    :host{display:block;background:#0b0d10;color:#eee;font-family:Inter,system-ui,sans-serif;padding:18px}h2{margin:0 0 5px}.sub{color:#8d969f;font-size:11px;margin-bottom:15px}.bar{display:flex;gap:8px;align-items:center;background:#15181c;border:1px solid #2c3239;border-radius:10px;padding:12px}button{background:#23282e;color:#eee;border:1px solid #3a4148;border-radius:7px;padding:8px 12px;cursor:pointer}.table{margin-top:12px;border:1px solid #2c3239;border-radius:10px;overflow:hidden}.row{display:grid;grid-template-columns:150px 1fr 130px 130px;gap:10px;padding:10px 12px;border-bottom:1px solid #282d33;font-size:12px}.head{color:#8d969f;background:#15181c;font-size:10px;text-transform:uppercase}.muted{color:#8d969f}</style>
+    <h2>AUTO DISCOVERY</h2><div class="sub">Découverte passive/mDNS et inventaire Show Network</div><div class="bar"><span class="muted" id="status">${rows.length} équipement(s) dans l’inventaire.</span><button id="scan">SCAN NETWORK</button></div><div class="table"><div class="row head"><span>IP</span><span>PROTOCOLES / FABRICANT</span><span>RÔLE</span><span>CONFIANCE</span></div>${rows.length?rows.map(r=>`<div class="row"><span>${esc(r.ip||'—')}</span><span>${esc((r.protocols||[]).join(', ')||r.display_manufacturer||'—')}</span><span>${esc(r.custom_role||r.category||'—')}</span><span>${esc(r.confidence??'—')}</span></div>`).join(''):'<div class="row"><span class="muted">Aucun équipement</span><span>—</span><span>—</span><span>—</span></div>'}</div>`;
+    this.querySelector('#scan')?.addEventListener('click',async()=>{const b=this.querySelector('#scan'),st=this.querySelector('#status');b.disabled=true;st.textContent='Scan en cours…';try{await this._hass.callService('dmx_monitor','scan_network',{});st.textContent='Scan terminé. Les résultats vont se rafraîchir.';}catch(e){st.textContent='Erreur: '+(e?.message||e);}finally{b.disabled=false;}});
+  }
 }
 customElements.define("show-network-discovery",ShowNetworkDiscovery);
 
@@ -494,7 +487,7 @@ class ShowNetworkProDashboard extends HTMLElement {
   _value(unique,fallback='—',fallbackId){const st=this._state(unique,fallbackId);return st?.state ?? fallback;}
   _truthy(v){return ['true','on','1','yes'].includes(String(v??'').toLowerCase());}
   _setView(view){this._view=view;this._notice='';this.render();}
-  _openIntegrationConfig(){history.pushState(null,'','/config/integrations/integration/dmx_monitor');window.dispatchEvent(new Event('location-changed'));}
+  _openIntegrationConfig(){window.location.assign('/config/integrations/integration/dmx_monitor');}
   async _call(service,data={}){
     try{await this._hass?.callService?.('dmx_monitor',service,data);this._notice='Action exécutée';this.render();return true;}
     catch(e){this._notice=`Erreur: ${e?.message||e}`;this.render();return false;}
@@ -505,11 +498,12 @@ class ShowNetworkProDashboard extends HTMLElement {
   }
   _securityHtml(){
     const sec=this._securityState();
-    return `<div class="card security"><div class="title">SÉCURITÉ COMMANDES ACTIVES</div><div class="big ${sec.unlocked?'ok':sec.configured?'warning':'critical'}">${sec.unlocked?'DÉVERROUILLÉ':sec.configured?'CONFIGURÉ — VERROUILLÉ':'NON CONFIGURÉ'}</div><div class="muted">${sec.unlocked?`Encore ${sec.remaining} s`:'OSC OUT, Light Sync et Projector Control restent bloqués.'}</div><div class="security-actions">${!sec.configured?'<button class="btn" id="setpwd">Configurer mot de passe</button>':'<button class="btn" id="unlock">Déverrouiller</button>'}${sec.configured?'<button class="btn" id="lock">Verrouiller</button>':''}</div></div>`;
+    return `<div class="card security"><div class="title">SÉCURITÉ COMMANDES ACTIVES</div><div class="big ${sec.unlocked?'ok':sec.configured?'warning':'critical'}">${sec.unlocked?'DÉVERROUILLÉ':sec.configured?'CONFIGURÉ — VERROUILLÉ':'NON CONFIGURÉ'}</div><div class="muted">${sec.unlocked?`Encore ${sec.remaining} s`:'OSC OUT, Light Sync et Projector Control restent bloqués.'}</div><div class="security-actions">${!sec.configured?'<button class="btn" id="setpwd">Configurer mot de passe</button>':'<button class="btn" id="unlock">Déverrouiller</button>'}${sec.configured?'<button class="btn" id="changepwd">Changer mot de passe</button><button class="btn" id="lock">Verrouiller</button>':''}</div></div>`;
   }
   _wireSecurity(){
     this.querySelector('#setpwd')?.addEventListener('click',async()=>{const p=prompt('Nouveau mot de passe Show Network (8 caractères minimum)');if(!p)return;if(p.length<8){this._notice='Erreur: le mot de passe doit contenir au moins 8 caractères';this.render();return;}if(await this._call('set_security_password',{password:p})){this._securityOverride={configured:true,unlocked:false,remaining:'0'};this._notice='Mot de passe enregistré. Les commandes actives restent verrouillées jusqu’au déverrouillage.';this.render();}});
     this.querySelector('#unlock')?.addEventListener('click',async()=>{const p=prompt('Mot de passe Show Network');if(!p)return;if(await this._call('unlock_security',{password:p})){this._securityOverride={configured:true,unlocked:true,remaining:this._value('security_unlock_remaining_s','1800')};this._notice='Commandes actives déverrouillées.';this.render();}});
+    this.querySelector('#changepwd')?.addEventListener('click',async()=>{const current=prompt('Mot de passe Show Network actuel');if(!current)return;const p=prompt('Nouveau mot de passe Show Network (8 caractères minimum)');if(!p)return;if(p.length<8){this._notice='Erreur: le nouveau mot de passe doit contenir au moins 8 caractères';this.render();return;}if(await this._call('set_security_password',{current_password:current,password:p})){this._securityOverride={configured:true,unlocked:false,remaining:'0'};this._notice='Mot de passe modifié. Commandes actives verrouillées.';this.render();}});
     this.querySelector('#lock')?.addEventListener('click',async()=>{if(await this._call('lock_security',{})){this._securityOverride={configured:true,unlocked:false,remaining:'0'};this._notice='Commandes actives verrouillées.';this.render();}});
   }
   _shell(content){return `<style>
@@ -575,9 +569,10 @@ class ShowNetworkProDashboard extends HTMLElement {
     if(key==='audio')inner+=this._entityTable(['dante','aes67','st2110','avb','ptp','audio_'],'Aucune donnée audio réseau observée pour le moment.');
     if(key==='video')inner+=this._entityTable(['projector','pjlink','video'],'Aucune entité vidéo/projecteur configurée pour le moment.');
     if(key==='security')inner+=this._securityHtml()+this._entityTable(['security_','osc_output','light_sync','projector_control'],'Les états de sécurité apparaîtront après chargement des entités.');
+    if(key==='network'){const cfg=this._state('show_network_config','sensor.dmx_monitor_show_network_config')?.attributes||{};inner+=`<div class="card"><div class="title">CONFIGURATION RÉSEAU SHOW CONTROL</div><div class="row"><span>DMX / Art-Net / sACN</span><b>${cfg.interface_dmx??'—'}</b></div><div class="row"><span>grandMA3 / MA-Net3</span><b>${cfg.interface_ma??'—'}</b></div><div class="row"><span>Dante</span><b>${cfg.interface_dante??'—'}</b></div><div class="row"><span>PTP</span><b>${cfg.interface_ptp??'—'}</b></div><div class="row"><span>Audio AES67/ST2110</span><b>${cfg.interface_audio??'—'}</b></div><div class="row"><span>Univers DMX</span><b>${cfg.universes??'—'}</b></div><div class="footer"><button class="btn primary" id="network-config">Modifier les interfaces / protocoles</button></div></div>`;}
     this.innerHTML=this._shell(inner);this.querySelector('#back')?.addEventListener('click',()=>this._setView('modules'));
     const map={dmx:['dmx-monitor-panel','dmx-live-view','enttec-panel'],zones:['dmx-ha-zones-panel','dmx-ha-mapping-panel'],osc:['control-sources-panel','osc-learn-panel','osc-mapping-panel','osc-output-panel','osc-source-profiles','punchlight-network-panel'],rules:['show-network-rule-builder','signal-watchdog-panel'],network:['show-network-topology-panel','show-network-discovery','show-network-fingerprint'],ma:['ma-inspector-panel'],inventory:['show-network-inventory'],builder:['show-network-ha-builder-panel'],brands:['show-network-brand-catalog'],reliability:['show-network-reliability-panel','signal-watchdog-panel']};
-    if(map[key])this._mountPanels(map[key]);if(key==='security')this._wireSecurity();
+    if(map[key])this._mountPanels(map[key]);if(key==='security')this._wireSecurity();this.querySelector('#network-config')?.addEventListener('click',()=>this._openIntegrationConfig());
   }
   _renderClassic(){
     const rows=[['LIGHT','DMX / sACN / Art-Net',this._value('network_packets_observed','—')],['AUDIO','Dante / AES67 / ST2110 / AVB',this._value('audio_protocols_active','—')],['NETWORK','Interfaces actives',this._value('network_interfaces_up','—')],['MA','Stations actives',this._value('ma_live_stations','—')]];

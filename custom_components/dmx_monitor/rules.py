@@ -65,14 +65,28 @@ class DmxRuleEvaluator:
         reason=(f"{count}/{len(c.channels)} selected channels meet threshold {threshold}" if not pending else f"target {'ON' if target else 'OFF'} pending ({pending} delay)")
         return RuleTrace(self.state,target,c.channels,active_channels,count,required,threshold,pending,reason)
 
-def parse_channel_selection(text: str) -> tuple[int, ...]:
+def parse_channel_selection(value) -> tuple[int, ...]:
+    """Parse DMX channel selections from HA/UI friendly formats.
+
+    Accepts lists/tuples/sets, comma/range strings (``1,2,5-8``) and the
+    bracketed JSON-ish form often produced by frontend controls (``[1, 2]``).
+    """
+    if isinstance(value, (list, tuple, set)):
+        parts = list(value)
+    else:
+        text = str(value or "").strip()
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1]
+        parts = text.replace(" ", "").split(",")
     result=set()
-    for part in text.replace(" ","").split(","):
+    for raw in parts:
+        part=str(raw).strip().strip('\"\'')
         if not part: continue
         if "-" in part:
             a,b=part.split("-",1); start,end=int(a),int(b); result.update(range(min(start,end),max(start,end)+1))
         else: result.add(int(part))
-    if not result or any(c<1 or c>512 for c in result): raise ValueError("selection must contain DMX channels 1..512")
+    if not result or any(c<1 or c>512 for c in result):
+        raise ValueError("selection must contain DMX channels 1..512")
     return tuple(sorted(result))
 
 

@@ -126,7 +126,7 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         self.osc_targets = {x.target_id: x for x in self.osc_target_store.load()}
         self.timecode = TimecodeMonitor()
         self.projector_monitor = PJLinkMonitor()
-        self.security = SecurityManager(hass.config.path())
+        self.security = SecurityManager(hass.config.path(), autoload=False)
         self._last_activity = {}
         self.data = {
             "devices_total": 0,
@@ -366,7 +366,7 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         snapshot["projectors"] = self.projector_monitor.snapshot()
         snapshot["network_capacity"] = capacity_snapshot(snapshot.get("dmx_universes", []), **self.capacity_config)
         snapshot["chaos"] = self.chaos.snapshot()
-        snapshot["archive"] = self.archive.status() if self.archive else {}
+        snapshot["archive"] = await self.hass.async_add_executor_job(self.archive.status) if self.archive else {}
         if getattr(self, "dmx_network", None):
             snapshot["dmx_network_health"] = self.dmx_network.snapshot()
         else:

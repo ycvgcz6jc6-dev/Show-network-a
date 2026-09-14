@@ -77,7 +77,7 @@ class SecurityState:
 
 class SecurityManager:
     """Salted PBKDF2 password gate for active operations."""
-    def __init__(self, path: str, unlock_seconds: int = 1800) -> None:
+    def __init__(self, path: str, unlock_seconds: int = 1800, autoload: bool = True) -> None:
         base = Path(path)
         self.path = base if base.suffix == ".json" else base / "show_network_security.json"
         self.unlock_seconds = max(60, min(int(unlock_seconds), 86400))
@@ -86,9 +86,10 @@ class SecurityManager:
         self._digest = ""
         self._failed_attempts = 0
         self._locked_until = 0.0
-        self._load()
+        if autoload:
+            self.load()
 
-    def _load(self) -> None:
+    def load(self) -> None:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
             self._salt = str(data.get("salt", ""))
