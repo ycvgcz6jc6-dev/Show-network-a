@@ -64,6 +64,7 @@ async def async_register(hass: HomeAssistant) -> None:
         new_options = dict(entry.options)
         new_options[key] = bool(call.data.get("enabled", False))
         hass.config_entries.async_update_entry(entry, options=new_options)
+        await hass.config_entries.async_reload(entry.entry_id)
 
     async def _set_dmx_universes(call):
         raw = str(call.data.get("universes", "")).strip()
@@ -89,6 +90,7 @@ async def async_register(hass: HomeAssistant) -> None:
         new_options = dict(entry.options)
         new_options[CONF_UNIVERSES] = raw
         hass.config_entries.async_update_entry(entry, options=new_options)
+        await hass.config_entries.async_reload(entry.entry_id)
 
     hass.services.async_register(DOMAIN, "set_module_enabled", _set_module_enabled)
     hass.services.async_register(DOMAIN, "set_dmx_universes", _set_dmx_universes)

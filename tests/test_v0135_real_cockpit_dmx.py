@@ -4,9 +4,9 @@ ROOT=Path(__file__).resolve().parents[1]
 CC=ROOT/'custom_components'/'dmx_monitor'
 
 def test_version_0135():
-    assert '"version": "0.14.4"' in (CC/'manifest.json').read_text()
-    assert 'VERSION = "0.14.4"' in (CC/'const.py').read_text()
-    assert 'show-network.js?v=0.14.4' in (CC/'__init__.py').read_text()
+    assert '"version": "0.14.8"' in (CC/'manifest.json').read_text()
+    assert 'VERSION = "0.14.8"' in (CC/'const.py').read_text()
+    assert 'show-network.js?v=0.14.8' in (CC/'__init__.py').read_text()
 
 def test_dmx_publish_limiter_uses_real_pending_token():
     text=(CC/'coordinator.py').read_text()
@@ -19,7 +19,7 @@ def test_frontend_cockpit_and_local_module_gates():
         assert marker in js
     assert '_moduleGate(module,label,key)' in js
     assert 'L’activation se fait maintenant dans la page du module concerné.' in js
-    assert 'Monitoring activé, mais aucun projecteur n’est configuré/découvert.' in js
+    assert 'Aucun projecteur PJLink observé.' in js
 
 def test_rule_builder_supports_values_b64_and_punchlight_feedback():
     js=(CC/'static'/'show-network.js').read_text()

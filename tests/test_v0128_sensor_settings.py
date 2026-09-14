@@ -14,11 +14,11 @@ def test_sidebar_panel_does_not_hijack_integration_config():
     text = (ROOT / "custom_components/dmx_monitor/__init__.py").read_text()
     assert 'frontend_url_path="show-network"' in text
     assert "config_panel_domain=DOMAIN" not in text
-    assert "show-network.js?v=0.14.4" in text
+    assert "show-network.js?v=0.14.8" in text
 
 
 def test_version_0128():
     manifest = (ROOT / "custom_components/dmx_monitor/manifest.json").read_text()
     const = (ROOT / "custom_components/dmx_monitor/const.py").read_text()
-    assert '"version": "0.14.4"' in manifest
-    assert 'VERSION = "0.14.4"' in const
+    assert '"version": "0.14.8"' in manifest
+    assert 'VERSION = "0.14.8"' in const

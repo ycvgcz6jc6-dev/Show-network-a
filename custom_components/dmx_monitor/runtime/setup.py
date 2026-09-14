@@ -32,7 +32,7 @@ from ..signal_watchdog import SignalWatchdogRule
 from ..runtime_data import ShowNetworkRuntimeData
 from ..vendor_discovery import async_scan as async_scan_vendor_discovery
 from ..discovery_pipeline import DiscoveryPipeline
-from ..network_discovery import arp_neighbors
+from ..network_discovery import arp_neighbors, ipv4_interfaces, warm_neighbor_cache
 from ..snmp import async_get as async_snmp_get
 from ..punchlight_network import async_scan as async_scan_punchlight_network
 from ..const import *
@@ -313,7 +313,8 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     coordinator.data["ha_builder_enabled"]=coordinator.ha_builder_enabled
     coordinator.data["notification"]={"enabled":coordinator.notifications.enabled,"target":coordinator.notifications.target,"mode":coordinator.notifications.mode}
 
-    async def _vendor_discovery_tick(_now=None):
+    async def _vendor_discovery_tick(_now=None, *, active=False):
+        manual_scan = bool(active)
         status = {"state": "running", "mdns_state": "scanning", "mdns_services": 0, "mdns_detail": "using Home Assistant shared Zeroconf; passive DNS-SD scan in progress", "mdns_timeout_s": 4.0, "arp_neighbors": 0, "inventory_total": len(coordinator.inventory.devices), "errors": []}
         coordinator.publish(discovery_status=status)
         rows = []
@@ -356,7 +357,14 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
             status["errors"].append(f"mDNS: {err}")
             _LOGGER.warning("Show Network mDNS discovery failed: %s", err)
         try:
+            interfaces = await hass.async_add_executor_job(ipv4_interfaces)
+            status["interfaces"] = interfaces
+            if manual_scan:
+                sweep = await hass.async_add_executor_job(warm_neighbor_cache, interfaces)
+                status["active_inventory_scan"] = sweep
+                await asyncio.sleep(0.35)
             neighbors = await hass.async_add_executor_job(arp_neighbors)
+            status["arp_by_interface"] = {i["interface"]: sum(1 for r in neighbors if r.get("interface") == i["interface"]) for i in interfaces}
             status["arp_neighbors"] = len(neighbors)
             for row in neighbors:
                 dev=coordinator.inventory.upsert(
@@ -386,7 +394,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                 try:
                     async with http_sem:
                         reader,writer=await asyncio.wait_for(asyncio.open_connection(ip,80),timeout=.8)
-                        writer.write(f"GET / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: Show-Network/0.14.7\r\nConnection: close\r\n\r\n".encode())
+                        writer.write(f"GET / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: Show-Network/0.14.8\r\nConnection: close\r\n\r\n".encode())
                         await writer.drain(); raw=await asyncio.wait_for(reader.read(16384),timeout=.8)
                         writer.close();
                         try: await writer.wait_closed()
@@ -508,11 +516,16 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                                 async_snmp_get(ip,community,f"1.3.6.1.2.1.31.1.1.1.15.{i}",timeout=.7))
                         return {"index":i,"name":name or f"if{i}","oper_status":status_v,"up":status_v==1,"speed_mbps":speed}
                     ports=await asyncio.gather(*(_port(i) for i in range(1,n+1))) if n else []
-                    temp=None
+                    temp=cpu60=memfree=vlan_count=None
                     if identity.get("manufacturer")=="Luminex":
-                        temp=await async_snmp_get(ip,community,GIGACORE_TEMP_OID,timeout=.9)
+                        temp,cpu60,memfree,vlan_count=await asyncio.gather(
+                            async_snmp_get(ip,community,GIGACORE_TEMP_OID,timeout=.9),
+                            async_snmp_get(ip,community,"1.3.6.1.4.1.4413.1.1.1.1.4.12.0",timeout=.9),
+                            async_snmp_get(ip,community,"1.3.6.1.4.1.4413.1.1.1.1.4.10.0",timeout=.9),
+                            async_snmp_get(ip,community,"1.3.6.1.2.1.17.7.1.1.4.0",timeout=.9),
+                        )
                         if isinstance(temp,(int,float)) and abs(temp)>200:temp=float(temp)/10.0
-                    switch_rows.append({"ip":ip,"manufacturer":identity.get("manufacturer"),"name":identity.get("sys_name"),"model":identity.get("sys_descr"),"sys_object_id":identity.get("sys_object_id"),"uptime_ticks":uptime,"interface_count":if_count,"ports":ports,"ports_up":sum(1 for p in ports if p["up"]),"temperature_c":temp,"read_only":True})
+                    switch_rows.append({"ip":ip,"manufacturer":identity.get("manufacturer"),"name":identity.get("sys_name"),"model":identity.get("sys_descr"),"sys_object_id":identity.get("sys_object_id"),"uptime_ticks":uptime,"interface_count":if_count,"ports":ports,"ports_up":sum(1 for p in ports if p["up"]),"temperature_c":temp,"cpu_60s_pct":cpu60,"memory_free_pct":memfree,"vlan_count":vlan_count,"read_only":True})
                 await asyncio.gather(*(_switch_telemetry(x) for x in status["snmp_hosts"]))
                 coordinator.publish(switch_telemetry=switch_rows)
                 status["switch_telemetry_devices"] = len(switch_rows)
@@ -528,7 +541,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
             device_inventory=coordinator.inventory.public(include_hidden=True),
             green_go_inventory=coordinator.green_go.snapshot(), elc_inventory=coordinator.elc.snapshot(),
         )
-    coordinator.async_scan_network = _vendor_discovery_tick
+    coordinator.async_scan_network = lambda: _vendor_discovery_tick(active=True)
     vendor_discovery_cancel=async_track_time_interval(hass,_vendor_discovery_tick,timedelta(seconds=180))
     # Run the first scan in the background instead of awaiting it inline: this
     # scan takes >=2s and was previously blocking async_setup_entry directly,

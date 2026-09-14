@@ -40,5 +40,5 @@ def test_manifest_and_const_versions_match():
     import json
     manifest = json.loads((COMP / "manifest.json").read_text())
     const = (COMP / "const.py").read_text()
-    assert manifest["version"] == "0.14.4"
-    assert 'VERSION = "0.14.4"' in const
+    assert manifest["version"] == "0.14.8"
+    assert 'VERSION = "0.14.8"' in const

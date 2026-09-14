@@ -1,5 +1,5 @@
 DOMAIN = "dmx_monitor"
-VERSION = "0.14.7"
+VERSION = "0.14.8"
 
 CONF_INTERFACE = "interface"
 CONF_UNIVERSES = "universes"
