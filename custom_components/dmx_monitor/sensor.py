@@ -72,6 +72,9 @@ SENSORS = (
     ("vendor_discovery", "Découvertes fabricants / Vendor discoveries", None),
     ("etc_sensor_catalog", "Capteurs ETC documentés / ETC documented sensors", None),
     ("switch_profiles", "Profils switches disponibles (catalogue) / Available switch profiles (catalogue)", None),
+    ("projectors_total", "Projecteurs PJLink / PJLink projectors", None),
+    ("projectors_online", "Projecteurs PJLink en ligne / Online PJLink projectors", None),
+    ("projectors_errors", "Projecteurs PJLink en erreur / PJLink projectors with errors", None),
     ("network_interfaces_up", "Interfaces réseau actives / Network interfaces up", None),
     ("network_interfaces_stale", "Interfaces réseau silencieuses / Stale network interfaces", None),
     ("network_packets_observed", "Paquets réseau observés / Network packets observed", None),
@@ -238,6 +241,8 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return dict(self.coordinator.data.get("discovery_status", {}))
         if self._key == "protocol_rx_diagnostics":
             return dict(self.coordinator.data.get("protocol_rx_diagnostics", {}))
+        if self._key in {"projectors_total", "projectors_online", "projectors_errors"}:
+            return dict(self.coordinator.data.get("projector_status", {}))
         if self._key in {"ma_packets", "ma_sources", "ma_groups", "ma_stations", "ma_live_stations", "ma_sessions"}:
             return {"ma_remote": self.coordinator.data.get("ma_remote", {}), "rx_diagnostics": self.coordinator.data.get("protocol_rx_diagnostics", {}).get("ma_net3", {})}
         if self._key == "device_inventory":

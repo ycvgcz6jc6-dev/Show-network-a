@@ -383,6 +383,10 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         if self.punchlight:
             snapshot["punchlight"] = self.punchlight.snapshot()
         snapshot["projectors"] = self.projector_monitor.snapshot()
+        snapshot["projector_status"] = self.projector_monitor.status()
+        snapshot["projectors_total"] = snapshot["projector_status"].get("total", 0)
+        snapshot["projectors_online"] = snapshot["projector_status"].get("online", 0)
+        snapshot["projectors_errors"] = snapshot["projector_status"].get("errors", 0)
         snapshot["network_capacity"] = capacity_snapshot(snapshot.get("dmx_universes", []), **self.capacity_config)
         snapshot["chaos"] = self.chaos.snapshot()
         snapshot["archive"] = await self.hass.async_add_executor_job(self.archive.status) if self.archive else {}

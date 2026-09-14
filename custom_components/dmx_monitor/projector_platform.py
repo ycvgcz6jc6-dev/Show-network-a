@@ -58,5 +58,10 @@ def sensor_entities(c):
             ProjectorState(c, r, base, "lamp_hours"),
             ProjectorState(c, r, base, "temperature_c"),
             ProjectorState(c, r, base, "errors"),
+            ProjectorState(c, r, base, "serial_number"),
+            ProjectorState(c, r, base, "software_version"),
+            ProjectorState(c, r, base, "input_resolution"),
+            ProjectorState(c, r, base, "recommended_resolution"),
+            ProjectorState(c, r, base, "filter_hours"),
         ])
     return out
