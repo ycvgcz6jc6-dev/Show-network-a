@@ -43,11 +43,45 @@ def _validate(data):
         for i,mode in enumerate(item["modes"]):
             require_mapping(mode,name=f"fixtures.{key}.modes[{i}]"); require_keys(mode,{"name","channels"},name=f"fixtures.{key}.modes[{i}]")
 
-_RAW=load_yaml_catalog("fixtures.yaml",_validate)
-PROFILES={}
-for key,item in _RAW.items():
-    channels=tuple(FixtureChannel(c["name"],int(c["offset"]),ChannelCapability(**c["capability"])) for c in item["channels"])
-    modes=tuple(FixtureMode(m["name"],tuple(m["channels"])) for m in item["modes"])
-    PROFILES[key]=FixtureProfile(item["profile_id"],item["manufacturer"],item["model"],channels,modes)
-def get(profile_id: str | None) -> FixtureProfile | None: return PROFILES.get(str(profile_id or ""))
-def snapshot() -> list[dict[str,Any]]: return [p.snapshot() for p in PROFILES.values()]
+_LOADED = False
+
+class _LazyProfiles(dict[str, FixtureProfile]):
+    def _ensure(self):
+        if not _LOADED:
+            load_profiles()
+    def __len__(self):
+        self._ensure(); return dict.__len__(self)
+    def __iter__(self):
+        self._ensure(); return dict.__iter__(self)
+    def get(self, key, default=None):
+        self._ensure(); return dict.get(self, key, default)
+    def values(self):
+        self._ensure(); return dict.values(self)
+    def items(self):
+        self._ensure(); return dict.items(self)
+
+PROFILES: dict[str, FixtureProfile] = _LazyProfiles()
+
+def load_profiles() -> dict[str, FixtureProfile]:
+    """Load the static fixture catalogue. Call from an executor in HA setup."""
+    global _LOADED
+    if _LOADED:
+        return PROFILES
+    raw = load_yaml_catalog("fixtures.yaml", _validate)
+    built = {}
+    for key,item in raw.items():
+        channels=tuple(FixtureChannel(c["name"],int(c["offset"]),ChannelCapability(**c["capability"])) for c in item["channels"])
+        modes=tuple(FixtureMode(m["name"],tuple(m["channels"])) for m in item["modes"])
+        built[key]=FixtureProfile(item["profile_id"],item["manufacturer"],item["model"],channels,modes)
+    dict.clear(PROFILES); dict.update(PROFILES, built); _LOADED = True
+    return PROFILES
+
+def get(profile_id: str | None) -> FixtureProfile | None:
+    if not _LOADED:
+        load_profiles()
+    return PROFILES.get(str(profile_id or ""))
+
+def snapshot() -> list[dict[str,Any]]:
+    if not _LOADED:
+        load_profiles()
+    return [p.snapshot() for p in PROFILES.values()]

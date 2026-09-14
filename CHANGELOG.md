@@ -1,3 +1,12 @@
+## 0.13.3 — Raw RX visibility
+
+- Fixed E1.31/sACN multicast universe mapping (U1 -> 239.255.0.1).
+- sACN now binds UDP 5568 on wildcard and joins configured groups on the selected DMX interface.
+- Added configured/joined multicast group and membership-interface diagnostics.
+- Added raw MA-Net3 per-source packet diagnostics before classification.
+- Moved fixture catalogue disk loading off the HA event loop during runtime setup.
+- Frontend cache/version bumped to 0.13.3.
+
 ## 0.13.2 — Protocol RX diagnostics
 
 - Added explicit receive diagnostics for Art-Net and sACN: listener state, bound interface/endpoint, packets received/parsed, last source, last universe, restart/error counters.

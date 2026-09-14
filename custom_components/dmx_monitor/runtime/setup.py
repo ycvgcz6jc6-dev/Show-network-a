@@ -77,6 +77,9 @@ class RuntimeSetupResult:
 
 async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings: dict) -> RuntimeSetupResult:
     """Compose and start protocol/runtime resources for one config entry."""
+    # Static fixture YAML must not be read on Home Assistant's event loop.
+    from ..fixture_profiles import load_profiles
+    await hass.async_add_executor_job(load_profiles)
     # DeviceInventory reads a JSON overrides file synchronously in __init__;
     # run the construction in the executor so that disk I/O never happens
     # directly on the event loop during config entry setup.

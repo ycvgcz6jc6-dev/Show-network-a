@@ -180,12 +180,12 @@ class DmxNetworkReceiver:
             return
         if hasattr(socket, "IP_MULTICAST_ALL"):
             try:
-                sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_ALL, 1)
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_ALL, 0)
             except OSError:
                 pass
         groups = self.multicast_universes or (1,)
         for universe in groups:
-            octets = ((int(universe) - 1) // 256, (int(universe) - 1) % 256)
+            octets = (int(universe) // 256, int(universe) % 256)
             target = f"239.255.{octets[0]}.{octets[1]}"
             mreq = socket.inet_aton(target) + socket.inet_aton(self.interface if self.interface != "0.0.0.0" else "0.0.0.0")
             try:
@@ -205,7 +205,8 @@ class DmxNetworkReceiver:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            sock.bind((self.interface, port))
+            bind_host = "0.0.0.0" if protocol == "SACN" else self.interface
+            sock.bind((bind_host, port))
             self._bound_endpoint[protocol] = f"{sock.getsockname()[0]}:{sock.getsockname()[1]}"
             self._joined_groups[protocol] = []
             self._join_errors[protocol] = []
@@ -404,6 +405,8 @@ class DmxNetworkReceiver:
                     "last_source": self._last_source["SACN"], "last_universe": self._last_universe["SACN"],
                     "last_packet_epoch": self._last_packet_epoch["SACN"], "last_error": self._last_error["SACN"],
                     "joined_groups": list(self._joined_groups["SACN"]), "join_errors": list(self._join_errors["SACN"]),
+                    "membership_interface": self.interface,
+                    "configured_groups": [f"239.255.{int(u)//256}.{int(u)%256}" for u in (self.multicast_universes or (1,))],
                     "restarts": self._restart_count["SACN"], "queue_drops": self._queue_drops["SACN"],
                 },
             },

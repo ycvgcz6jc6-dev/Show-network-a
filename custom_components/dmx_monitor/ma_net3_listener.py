@@ -38,6 +38,10 @@ class MANet3Listener:
         self.join_errors: list[str] = []
         self.last_source: str | None = None
         self.last_packet_epoch: float | None = None
+        self.last_packet_size: int | None = None
+        self.last_packet_prefix_hex: str | None = None
+        self.last_packet_prefix_ascii: str | None = None
+        self.source_stats: dict[str, dict] = {}
 
     async def start(self):
         if self.transports:
@@ -90,6 +94,17 @@ class MANet3Listener:
         self.last_seen = now
         self.last_packet_epoch = time()
         self.last_source = source
+        self.last_packet_size = len(data)
+        prefix = bytes(data[:24])
+        self.last_packet_prefix_hex = prefix.hex(" ")
+        self.last_packet_prefix_ascii = "".join(chr(b) if 32 <= b < 127 else "." for b in prefix)
+        stats = self.source_stats.setdefault(source, {"packets": 0, "bytes": 0, "last_packet_epoch": None, "last_size": 0, "prefix_hex": "", "prefix_ascii": ""})
+        stats["packets"] += 1
+        stats["bytes"] += len(data)
+        stats["last_packet_epoch"] = self.last_packet_epoch
+        stats["last_size"] = len(data)
+        stats["prefix_hex"] = self.last_packet_prefix_hex
+        stats["prefix_ascii"] = self.last_packet_prefix_ascii
         self.sources.add(source)
         self.groups_seen.add(group)
         self.observations.append(MAObservation(source, group, len(data), now))
@@ -110,6 +125,10 @@ class MANet3Listener:
                 "joined_groups": list(self.joined_groups), "join_errors": list(self.join_errors),
                 "last_error": self.last_error, "last_source": self.last_source,
                 "last_packet_epoch": self.last_packet_epoch,
+                "last_packet_size": self.last_packet_size,
+                "last_packet_prefix_hex": self.last_packet_prefix_hex,
+                "last_packet_prefix_ascii": self.last_packet_prefix_ascii,
+                "raw_sources": [{"source_ip": ip, **stats} for ip, stats in sorted(self.source_stats.items())],
             },
         }
 
