@@ -128,3 +128,11 @@ Validation: static/unit/syntax only; no claim of real HA/network/hardware valida
 - Automatic reduction of non-critical refresh/discovery work under host pressure.
 - Protocol reception and watchdog paths remain independent of adaptive UI/polling cadence.
 - CPU/RAM and current performance level are exposed to the HA entity layer.
+
+## 0.14.0
+- DMX View: navigation univers précédent/suivant en plus du sélecteur; conservation de la réception réelle uniquement.
+- Découverte: enrichissement SNMP v1 strictement read-only et borné des voisins ARP quand une communauté est explicitement configurée; lecture sysDescr/sysName/sysObjectID; qualification Luminex/GigaCore, ELC et Green-GO uniquement sur preuve explicite.
+- Dante: reconnaissance mDNS conservative des services netaudio/Dante/Audinate et alimentation de l'inventaire; page Audio conserve une synthèse propre et ajoute un volet repliable Geek Diagnostics.
+- Inventaire: édition manuelle plus pratique avec catalogue constructeurs et rafraîchissement après sauvegarde.
+- Constructeurs: modal d'ajout remontée dans le composant pour corriger positionnement/styles.
+- Aucun plan IP utilisateur n'est codé en dur.

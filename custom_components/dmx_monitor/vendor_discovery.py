@@ -11,7 +11,9 @@ from typing import Any
 
 MARKERS = {
     "green_go": ("green-go", "greengo"),
-    "elc": ("dmxlan", "dmxlan", "elc lighting"),
+    "elc": ("dmxlan", "elc lighting"),
+    "dante": ("_netaudio-", "dante", "audinate"),
+    "luminex": ("luminex", "gigacore"),
 }
 
 

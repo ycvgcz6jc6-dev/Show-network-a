@@ -33,6 +33,7 @@ from ..runtime_data import ShowNetworkRuntimeData
 from ..vendor_discovery import async_scan as async_scan_vendor_discovery
 from ..discovery_pipeline import DiscoveryPipeline
 from ..network_discovery import arp_neighbors
+from ..snmp import async_get as async_snmp_get
 from ..punchlight_network import async_scan as async_scan_punchlight_network
 from ..const import *
 from ..aes70_monitor import AES70Monitor
@@ -311,6 +312,19 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                     coordinator.green_go.observe(host, source="mdns", evidence=row.get("evidence"), last_seen=row.get("observed_at"))
                 elif row.get("vendor") == "elc":
                     coordinator.elc.observe(host, source="mdns", evidence=row.get("evidence"), last_seen=row.get("observed_at"))
+                elif row.get("vendor") in ("dante", "luminex"):
+                    vendor = row.get("vendor")
+                    addresses = row.get("addresses") or []
+                    ip = addresses[0] if addresses else None
+                    coordinator.inventory.upsert(
+                        ip=ip, hostname=row.get("host") or row.get("name"),
+                        manufacturer=("Audinate/Dante" if vendor == "dante" else "Luminex"),
+                        category=("audio_network" if vendor == "dante" else "network_switch"),
+                        protocols=({"mDNS", "Dante"} if vendor == "dante" else {"mDNS"}),
+                        sources={"mdns"}, confidence="confirmed", confidence_score=.95,
+                        evidence=[{"field":"service_type","value":row.get("service_type"),"source":"mdns","confidence":1.0}],
+                        unique_id=f"mdns:{ip or host}",
+                    )
         except Exception as err:
             status["mdns_state"] = "error"
             status["mdns_detail"] = f"{type(err).__name__}: {err}"
@@ -326,6 +340,49 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                     evidence=[{"field":"interface","value":row.get("interface"),"source":"arp_cache","confidence":0.9}],
                     unique_id=f"candidate:{row.get('ip')}",
                 )
+            # Read-only SNMP identity enrichment.  This is deliberately bounded and
+            # uses only the community explicitly configured by the user.  A timeout is
+            # not evidence that the host is not a switch.
+            community = str(settings.get(CONF_GIGACORE_COMMUNITY, "") or "").strip()
+            if community:
+                sem = asyncio.Semaphore(8)
+                async def _snmp_identity(row):
+                    ip = row.get("ip")
+                    if not ip: return
+                    async with sem:
+                        descr, name, obj = await asyncio.gather(
+                            async_snmp_get(ip, community, "1.3.6.1.2.1.1.1.0", timeout=.45),
+                            async_snmp_get(ip, community, "1.3.6.1.2.1.1.5.0", timeout=.45),
+                            async_snmp_get(ip, community, "1.3.6.1.2.1.1.2.0", timeout=.45),
+                        )
+                    if descr is None and name is None and obj is None: return
+                    text = f"{descr or ''} {name or ''}".lower()
+                    manufacturer = None
+                    model = None
+                    if "luminex" in text or "gigacore" in text:
+                        manufacturer, model = "Luminex", (str(descr) if descr else "GigaCore")
+                    elif "elc" in text or "dmxlan" in text:
+                        manufacturer = "ELC Lighting"
+                    elif "green-go" in text or "greengo" in text:
+                        manufacturer = "Green-GO"
+                    dev = coordinator.inventory.find_by_ip(ip)
+                    coordinator.inventory.upsert(
+                        unique_id=(dev.unique_id if dev else f"candidate:{ip}"), ip=ip,
+                        hostname=(str(name) if name else None), manufacturer=manufacturer, model=model,
+                        category="network_switch", protocols={"IPv4/ARP", "SNMP"}, sources={"snmp_readonly"},
+                        confidence=("confirmed" if manufacturer else "candidate"),
+                        confidence_score=(.96 if manufacturer else .8),
+                        evidence=[
+                            {"field":"sysDescr","value":descr,"source":"snmp","confidence":1.0},
+                            {"field":"sysName","value":name,"source":"snmp","confidence":1.0},
+                            {"field":"sysObjectID","value":obj,"source":"snmp","confidence":1.0},
+                        ],
+                    )
+                await asyncio.gather(*(_snmp_identity(r) for r in neighbors))
+                status["snmp_responders"] = sum(1 for d in coordinator.inventory.devices.values() if "SNMP" in d.protocols)
+                status["identified_switches"] = sum(1 for d in coordinator.inventory.devices.values() if d.category == "network_switch")
+            else:
+                status["snmp_state"] = "not_configured"
         except Exception as err:
             status["errors"].append(f"ARP: {err}")
             _LOGGER.warning("Show Network ARP discovery failed: %s", err)
