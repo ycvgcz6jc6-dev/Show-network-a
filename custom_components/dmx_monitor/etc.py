@@ -40,30 +40,19 @@ ETC_POWER = {
 # Fields explicitly useful for a professional diagnostic UI.  Some are
 # available as CEM3 error/status information; transport support is kept false
 # until a documented passive network/API path is implemented.
-ETC_SENSORS = tuple(
-    ETCSensorDefinition(*row)
-    for row in (
-        ("cpu_temperature", "Température CPU", "CPU temperature", "°C"),
-        ("phase_a_voltage", "Tension phase A", "Phase A voltage", "V"),
-        ("phase_b_voltage", "Tension phase B", "Phase B voltage", "V"),
-        ("phase_c_voltage", "Tension phase C", "Phase C voltage", "V"),
-        ("line_frequency", "Fréquence secteur", "Line frequency", "Hz"),
-        ("phase_a_status", "État phase A", "Phase A status"),
-        ("phase_b_status", "État phase B", "Phase B status"),
-        ("phase_c_status", "État phase C", "Phase C status"),
-        ("dmx_port_a_status", "DMX port A", "DMX port A status"),
-        ("dmx_port_b_status", "DMX port B", "DMX port B status"),
-        ("fan_status", "Ventilateur", "Fan status"),
-        ("zero_cross_status", "Zero-cross", "Zero-cross status"),
-        ("temperature_sensor_status", "Capteur température", "Temperature sensor status"),
-        ("rack_detect_status", "Détection rack", "Rack detect status"),
-        ("memory_status", "Mémoire", "Memory status"),
-        ("af_card_1_status", "AF Card 1", "AF Card 1 status"),
-        ("af_card_2_status", "AF Card 2", "AF Card 2 status"),
-        ("af_card_3_status", "AF Card 3", "AF Card 3 status"),
-        ("af_card_4_status", "AF Card 4", "AF Card 4 status"),
-        ("dmx_error_count", "Erreurs DMX", "DMX error count"),
-    )
+ETC_SENSORS = (
+    ETCSensorDefinition("cpu_temperature", "Température CPU", "CPU temperature", "°C", "cem3_web_system", True),
+    ETCSensorDefinition("phase_x_voltage", "Tension phase X", "Phase X voltage", "V", "cem3_web_system", True),
+    ETCSensorDefinition("phase_y_voltage", "Tension phase Y", "Phase Y voltage", "V", "cem3_web_system", True),
+    ETCSensorDefinition("phase_z_voltage", "Tension phase Z", "Phase Z voltage", "V", "cem3_web_system", True),
+    ETCSensorDefinition("line_frequency", "Fréquence secteur", "Line frequency", "Hz", "cem3_web_system", True),
+    ETCSensorDefinition("rack_status", "État rack", "Rack status", None, "cem3_web_system", True),
+    ETCSensorDefinition("active_errors", "Erreurs actives", "Active errors", None, "cem3_web_system", True),
+    ETCSensorDefinition("software_version", "Version CEM3", "CEM3 software version", None, "cem3_web_system", True),
+    ETCSensorDefinition("panic_state", "État Panic", "Panic state", None, "cem3_web_system", True),
+    ETCSensorDefinition("circuits", "État circuits", "Circuit status", None, "cem3_web_dimmers", True),
+    ETCSensorDefinition("actual_load", "Charge réelle AF", "AF actual load", "A", "documented_capability", False),
+    ETCSensorDefinition("recorded_load", "Charge enregistrée AF", "AF recorded load", "A", "documented_capability", False),
 )
 
 
@@ -78,7 +67,7 @@ def profile(model: str | None = None) -> dict:
         "category": "lighting_control_and_power",
         "console_families": ETC_CONSOLES,
         "power_families": ETC_POWER,
-        "protocols": ["sACN", "Art-Net", "ETC Net3", "DMX", "RDM"],
+        "protocols": ["sACN", "ETC Net3", "DMX", "RDM", "CEM3 HTTP web interface"],
         "sensors": sensor_catalog(),
         "evidence_policy": "official_documentation_only",
     }

@@ -4,7 +4,8 @@ This module intentionally parses only the packet envelope required for
 monitoring. It does not transmit, respond, merge, or alter DMX data.
 """
 from __future__ import annotations
-from dataclasses import dataclass
+from threading import RLock
+from dataclasses import dataclass, replace
 import struct
 from time import monotonic, time
 from collections import deque
@@ -33,6 +34,7 @@ class UniverseObservation:
 
 class UniverseTracker:
     def __init__(self, max_items: int = 2048, history_seconds: float = 2.0):
+        self._lock = RLock()
         self.max_items = max(64, int(max_items))
         self.history_seconds = max(0.5, float(history_seconds))
         self._items={}
@@ -45,58 +47,60 @@ class UniverseTracker:
         self._order=deque()
 
     def observe(self, protocol, universe, source, values, priority=None, sequence=None, interface=None):
-        key=(protocol,universe,source)
-        now=monotonic()
-        times=self._times.setdefault(key, deque())
-        times.append(now)
-        cutoff=now-self.history_seconds
-        while times and times[0] < cutoff:
-            times.popleft()
-        previous=self._previous.get(key)
-        changed=previous is not None and previous != values
-        current=bytes(values[:512])
-        self._previous[key]=current
-        last_time = self._last_time.get(key)
-        inter = (now-last_time)*1000.0 if last_time is not None else 0.0
-        self._last_time[key]=now
-        prev_inter = getattr(self._items.get(key), "inter_arrival_ms", 0.0)
-        jitter = abs(inter-prev_inter) if last_time is not None else 0.0
-        if sequence is not None and protocol.upper() == "SACN":
-            prev = self._last_sequence.get(key)
-            if prev is not None:
-                gap = (int(sequence)-int(prev)) & 0xFF
-                if 1 < gap < 128: self._seq_expected[key] = self._seq_expected.get(key, 0) + gap - 1
-            self._last_sequence[key]=int(sequence)
-            self._seq_received[key]=self._seq_received.get(key, 0)+1
-        rate=len(times)/self.history_seconds
-        received=self._seq_received.get(key, 0); lost=self._seq_expected.get(key, 0)
-        loss=(lost/max(1, lost+received))*100.0
-        item=UniverseObservation(
-            protocol,universe,source,priority,sequence,rate,
-            sum(1 for x in current if x),current,
-            now if changed else self._items.get(key,UniverseObservation(
-                protocol,universe,source,priority,sequence,rate,0,bytes(values),None,interface
-            )).last_change,interface,round(inter,2),round(jitter,2),round(loss,2)
-        )
-        self._items[key]=item
-        if key not in self._order:
-            self._order.append(key)
-        # O(1) bounded eviction: never sort the complete tracker during a burst.
-        while len(self._items) > self.max_items and self._order:
-            stale_key = self._order.popleft()
-            if stale_key not in self._items:
-                continue
-            self._items.pop(stale_key, None)
-            self._times.pop(stale_key, None)
-            self._previous.pop(stale_key, None)
-            self._last_time.pop(stale_key, None)
-            self._last_sequence.pop(stale_key, None)
-            self._seq_expected.pop(stale_key, None)
-            self._seq_received.pop(stale_key, None)
-        return item
+        with self._lock:
+            key=(protocol,universe,source)
+            now=monotonic()
+            times=self._times.setdefault(key, deque())
+            times.append(now)
+            cutoff=now-self.history_seconds
+            while times and times[0] < cutoff:
+                times.popleft()
+            previous=self._previous.get(key)
+            changed=previous is not None and previous != values
+            current=bytes(values[:512])
+            self._previous[key]=current
+            last_time = self._last_time.get(key)
+            inter = (now-last_time)*1000.0 if last_time is not None else 0.0
+            self._last_time[key]=now
+            prev_inter = getattr(self._items.get(key), "inter_arrival_ms", 0.0)
+            jitter = abs(inter-prev_inter) if last_time is not None else 0.0
+            if sequence is not None and protocol.upper() == "SACN":
+                prev = self._last_sequence.get(key)
+                if prev is not None:
+                    gap = (int(sequence)-int(prev)) & 0xFF
+                    if 1 < gap < 128: self._seq_expected[key] = self._seq_expected.get(key, 0) + gap - 1
+                self._last_sequence[key]=int(sequence)
+                self._seq_received[key]=self._seq_received.get(key, 0)+1
+            rate=len(times)/self.history_seconds
+            received=self._seq_received.get(key, 0); lost=self._seq_expected.get(key, 0)
+            loss=(lost/max(1, lost+received))*100.0
+            item=UniverseObservation(
+                protocol,universe,source,priority,sequence,rate,
+                sum(1 for x in current if x),current,
+                now if changed else self._items.get(key,UniverseObservation(
+                    protocol,universe,source,priority,sequence,rate,0,bytes(values),None,interface
+                )).last_change,interface,round(inter,2),round(jitter,2),round(loss,2)
+            )
+            self._items[key]=item
+            if key not in self._order:
+                self._order.append(key)
+            # O(1) bounded eviction: never sort the complete tracker during a burst.
+            while len(self._items) > self.max_items and self._order:
+                stale_key = self._order.popleft()
+                if stale_key not in self._items:
+                    continue
+                self._items.pop(stale_key, None)
+                self._times.pop(stale_key, None)
+                self._previous.pop(stale_key, None)
+                self._last_time.pop(stale_key, None)
+                self._last_sequence.pop(stale_key, None)
+                self._seq_expected.pop(stale_key, None)
+                self._seq_received.pop(stale_key, None)
+            return replace(item)
 
     def all(self):
-        return list(self._items.values())
+        with self._lock:
+            return [replace(item) for item in self._items.values()]
 
 def parse_artnet_dmx(data: bytes):
     if len(data)<18 or data[:8] != b"Art-Net\0":
@@ -182,7 +186,7 @@ class DmxNetworkReceiver:
             try:
                 sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_ALL, 0)
             except OSError:
-                pass
+                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
         groups = self.multicast_universes or (1,)
         for universe in groups:
             octets = (int(universe) // 256, int(universe) % 256)
@@ -253,11 +257,11 @@ class DmxNetworkReceiver:
                     try:
                         self._sockets.remove((sock, group))
                     except ValueError:
-                        pass
+                        logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
                     try:
                         sock.close()
                     except OSError:
-                        pass
+                        logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
             if started_at is not None and (asyncio.get_running_loop().time() - started_at) > MIN_STABLE_UPTIME_S:
                 backoff = 1.0
             if not self._stopping:
@@ -324,7 +328,7 @@ class DmxNetworkReceiver:
                         try:
                             self.on_timecode(data, addr[0])
                         except Exception:
-                            pass
+                            logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
                     parsed = parse_artnet_dmx(data)
                     if not parsed:
                         continue
@@ -353,7 +357,7 @@ class DmxNetworkReceiver:
             try:
                 sock.close()
             except OSError:
-                pass
+                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
         self._tasks.clear()
         self._sockets.clear()
         for protocol in self._latest:

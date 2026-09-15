@@ -46,6 +46,13 @@ def encode_osc(address: str, args: list[Any] | tuple[Any, ...] = ()) -> bytes:
         elif isinstance(value, int): tags.append("i"); payload.extend(struct.pack(">i", value))
         elif isinstance(value, float): tags.append("f"); payload.extend(struct.pack(">f", value))
         elif isinstance(value, str): tags.append("s"); payload.extend(_pad_string(value))
+        elif isinstance(value, (bytes, bytearray)):
+            tags.append("b")
+            raw = bytes(value)
+            payload.extend(struct.pack(">I", len(raw)))
+            payload.extend(raw)
+            payload.extend(b"\0" * ((4 - len(raw) % 4) % 4))
+        elif value is None: tags.append("N")
         else: raise ValueError(f"Unsupported OSC argument type: {type(value).__name__}")
     return _pad_string(address) + _pad_string("".join(tags)) + bytes(payload)
 

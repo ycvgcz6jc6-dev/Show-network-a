@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,9 +39,58 @@ def _plain(value: Any) -> Any:
             try:
                 data[key] = _plain(item)
             except Exception:
-                pass
+                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
         return data or str(value)
     return str(value)
+
+
+
+
+def _first_value(value: Any) -> Any:
+    """Return the current value from AES70 getter tuples/Arguments."""
+    plain = _plain(value)
+    if isinstance(plain, (list, tuple)):
+        return plain[0] if plain else None
+    if isinstance(plain, dict):
+        # AES70py Arguments wrappers can become dict-like; prefer the first
+        # public value without depending on generated field names.
+        for item in plain.values():
+            return item
+        return None
+    return plain
+
+
+def _mute_bool(value: Any) -> bool | None:
+    """Map OcaMuteState conservatively: Muted=1, Unmuted=2."""
+    plain = _first_value(value)
+    if isinstance(plain, bool):
+        return plain
+    if isinstance(plain, (int, float)):
+        if int(plain) == 1:
+            return True
+        if int(plain) == 2:
+            return False
+    text = str(plain or "").lower()
+    if "unmut" in text:
+        return False
+    if "muted" in text or text == "mute":
+        return True
+    return None
+
+
+def _role_kind(obj: Any) -> str:
+    name = type(obj).__name__.lower()
+    if "temperaturesensor" in name:
+        return "temperature"
+    if "impedancesensor" in name:
+        return "impedance"
+    if "audiolevelsensor" in name or "levelsensor" in name:
+        return "level"
+    if name.endswith("ocamute") or name == "ocamute" or "mute" in name:
+        return "mute"
+    if name.endswith("ocagain") or name == "ocagain":
+        return "gain"
+    return ""
 
 
 @dataclass
@@ -56,8 +106,11 @@ class AES70Record:
     state: Any = None
     message: str | None = None
     roles: list[str] = field(default_factory=list)
+    telemetry: dict[str, Any] = field(default_factory=dict)
+    telemetry_errors: dict[str, str] = field(default_factory=dict)
     online: bool = False
     error: str | None = None
+    last_seen: float | None = None
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -72,8 +125,11 @@ class AES70Record:
             "state": _plain(self.state),
             "message": self.message,
             "roles": list(self.roles),
+            "telemetry": _plain(self.telemetry),
+            "telemetry_errors": dict(self.telemetry_errors),
             "online": self.online,
             "error": self.error,
+            "last_seen": self.last_seen,
             "protocol": "AES70/OCA",
             "source": "live_aes70",
         }
@@ -114,7 +170,7 @@ class AES70Monitor:
             try:
                 client.close()
             except Exception:
-                pass
+                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
         self._clients.clear()
 
     async def _loop(self) -> None:
@@ -139,6 +195,55 @@ class AES70Monitor:
             rec.online = False
             rec.error = f"{type(err).__name__}: {err}"
             _LOGGER.debug("AES70 %s unavailable: %s", host, err)
+
+    async def _read_role_telemetry(self, roles: dict[Any, Any], rec: AES70Record) -> None:
+        """Read only standard AES70 properties from discovered role objects.
+
+        No Set* method is ever invoked. The object class determines which
+        standard getter is safe to call; unsupported/vendor objects are left
+        untouched and therefore cannot create synthetic telemetry.
+        """
+        telemetry: dict[str, Any] = {}
+        errors: dict[str, str] = {}
+        for role, obj in roles.items():
+            role_name = str(role)
+            kind = _role_kind(obj)
+            if not kind:
+                continue
+            getter_name = {
+                "temperature": "GetReading",
+                "impedance": "GetReading",
+                "level": "GetReading",
+                "mute": "GetState",
+                "gain": "GetGain",
+            }[kind]
+            getter = getattr(obj, getter_name, None)
+            if not callable(getter):
+                continue
+            try:
+                raw = await asyncio.wait_for(getter(), timeout=1.5)
+                current = _first_value(raw)
+                entry: dict[str, Any] = {
+                    "kind": kind,
+                    "class": type(obj).__name__,
+                    "getter": getter_name,
+                    "value": _plain(current),
+                }
+                if kind == "temperature":
+                    entry["unit"] = "°C"
+                elif kind in {"level", "gain"}:
+                    entry["unit"] = "dB"
+                elif kind == "impedance":
+                    entry["unit"] = "ohm/phase"
+                elif kind == "mute":
+                    entry["muted"] = _mute_bool(raw)
+                telemetry[role_name] = entry
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:
+                errors[role_name] = f"{type(err).__name__}: {err}"
+        rec.telemetry = telemetry
+        rec.telemetry_errors = errors
 
     async def _poll(self, host: str) -> None:
         # AES70py is async, but its TCP connection setup is synchronous.
@@ -172,15 +277,17 @@ class AES70Monitor:
                 rec.manufacturer = "d&b audiotechnik"
             roles = await device.get_role_map()
             rec.roles = sorted(str(k) for k in roles.keys())
+            await self._read_role_telemetry(roles, rec)
             rec.online = True
             rec.error = None
+            rec.last_seen = time.time()
         finally:
             rec_snapshot = rec
             self.records[host] = rec_snapshot
             try:
                 device.close()
             except Exception:
-                pass
+                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
             self._clients.pop(host, None)
 
     def snapshot(self) -> dict[str, Any]:

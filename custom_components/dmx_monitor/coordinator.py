@@ -15,6 +15,7 @@ from .green_go import GreenGOInventory
 from .elc import ELCInventory
 from .gigacore import GigaCoreMonitor
 from .etc import profile as etc_profile
+from .etc_cem3 import CEM3WebMonitor
 from .switch_profiles import enabled_profiles
 from .lighting_receiver import UniverseTracker
 from .signal_watchdog import SignalWatchdogManager
@@ -28,12 +29,18 @@ from .network_health import NetworkHealth
 from .ma_remote import MARemoteInventory
 from .audio_amplifiers import AudioAmplifierInventory
 from .power_manager import PowerManager
+from .fixture_control import FixtureControlEngine
+from .dmx_scene_bank import DmxSceneBank
+from .rdm_inventory import RDMInventory
 from .dmx_circuit_monitor import DmxCircuitMonitor
 from .dmx_ha_mapping import DmxHAMappingEngine
 from .dmx_ha_mapping_storage import DmxHAMappingStore
 from .dmx_ha_zones import DmxHAZoneEngine, DmxHAZone
 from .backup import ConfigBackupManager
+from .diagnostics_export import DiagnosticsExporter
 from .osc_output import OSCOutput, OSCTargetStore
+from .midi_output import MIDIOutput, MIDITargetStore
+from .show_control import ShowControlBank
 from .timecode import TimecodeMonitor
 from .reliability import ChaosSimulator, capacity_snapshot
 from .rate_limiter import RateLimiter
@@ -44,6 +51,7 @@ from .core.state_store import RuntimeStateStore
 from .host_metrics import snapshot as host_metrics_snapshot
 from .performance_manager import AdaptivePerformance
 from .osc_learn import OSCLearnSession
+from .video_ip_supervision import VideoIPSupervision
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -66,11 +74,14 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         self.elc = ELCInventory()
         self.vendor_discovery = []
         self.gigacore = gigacore
+        self.etc_cem3_monitor = None
         self.ma_listener = None
         self.ma_remote = MARemoteInventory()
         self.ptp_monitor = None
         self.dante_monitor = None
         self.aes67_monitor = None
+        self.aes70_monitor = None
+        self.avdecc_monitor = None
         self.st2110_monitor = None
         self.avb_monitor = None
         self.enttec_input = None
@@ -84,21 +95,24 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         self.watchdogs = SignalWatchdogManager(hass, action_guard=self._watchdog_action_allowed, event_callback=self._watchdog_event)
         self.rules = RuleSet()
         self.rule_store = RuleStore(hass.config.path())
-        for _rule in self.rule_store.load():
-            try:
-                self.rules.add(_rule)
-            except (ValueError, TypeError):
-                _LOGGER.warning("Ignoring invalid persisted Show Network rule: %s", getattr(_rule, "name", "?"))
+        # Persisted rules are loaded asynchronously by runtime/setup.py.  Do not
+        # touch disk in the coordinator constructor: HA creates it on the event loop.
         self.topology = ShowTopology()
         self.network_health = NetworkHealth()
         self.audio_amplifiers = AudioAmplifierInventory()
         self.power_manager = PowerManager(hass.config.path("show_network_power_manager.json"))
+        self.fixture_control = FixtureControlEngine(hass.config.path())
+        self.dmx_scene_bank = DmxSceneBank(hass.config.path("show_network_dmx_scenes.json"))
+        self.rdm_inventory = RDMInventory()
+        self.rdm_bridge = None
+        self.rdmnet_bridge = None
+        self.rdm_allow_writes = False
         self.dmx_circuit_monitor = DmxCircuitMonitor(hass.config.path("show_network_dmx_circuit_monitor.json"))
         self.archive = None
         self.chaos = ChaosSimulator()
         self.capacity_config = {"link_mbps": 1000.0, "dante_mbps": 0.0, "cameras_mbps": 0.0, "st2110_mbps": 0.0, "other_mbps": 0.0}
         self._timeline_dmx_hashes = {}
-        self._dmx_publish_limiter = RateLimiter(interval_s=0.05)
+        self._dmx_publish_limiter = RateLimiter(interval_s=0.2)
         # Node-RED-inspired latest-value pipeline: watchdogs see every packet,
         # while rules/HA mappings process coalesced snapshots at a bounded rate.
         self._dmx_flow = LatestValuePipeline(self._process_dmx_snapshot, interval_s=0.05, max_keys=256, byte_change_threshold=1)
@@ -124,15 +138,21 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         self.dmx_ha_zone_store_path = hass.config.path("show_network_dmx_ha_zones.json")
         self._load_dmx_ha_zones()
         self.config_backups = ConfigBackupManager(hass.config.path())
+        self.diagnostics_exporter = DiagnosticsExporter(hass.config.path())
         for _mapping in self.dmx_ha_mapping_store.load():
             self.dmx_ha_mapping_engine.add(_mapping)
         self.control_mapping_events = []
         self.osc_output = OSCOutput()
         self.osc_learn = OSCLearnSession()
         self.osc_target_store = OSCTargetStore(hass.config.path("show_network_osc_targets.json"))
-        self.osc_targets = {x.target_id: x for x in self.osc_target_store.load()}
+        self.osc_targets = {}
+        self.midi_output = MIDIOutput()
+        self.midi_target_store = MIDITargetStore(hass.config.path("show_network_midi_targets.json"))
+        self.midi_targets = {}
+        self.show_control = ShowControlBank(hass.config.path("show_network_show_control.json"))
         self.timecode = TimecodeMonitor()
         self.projector_monitor = PJLinkMonitor()
+        self.video_ip_supervision = VideoIPSupervision()
         self.security = SecurityManager(hass.config.path(), autoload=False)
         self._last_activity = {}
         self.data = {
@@ -162,6 +182,10 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             "osc_input": {"enabled": False, "messages": 0, "last_address": None, "last_source": None, "last_error": None},
             "osc_learn": {"active": False, "suggestions": []},
             "midi_input": {"enabled": False, "connected": False, "messages": 0, "port": None, "last_error": None},
+            "midi_output": self.midi_output.snapshot(),
+            "midi_output_sent": 0,
+            "midi_targets": [],
+            **self.show_control.snapshot(),
             "ptp_packets": 0,
             "ptp_sources": 0,
             "ptp_event_packets": 0,
@@ -199,6 +223,11 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             "green_go_devices": 0,
             "green_go_sources": 0,
             "etc_sensor_catalog": [],
+            "etc_cem3": {"enabled": False, "total": 0, "online": 0, "errors_total": 0, "racks": []},
+            "etc_cem3_racks_total": 0,
+            "etc_cem3_racks_online": 0,
+            "etc_cem3_errors_total": 0,
+            "etc_cem3_temperature_max": None,
             "switch_profiles": [],
             "switch_manufacturers": [],
             "enttec_connected": False,
@@ -211,6 +240,7 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             "enttec_model": None,
             "enttec_values": bytes(512),
             "punchlight": {"configured": False, "connected": False, "recording": False, "ready": False, "messages": 0},
+            "tally_ip": {"enabled": False, "listening": False, "on": False, "receive_only": True},
             "dmx_universes": [],
             "watchdog_rules": [],
             "watchdog_active": 0,
@@ -300,6 +330,8 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             await self.gigacore.async_update()
         if getattr(self, "projector_monitor_enabled", True):
             await self.projector_monitor.async_update()
+        if self.etc_cem3_monitor:
+            await self.etc_cem3_monitor.async_update()
         snapshot = dict(self.data)
         snapshot["security"] = self.security.snapshot()
         snapshot["network_interfaces"] = await self.hass.async_add_executor_job(network_interface_snapshot)
@@ -325,6 +357,12 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         snapshot["elc_inventory"] = self.elc.snapshot()
         snapshot["vendor_discovery"] = list(self.vendor_discovery)
         snapshot["etc_sensor_catalog"] = etc_profile().get("sensors", [])
+        etc_live = self.etc_cem3_monitor.snapshot(detail=False) if self.etc_cem3_monitor else {"enabled": False, "total": 0, "online": 0, "errors_total": 0, "temperature_max_c": None, "racks": []}
+        snapshot["etc_cem3"] = etc_live
+        snapshot["etc_cem3_racks_total"] = etc_live.get("total", 0)
+        snapshot["etc_cem3_racks_online"] = etc_live.get("online", 0)
+        snapshot["etc_cem3_errors_total"] = etc_live.get("errors_total", 0)
+        snapshot["etc_cem3_temperature_max"] = etc_live.get("temperature_max_c")
         snapshot["switch_profiles"] = [p.key for p in enabled_profiles(self.data.get("switch_manufacturers"))]
         self.topology.ingest_inventory(self.inventory.public())
         # Promote every observed DMX/audio/control source into the topology with
@@ -355,11 +393,136 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         if self.ptp_monitor:
             snapshot.update(self.ptp_monitor.snapshot())
         if self.dante_monitor:
-            snapshot.update(self.dante_monitor.snapshot())
+            dante_snapshot = self.dante_monitor.snapshot()
+            snapshot.update(dante_snapshot)
+            for row in dante_snapshot.get("dante_inventory", []):
+                ip = row.get("source")
+                if not ip:
+                    continue
+                label = row.get("display_name")
+                evidence = [
+                    {"field": "dns_sd", "value": value, "source": "dante_mdns_passive", "confidence": 0.9}
+                    for value in row.get("identity_evidence", [])[:10]
+                ]
+                self.inventory.upsert(
+                    ip=ip,
+                    hostname=label,
+                    protocols={"Dante/DNS-SD"},
+                    sources={"dante_mdns_passive"},
+                    confidence="candidate",
+                    confidence_score=0.85,
+                    unique_id=f"candidate:{ip}",
+                    evidence=evidence,
+                )
         if self.aes67_monitor:
             snapshot.update(self.aes67_monitor.snapshot())
         if getattr(self, "aes70_monitor", None):
-            snapshot.update(self.aes70_monitor.snapshot())
+            aes70_snapshot = self.aes70_monitor.snapshot()
+            snapshot.update(aes70_snapshot)
+            for row in aes70_snapshot.get("aes70_devices", []):
+                manufacturer = row.get("manufacturer") or "AES70/OCA"
+                host = row.get("host")
+                if not host:
+                    continue
+                key = f"aes70:{host}"
+                self.audio_amplifiers.observe(
+                    key=key,
+                    manufacturer=manufacturer,
+                    host=host,
+                    model=row.get("model"),
+                    serial=row.get("serial"),
+                    device_name=row.get("device_name"),
+                    protocol="AES70/OCA",
+                    evidence="live OCP.1 DeviceManager/role map",
+                    observed_at=row.get("last_seen"),
+                )
+                if row.get("last_seen"):
+                    aes70_roles = row.get("telemetry") or {}
+                    temperatures = {}
+                    loads = {}
+                    mutes = {}
+                    input_levels = {}
+                    output_levels = {}
+                    controls = []
+                    for role_name, entry in aes70_roles.items():
+                        if not isinstance(entry, dict):
+                            continue
+                        kind = entry.get("kind")
+                        value = entry.get("value")
+                        controls.append({"role": role_name, **entry})
+                        if kind == "temperature" and isinstance(value, (int, float)):
+                            temperatures[str(role_name)] = float(value)
+                        elif kind == "mute" and isinstance(entry.get("muted"), bool):
+                            mutes[str(role_name)] = bool(entry.get("muted"))
+                        elif kind == "impedance":
+                            # OcaImpedance is complex (magnitude/phase). Preserve
+                            # the full role data in controls and only expose a
+                            # scalar load when a real magnitude is present.
+                            magnitude = None
+                            if isinstance(value, dict):
+                                for candidate in ("magnitude", "Magnitude", "value", "Value"):
+                                    if isinstance(value.get(candidate), (int, float)):
+                                        magnitude = float(value[candidate]); break
+                            elif isinstance(value, (int, float)):
+                                magnitude = float(value)
+                            if magnitude is not None:
+                                loads[str(role_name)] = magnitude
+                        elif kind == "level" and isinstance(value, (int, float)):
+                            role_l = str(role_name).lower()
+                            if "input" in role_l or role_l.startswith("in"):
+                                input_levels[str(role_name)] = float(value)
+                            elif "output" in role_l or role_l.startswith("out"):
+                                output_levels[str(role_name)] = float(value)
+                    max_temp = max(temperatures.values()) if temperatures else None
+                    self.audio_amplifiers.update_telemetry(
+                        key,
+                        observed_at=row.get("last_seen"),
+                        source="AES70/OCA",
+                        status=str(row.get("state")) if row.get("state") is not None else "online",
+                        error=row.get("error"),
+                        temperature_c=max_temp,
+                        temperatures=temperatures,
+                        load=loads,
+                        mute=mutes,
+                        input_level=input_levels,
+                        output_level=output_levels,
+                        controls=controls or [{"role": role} for role in row.get("roles", [])],
+                    )
+        if getattr(self, "avdecc_monitor", None):
+            avdecc_snapshot = self.avdecc_monitor.snapshot()
+            snapshot.update(avdecc_snapshot)
+            for row in avdecc_snapshot.get("avdecc_entities", []):
+                manufacturer = row.get("manufacturer") or "AVDECC/Milan"
+                entity_id = row.get("entity_id")
+                if not entity_id:
+                    continue
+                key = f"avdecc:{entity_id}"
+                observed_at = row.get("last_seen")
+                self.audio_amplifiers.observe(
+                    key=key,
+                    manufacturer=manufacturer,
+                    host=row.get("host"),
+                    model=row.get("model"),
+                    serial=row.get("serial"),
+                    entity_id=entity_id,
+                    device_name=row.get("name"),
+                    firmware=row.get("firmware"),
+                    protocol="AVDECC/Milan",
+                    evidence="L-Acoustics LA_avdecc helper bridge",
+                    observed_at=observed_at,
+                )
+                if observed_at is not None:
+                    self.audio_amplifiers.update_telemetry(
+                        key,
+                        observed_at=observed_at,
+                        source="AVDECC/Milan",
+                        status="online" if row.get("online") else "offline",
+                        error=row.get("error"),
+                        streams=row.get("streams") or [],
+                        counters=row.get("counters") or {},
+                        clock=row.get("clock") or {},
+                        controls=row.get("controls") or [],
+                    )
         if self.st2110_monitor:
             snapshot.update(self.st2110_monitor.snapshot())
         if self.avb_monitor:
@@ -377,18 +540,33 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             for row in self.dante_monitor.snapshot().get("dante_inventory", []):
                 text = " ".join(row.get("markers", []) + row.get("services", [])).lower()
                 # Conservative candidates: manufacturer evidence must come from observed payload markers.
-                hints = (("l_acoustics", "l-acoustics"), ("l_acoustics", "l acoustics"), ("d_and_b", "d&b"), ("d_and_b", "db audiotechnik"), ("lab_gruppen_lake", "lab gruppen"), ("lab_gruppen_lake", "lake"), ("adamson", "adamson"), ("powersoft", "powersoft"), ("qsc", "qsc"), ("crown", "crown"), ("yamaha", "yamaha"), ("meyer_sound", "meyer sound"))
+                hints = (("L-Acoustics", "l-acoustics"), ("L-Acoustics", "l acoustics"), ("d&b audiotechnik", "d&b"), ("d&b audiotechnik", "db audiotechnik"), ("Lab Gruppen/Lake", "lab gruppen"), ("Lab Gruppen/Lake", "lake"), ("Adamson", "adamson"), ("QSC", "qsc"), ("Crown", "crown"), ("Yamaha", "yamaha"), ("Meyer Sound", "meyer sound"))
                 for manufacturer, marker in hints:
                     if marker in text:
-                        self.audio_amplifiers.observe(key=f"{manufacturer}:{row.get("source")}", manufacturer=manufacturer, host=row.get("source"), protocol="Dante/mDNS", evidence=marker)
+                        observed_at = row.get("last_seen") or row.get("last_timestamp")
+                        self.audio_amplifiers.observe(key=f"{manufacturer}:{row.get('source')}", manufacturer=manufacturer, host=row.get("source"), protocol="Dante/mDNS", evidence=marker, observed_at=observed_at)
         snapshot.update(self.audio_amplifiers.snapshot())
+        if getattr(self, "rdm_bridge", None):
+            rows = list(self.rdm_bridge.devices)
+            self.rdm_inventory.ingest(rows, transport="RDM/OLA")
+            snapshot.update(self.rdm_bridge.snapshot())
+        if getattr(self, "rdmnet_bridge", None):
+            rows = list(self.rdmnet_bridge.devices)
+            self.rdm_inventory.ingest(rows, transport="RDMnet")
+            snapshot.update(self.rdmnet_bridge.snapshot())
+        snapshot.update(self.rdm_inventory.snapshot())
         snapshot.update(self.power_manager.snapshot())
+        snapshot.update(self.fixture_control.snapshot())
+        snapshot.update(self.dmx_scene_bank.snapshot())
         snapshot.update(self.dmx_circuit_monitor.snapshot())
         if self.enttec_input:
             snapshot.update(self.enttec_input.snapshot())
         if self.punchlight:
             snapshot["punchlight"] = self.punchlight.snapshot()
         snapshot["projectors"] = self.projector_monitor.snapshot()
+        # Phase 10 stays out of the HA entity model. The panel reads this
+        # coordinator snapshot through the authenticated websocket endpoint.
+        snapshot["video_ip_supervision"] = self.video_ip_supervision.snapshot()
         snapshot["projector_status"] = self.projector_monitor.status()
         snapshot["projectors_total"] = snapshot["projector_status"].get("total", 0)
         snapshot["projectors_online"] = snapshot["projector_status"].get("online", 0)
@@ -396,6 +574,8 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         snapshot["network_capacity"] = capacity_snapshot(snapshot.get("dmx_universes", []), **self.capacity_config)
         snapshot["chaos"] = self.chaos.snapshot()
         snapshot["archive"] = await self.hass.async_add_executor_job(self.archive.status) if self.archive else {}
+        snapshot["archive"]["configuration_backups"] = await self.hass.async_add_executor_job(self.config_backups.status)
+        snapshot["archive"]["diagnostics"] = self.diagnostics_exporter.status()
         if getattr(self, "dmx_network", None):
             snapshot["dmx_network_health"] = self.dmx_network.snapshot()
         else:
@@ -428,11 +608,24 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             snapshot.update(ma_packets=ma["packets"], ma_sources=ma["sources"], ma_groups=ma["groups"])
             rx_diag["ma_net3"] = ma.get("diagnostics", {})
             source_hints={x.get("source_ip"):x.get("identity_hints",[]) for x in ma.get("diagnostics",{}).get("raw_sources",[])}
+            source_epochs={x.get("source_ip"):x.get("last_packet_epoch") for x in ma.get("diagnostics",{}).get("raw_sources",[])}
             for obs in ma.get("observations", [])[-50:]:
                 try:
-                    self.ma_remote.observe(obs.source_ip, obs.destination_group, session_index=getattr(obs, "session_index", None), identity_hints=source_hints.get(obs.source_ip))
+                    self.ma_remote.observe(
+                        obs.source_ip, obs.destination_group,
+                        session_index=getattr(obs, "session_index", None),
+                        identity_hints=source_hints.get(obs.source_ip),
+                        observed_at=getattr(obs, "received_at", None),
+                        packet_epoch=source_epochs.get(obs.source_ip),
+                    )
                 except AttributeError:
-                    self.ma_remote.observe(obs["source_ip"], obs["destination_group"], session_index=obs.get("session_index"), identity_hints=source_hints.get(obs.get("source_ip")))
+                    self.ma_remote.observe(
+                        obs["source_ip"], obs["destination_group"],
+                        session_index=obs.get("session_index"),
+                        identity_hints=source_hints.get(obs.get("source_ip")),
+                        observed_at=obs.get("received_at"),
+                        packet_epoch=source_epochs.get(obs.get("source_ip")),
+                    )
             snapshot["ma_remote"] = self.ma_remote.snapshot()
         else:
             rx_diag["ma_net3"] = {"state": "disabled_or_unavailable", "interface": snapshot.get("show_network_config", {}).get("interface_ma")}
@@ -445,6 +638,14 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             "avb": self.avb_monitor.snapshot() if self.avb_monitor else {},
         }
         snapshot["protocol_rx_diagnostics"] = rx_diag
+        # Publication time is deliberately separate from protocol packet ages.
+        # The frontend can therefore distinguish "HA refreshed" from "fresh network data".
+        import time as _time
+        snapshot["show_network_freshness"] = {
+            "published_at_epoch": round(_time.time(), 3),
+            "published_monotonic": round(_time.monotonic(), 3),
+            "update_interval_s": float(self.update_interval.total_seconds()) if self.update_interval else None,
+        }
         self.data = snapshot
         return snapshot
 
@@ -475,6 +676,10 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
                 except Exception:
                     _LOGGER.exception("Unable to add dynamic DMX universe entity")
         self.dmx_tracker.observe(protocol, universe, source, values, priority, sequence, interface)
+        # Single-universe HA scene output yields immediately to any external DMX
+        # source on that same universe, then resumes after the configured hold.
+        if self.dmx_scene_bank.observe_input(protocol, universe, source):
+            self.data.update(self.dmx_scene_bank.snapshot())
         if self.archive:
             timeline_key = (str(protocol).lower(), int(universe), str(source or ""))
             compact_hash = hash(bytes(values[:512]))
@@ -654,8 +859,16 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
                 self.capacity_config[key] = max(0.0, float(values[key]))
         self.publish(network_capacity=capacity_snapshot(self.data.get("dmx_universes", []), **self.capacity_config))
 
+    async def async_save_rules(self) -> None:
+        """Persist Rule Builder configuration without blocking HA's event loop."""
+        await self.rule_store.async_save(list(self.rules.rules.values()))
+        await self.hass.async_add_executor_job(self.config_backups.backup, "rule_save")
+
     def save_rules(self) -> None:
-        """Persist Rule Builder configuration without runtime state/history."""
+        """Compatibility wrapper for non-HA callers/tests.
+
+        Runtime service handlers use :meth:`async_save_rules`.
+        """
         self.rule_store.save(list(self.rules.rules.values()))
         self.config_backups.backup("rule_save")
 

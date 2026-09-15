@@ -34,6 +34,7 @@ class DeviceRecord:
     switch_name: str | None = None
     switch_port: str | None = None
     link_speed_mbps: int | None = None
+    interface: str | None = None
     protocols: set[str] = field(default_factory=set)
     sources: set[str] = field(default_factory=set)
     evidence: list[Evidence] = field(default_factory=list)
@@ -145,12 +146,24 @@ class DeviceInventory:
     def upsert(self, **kwargs):
         uid = self.identity(serial=kwargs.get("serial"), mac=kwargs.get("mac"), fallback=kwargs.get("unique_id"))
         device = self.devices.get(uid)
+        # Discovery often sees an IP first (ARP/HTTP) and learns the stable MAC
+        # later. Promote the existing candidate instead of creating a duplicate.
+        if device is None and (kwargs.get("serial") or kwargs.get("mac")) and kwargs.get("ip"):
+            existing = self.find_by_ip(kwargs.get("ip"), interface=kwargs.get("interface"))
+            if existing is not None and existing.unique_id != uid:
+                old_uid = existing.unique_id
+                self.devices.pop(old_uid, None)
+                existing.unique_id = uid
+                self.devices[uid] = existing
+                if old_uid in self.overrides and uid not in self.overrides:
+                    self.overrides[uid] = self.overrides.pop(old_uid)
+                device = existing
         if device is None:
             device = DeviceRecord(unique_id=uid)
             self.devices[uid] = device
         for key in (
             "ip", "ipv6", "hostname", "mac", "manufacturer", "model", "product_type",
-            "serial", "firmware", "category", "vlan", "switch_name", "switch_port", "link_speed_mbps",
+            "serial", "firmware", "category", "vlan", "switch_name", "switch_port", "link_speed_mbps", "interface",
         ):
             value = kwargs.get(key)
             if value is not None:
@@ -170,8 +183,13 @@ class DeviceInventory:
         self._apply_override(uid)
         return device
 
-    def find_by_ip(self, ip):
-        return next((d for d in self.devices.values() if d.ip == ip or d.ipv6 == ip), None)
+    def find_by_ip(self, ip, interface: str | None = None):
+        matches = [d for d in self.devices.values() if d.ip == ip or d.ipv6 == ip]
+        if interface is not None:
+            exact = next((d for d in matches if d.interface == interface), None)
+            if exact is not None:
+                return exact
+        return matches[0] if matches else None
 
     def public(self, include_hidden=True):
         rows = [d.as_public_dict() for d in self.devices.values() if include_hidden or not d.hidden]

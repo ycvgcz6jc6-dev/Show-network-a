@@ -6,6 +6,7 @@ until a user explicitly runs a configured button. DMX Monitor itself remains
 receive-only.
 """
 from __future__ import annotations
+import logging
 
 import asyncio
 import json
@@ -261,6 +262,22 @@ class PowerManager:
         if self._repeat_task is None or self._repeat_task.done():
             self._repeat_task = asyncio.create_task(self._repeat_worker(), name="show-network-power-maintain")
 
+    async def cancel_transitions(self, reason: str = "sequence cancelled") -> None:
+        """Cancel active transitions but keep the last transmitted frame alive.
+
+        This deliberately does not zero DMX. A security timeout must prevent
+        future steps, not cause an automatic power cut.
+        """
+        tasks = [t for t in self._run_tasks.values() if not t.done()]
+        for button_id, task in list(self._run_tasks.items()):
+            if not task.done():
+                button = self.buttons.get(button_id)
+                if button:
+                    button.last_error = reason
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def stop(self) -> None:
         tasks = list(self._run_tasks.values()); self._run_tasks.clear()
         for t in tasks:
@@ -271,19 +288,19 @@ class PowerManager:
         serials=list(self._serials.values());self._serials.clear()
         for ser in serials:
             try: await asyncio.to_thread(ser.close)
-            except Exception: pass
+            except Exception: logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
 
-    async def run(self, button_id: str, turn_on: bool) -> None:
+    async def run(self, button_id: str, turn_on: bool, *, guard=None) -> None:
         button = self.buttons.get(button_id)
         if not button: raise ValueError(f"Unknown Power Manager button: {button_id}")
         if not button.enabled: raise ValueError("Power Manager button is disabled")
         old = self._run_tasks.get(button_id)
         if old and not old.done(): old.cancel(); await asyncio.gather(old, return_exceptions=True)
-        task = asyncio.create_task(self._run_sequence(button, bool(turn_on)), name=f"show-network-power-{button_id}")
+        task = asyncio.create_task(self._run_sequence(button, bool(turn_on), guard=guard), name=f"show-network-power-{button_id}")
         self._run_tasks[button_id] = task
         await task
 
-    async def _run_sequence(self, button: PowerButton, turn_on: bool) -> None:
+    async def _run_sequence(self, button: PowerButton, turn_on: bool, *, guard=None) -> None:
         button.state = "turning_on" if turn_on else "turning_off"; button.last_error = None
         key = self._output_key(button.output); frame = self._frames.setdefault(key, bytearray(512)); self._configs[key] = button.output
         channels = list(button.channels)
@@ -292,13 +309,29 @@ class PowerManager:
         if not turn_on: channels.reverse()
         try:
             for ch in channels:
+                # Security is re-checked before and after every wait. Expiry or an
+                # explicit lock therefore cannot let a queued sequence continue.
+                if guard is not None:
+                    guard()
                 delay = ch.on_delay_s if turn_on else ch.off_delay_s
-                if delay: await asyncio.sleep(delay)
+                if delay:
+                    await asyncio.sleep(delay)
+                if guard is not None:
+                    guard()
                 frame[ch.channel - 1] = ch.on_value if turn_on else ch.off_value
                 await self._send(button.output, bytes(frame))
             button.state = "on" if turn_on else "off"; button.last_run = time.time()
+        except PermissionError as err:
+            button.state = "interrupted"
+            button.last_error = str(err)
+            button.last_run = time.time()
+            self.last_error = button.last_error
+            raise
         except asyncio.CancelledError:
-            button.state = "unknown"; raise
+            button.state = "interrupted"
+            button.last_error = button.last_error or "sequence cancelled"
+            button.last_run = time.time()
+            raise
         except Exception as err:
             button.state = "error"; button.last_error = f"{type(err).__name__}: {err}"; self.last_error = button.last_error; self.errors += 1
             raise
@@ -310,7 +343,7 @@ class PowerManager:
                 cfg = self._configs.get(key)
                 if cfg is None: continue
                 # Maintain only outputs used by a button that is ON/transitioning.
-                active = any(self._output_key(b.output) == key and b.state in {"on", "turning_on", "turning_off"} for b in self.buttons.values())
+                active = any(self._output_key(b.output) == key and b.state in {"on", "turning_on", "turning_off", "interrupted"} for b in self.buttons.values())
                 if active:
                     try: await self._send(cfg, bytes(frame))
                     except Exception as err:
@@ -350,7 +383,7 @@ class PowerManager:
             "power_manager_enabled": ENABLED,
             "power_manager_buttons": [b.public() for b in self.buttons.values()],
             "power_manager_button_count": len(self.buttons),
-            "power_manager_active": sum(1 for b in self.buttons.values() if b.state in {"on", "turning_on", "turning_off"}),
+            "power_manager_active": sum(1 for b in self.buttons.values() if b.state in {"on", "turning_on", "turning_off", "interrupted"}),
             "power_manager_sent": self.sent, "power_manager_errors": self.errors,
             "power_manager_last_error": self.last_error,
             "power_manager_outputs": [x.value for x in PowerOutput],

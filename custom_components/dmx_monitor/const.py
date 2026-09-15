@@ -1,5 +1,5 @@
 DOMAIN = "dmx_monitor"
-VERSION = "0.14.8"
+VERSION = "0.15.2"
 
 CONF_INTERFACE = "interface"
 CONF_UNIVERSES = "universes"
@@ -40,6 +40,15 @@ CONF_PUNCHLIGHT_STOP_SCENE = "punchlight_stop_scene"
 CONF_PUNCHLIGHT_READY_SCENE = "punchlight_ready_scene"
 CONF_PUNCHLIGHT_NOT_READY_SCENE = "punchlight_not_ready_scene"
 
+# Receive-only IP tally (TSL UMD over UDP).
+CONF_TALLY_IP_ENABLED = "tally_ip_enabled"
+CONF_TALLY_IP_INTERFACE = "tally_ip_interface"
+CONF_TALLY_IP_PORT = "tally_ip_port"
+CONF_TALLY_IP_SCREEN = "tally_ip_screen"
+CONF_TALLY_IP_INDEX = "tally_ip_index"
+CONF_TALLY_IP_STALE_TIMEOUT = "tally_ip_stale_timeout"
+DEFAULT_TALLY_IP_PORT = 4003
+
 CONF_WATCHDOG_ENABLED = "watchdog_enabled"
 CONF_WATCHDOG_PROTOCOL = "watchdog_protocol"
 CONF_WATCHDOG_UNIVERSE = "watchdog_universe"
@@ -75,8 +84,25 @@ CONF_DMX_SOURCE = "dmx_source"
 CONF_MA_ENABLED = "ma_enabled"
 CONF_AES70_HOSTS = "aes70_hosts"
 CONF_AES70_PORT = "aes70_port"
+CONF_AVDECC_BRIDGE_URL = "avdecc_bridge_url"
 CONF_CHAOS_ENABLED = "chaos_enabled"
 CONF_PROJECTOR_MONITOR_ENABLED = "projector_monitor_enabled"
+
+CONF_ETC_CEM3_ENABLED = "etc_cem3_enabled"
+CONF_ETC_CEM3_HOSTS = "etc_cem3_hosts"
+CONF_ETC_CEM3_DISCOVERY = "etc_cem3_discovery"
+CONF_ETC_CEM3_INTERFACES = "etc_cem3_interfaces"
+CONF_INTERFACE_ETC = "interface_etc"
+
+CONF_VIDEO_IP_ENABLED = "video_ip_enabled"
+CONF_VIDEO_IP_INTERFACE = "video_ip_interface"
+CONF_VIDEO_IP_PREVIEW_ENABLED = "video_ip_preview_enabled"
+
+CONF_RDM_BRIDGE_URL = "rdm_bridge_url"
+CONF_RDMNET_BRIDGE_URL = "rdmnet_bridge_url"
+CONF_RDM_ENABLED = "rdm_enabled"
+CONF_RDMNET_ENABLED = "rdmnet_enabled"
+CONF_RDM_ALLOW_WRITES = "rdm_allow_writes"
 
 CONF_NOTIFICATION_ENABLED = "notification_enabled"
 CONF_NOTIFICATION_TARGET = "notification_target"

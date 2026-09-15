@@ -82,7 +82,7 @@ def _scan_sync(zc, interface: str | None, timeout: float) -> list[dict[str, Any]
             try:
                 browser.cancel()
             except Exception:
-                pass
+                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
     return sorted(found.values(), key=lambda row: (row["type"] != "punchlight_dli_lan", row["name"].lower()))
 
 

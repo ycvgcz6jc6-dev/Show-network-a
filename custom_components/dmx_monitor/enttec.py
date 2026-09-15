@@ -95,7 +95,7 @@ class EnttecDmxInput:
                 try:
                     await task
                 except asyncio.CancelledError:
-                    pass
+                    logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
                 setattr(self, task_name, None)
         self._pending_callback = None
         if self._serial:

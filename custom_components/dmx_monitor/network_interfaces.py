@@ -3,6 +3,7 @@
 Read-only: no route, VLAN, address or interface state is changed.
 """
 from __future__ import annotations
+import logging
 import socket
 from dataclasses import dataclass, asdict
 
@@ -36,7 +37,7 @@ def discover_interfaces() -> list[NetworkInterfaceInfo]:
                                              bool(st.isup) if st else None, int(st.speed) if st and st.speed else None))
         return rows
     except Exception:
-        pass
+        logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
     try:
         names=[name for _,name in socket.if_nameindex()]
     except OSError:

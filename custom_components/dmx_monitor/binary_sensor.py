@@ -19,6 +19,29 @@ class PunchLightRecording(CoordinatorEntity, BinarySensorEntity):
     def extra_state_attributes(self):
         return dict(self.coordinator.data.get("punchlight", {}))
 
+
+class TallyIPOn(CoordinatorEntity, BinarySensorEntity):
+    _attr_has_entity_name = True
+    _attr_name = "Tally IP — ON"
+    _attr_icon = "mdi:tally-mark-1"
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator)
+        self._attr_unique_id = "tally_ip_on"
+
+    @property
+    def is_on(self):
+        return bool(self.coordinator.data.get("tally_ip", {}).get("on"))
+
+    @property
+    def available(self):
+        state = self.coordinator.data.get("tally_ip", {})
+        return bool(state.get("enabled") and state.get("listening"))
+
+    @property
+    def extra_state_attributes(self):
+        return dict(self.coordinator.data.get("tally_ip", {}))
+
 class PunchLightReady(CoordinatorEntity, BinarySensorEntity):
     _attr_has_entity_name = True
     _attr_name = "PunchLight — Ready"
@@ -43,6 +66,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     seen = set(canonical)
     entities = [UniverseActive(coordinator, *canonical[key]) for key in sorted(seen, key=str)]
     entities.extend([PunchLightRecording(coordinator), PunchLightReady(coordinator)])
+    if coordinator.data.get("tally_ip", {}).get("enabled"):
+        entities.append(TallyIPOn(coordinator))
     entities.extend(projector_binary_entities(coordinator))
     entities.extend(BuilderBinarySensor(coordinator, item) for item in coordinator.ha_builder.items.values() if item.entity_type == "binary_sensor" and item.enabled)
     async_add_entities(entities)
