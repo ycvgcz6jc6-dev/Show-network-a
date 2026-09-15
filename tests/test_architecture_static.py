@@ -20,7 +20,7 @@ def test_service_registry_covers_yaml():
     for path in (COMP/"services").glob("*.py"):
         registered.update(re.findall(r'async_register\(DOMAIN,\s*["\']([^"\']+)',path.read_text()))
     assert service_names == registered
-    assert len(registered) == 44
+    assert len(registered) == 80
 
 def test_runtime_resources_have_explicit_stop_methods():
     tree=ast.parse((COMP/"runtime/setup.py").read_text())

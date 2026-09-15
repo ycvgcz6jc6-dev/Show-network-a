@@ -1,0 +1,6 @@
+# Append inside LA_avdecc/examples/src/CMakeLists.txt when building the helper.
+if(BUILD_AVDECC_CONTROLLER AND ENABLE_AVDECC_FEATURE_JSON)
+  add_executable(ShowNetworkCollector showNetworkCollector.cpp)
+  target_link_libraries(ShowNetworkCollector PRIVATE la_avdecc_controller_cxx)
+  cu_setup_executable_options(ShowNetworkCollector)
+endif()

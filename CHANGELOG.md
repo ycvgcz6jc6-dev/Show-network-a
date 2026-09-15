@@ -1,4 +1,26 @@
+# 0.15.2 EXPERIMENTAL — 2026-09-15
+
+- Base cumulative : archive FULL 0.15.0 fournie, tous ses fichiers conservés.
+- CEM3 : requêtes réelles fixes de lecture, parsers des 72 circuits, propriétés et espaces, validation forte avant POST.
+- Découverte progressive limitée aux NIC choisies, ajout manuel conservé, plafond 32 racks, quatre connexions simultanées.
+- Circuits détaillés par WebSocket authentifié dans le panneau ; agrégats HA préservés et attributs Recorder allégés.
+- États offline/freshness distincts, propriétés en cache, annulation et fermeture des sessions au déchargement.
+- Durcissement réappliqué : 44 exceptions silencieuses journalisées, DOMAIN centralisé, locks State Store/DMX tracker, publication DMX à 5 Hz (mappings inchangés à 20 Hz).
+- Si HA refuse de décharger les plateformes, les ressources restent actives pour éviter une intégration partiellement arrêtée.
+- Tests historiques retrouvés et adaptés aux 80 services, cinq plateformes et version courante ; nouveaux tests CEM3/HTTP/concurrence/cycle de vie.
+- README français puis anglais, provenance et limites de validation explicites.
+
+---
+
 # Changelog
+
+## 0.15.0 — Experimental cumulative release
+
+- Cumulative reconciliation of development phases 1–12.
+- Added GDTF fixture control, RDM/RDMnet bridge integration, 19-scene HA→DMX bank with external-source arbitration, OSC/MIDI/Show Control, IP-video supervision, backup/restore/diagnostics, ETC Sensor3/CEM3 monitoring and passive TSL UMD IP Tally.
+- Final UI/service/runtime consistency audit.
+- README rewritten in French then English with experimental warning and manual installation/update instructions.
+- Active output features remain independently gated; hardware/vendor validation is still required.
 
 ## 0.14.7 — UI state, discovery repair, Power Manager
 - Fixed SNMP BER request encoding and response value parsing (including sysObjectID).
@@ -179,3 +201,11 @@ Validation: static/unit/syntax only; no claim of real HA/network/hardware valida
 - PTP: écoute multicast explicite 224.0.1.129 sur l'interface configurée, présence d'horloge, âge, domaine et Grandmaster exposés.
 - Dante/PTP: synthèse horloge ajoutée tout en conservant les diagnostics geek.
 - sACN: validation de régression du parseur E1.31 sur 512 slots et maintien réception multicast/unicast sur UDP 5568.
+
+## Phase 12 — ETC Sensor3 / CEM3 live supervision
+- Added a dedicated read-only CEM3 HTTP monitor based on the documented CEM3 web interface.
+- Added explicit ETC interface binding and configured CEM3 host list.
+- Added live rack metrics: CPU temperature, line frequency, X/Y/Z phase voltage, rack status, active errors, software version, panic state, and visible circuit statistics when present in the Dimmers page.
+- Added one rack status entity and metric sensors per configured CEM3 rack, plus aggregate ETC CEM3 sensors.
+- Reworked the ETC panel from capability-only catalogue to live Sensor3/CEM3 supervision while retaining documented-but-not-yet-live capabilities.
+- ETC monitor uses HTTP GET only; no rack configuration, level, preset, test, or power-control command is sent.

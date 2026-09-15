@@ -48,6 +48,6 @@ def test_version_0131():
     manifest = (ROOT / "custom_components/dmx_monitor/manifest.json").read_text()
     const = (ROOT / "custom_components/dmx_monitor/const.py").read_text()
     init = (ROOT / "custom_components/dmx_monitor/__init__.py").read_text()
-    assert '"version": "0.14.8"' in manifest
-    assert 'VERSION = "0.14.8"' in const
-    assert 'show-network.js?v=0.14.8' in init
+    assert '"version": "0.15.2"' in manifest
+    assert 'VERSION = "0.15.2"' in const
+    assert 'show-network.js?v=0.15.2' in init
