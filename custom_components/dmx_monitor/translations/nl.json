@@ -52,7 +52,18 @@
           "capacity_other_mbps": "Capaciteit overig verkeer (Mbps)",
           "projectors": "Projectorconfiguratie (JSON)",
           "aes70_hosts": "AES70/OCA-hosts",
-          "aes70_port": "AES70/OCA-poort"
+          "aes70_port": "AES70/OCA-poort",
+          "interface_etc": "ETC CEM3 interface IP address",
+          "etc_cem3_enabled": "Enable ETC Sensor3 / CEM3 monitoring",
+          "etc_cem3_hosts": "CEM3 racks (IP addresses or names, comma-separated)",
+          "tally_ip_interface": "Tally IP interface address",
+          "tally_ip_enabled": "Enable Tally IP receiver",
+          "tally_ip_port": "Tally IP UDP port",
+          "tally_ip_screen": "TSL screen (-1 = any)",
+          "tally_ip_index": "TSL index (-1 = any)",
+          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)",
+          "etc_cem3_discovery": "Conservative ETC CEM3 discovery",
+          "etc_cem3_interfaces": "ETC CEM3 IPv4 interfaces (multiple choices)"
         },
         "data_description": {
           "aes70_hosts": "Comma-separated AES70 hostnames or IP addresses to query."
@@ -109,7 +120,18 @@
           "capacity_other_mbps": "Capaciteit overig verkeer (Mbps)",
           "projectors": "Projectorconfiguratie (JSON)",
           "aes70_hosts": "AES70/OCA-hosts",
-          "aes70_port": "AES70/OCA-poort"
+          "aes70_port": "AES70/OCA-poort",
+          "interface_etc": "ETC CEM3 interface IP address",
+          "etc_cem3_enabled": "Enable ETC Sensor3 / CEM3 monitoring",
+          "etc_cem3_hosts": "CEM3 racks (IP addresses or names, comma-separated)",
+          "tally_ip_interface": "Tally IP interface address",
+          "tally_ip_enabled": "Enable Tally IP receiver",
+          "tally_ip_port": "Tally IP UDP port",
+          "tally_ip_screen": "TSL screen (-1 = any)",
+          "tally_ip_index": "TSL index (-1 = any)",
+          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)",
+          "etc_cem3_discovery": "Conservative ETC CEM3 discovery",
+          "etc_cem3_interfaces": "ETC CEM3 IPv4 interfaces (multiple choices)"
         }
       }
     }
@@ -164,7 +186,18 @@
           "capacity_cameras_mbps": "Cameracapaciteit (Mbps)",
           "capacity_st2110_mbps": "ST 2110-capaciteit (Mbps)",
           "capacity_other_mbps": "Capaciteit overig verkeer (Mbps)",
-          "projectors": "Projectorconfiguratie (JSON)"
+          "projectors": "Projectorconfiguratie (JSON)",
+          "interface_etc": "ETC CEM3 interface IP address",
+          "etc_cem3_enabled": "Enable ETC Sensor3 / CEM3 monitoring",
+          "etc_cem3_hosts": "CEM3 racks (IP addresses or names, comma-separated)",
+          "tally_ip_interface": "Tally IP interface address",
+          "tally_ip_enabled": "Enable Tally IP receiver",
+          "tally_ip_port": "Tally IP UDP port",
+          "tally_ip_screen": "TSL screen (-1 = any)",
+          "tally_ip_index": "TSL index (-1 = any)",
+          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)",
+          "etc_cem3_discovery": "Conservative ETC CEM3 discovery",
+          "etc_cem3_interfaces": "ETC CEM3 IPv4 interfaces (multiple choices)"
         }
       }
     }

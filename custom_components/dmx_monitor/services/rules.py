@@ -30,7 +30,7 @@ async def async_register(hass: HomeAssistant) -> None:
                     enabled=bool(data.get("enabled", False)), test_mode=bool(data.get("test_mode", False)),
                 )
                 coordinator.rules.add(rule)
-                coordinator.save_rules()
+                await coordinator.async_save_rules()
                 coordinator.publish(dmx_rules=coordinator.rules.snapshot())
             except (KeyError, TypeError, ValueError) as err:
                 raise ValueError(f"Invalid DMX rule: {err}") from err
@@ -57,7 +57,7 @@ async def async_register(hass: HomeAssistant) -> None:
                     enabled=bool(data.get("enabled", False)), test_mode=bool(data.get("test_mode", False)),
                 )
                 coordinator.rules.update(old_name, rule)
-                coordinator.save_rules()
+                await coordinator.async_save_rules()
                 coordinator.publish(dmx_rules=coordinator.rules.snapshot(), dmx_rule_traces=coordinator.rules.trace_snapshot())
             except (KeyError, TypeError, ValueError) as err:
                 raise ValueError(f"Invalid DMX rule: {err}") from err
@@ -65,19 +65,19 @@ async def async_register(hass: HomeAssistant) -> None:
         async def _remove_rule(call):
             coordinator = coordinator_for_call(hass, call)
             coordinator.rules.remove(str(call.data["name"]))
-            coordinator.save_rules()
+            await coordinator.async_save_rules()
             coordinator.publish(dmx_rules=coordinator.rules.snapshot())
 
         async def _set_rule_enabled(call):
             coordinator = coordinator_for_call(hass, call)
             coordinator.rules.set_enabled(str(call.data["name"]), bool(call.data["enabled"]))
-            coordinator.save_rules()
+            await coordinator.async_save_rules()
             coordinator.publish(dmx_rules=coordinator.rules.snapshot())
 
         async def _set_rule_test_mode(call):
             coordinator = coordinator_for_call(hass, call)
             coordinator.rules.set_test_mode(str(call.data["name"]), bool(call.data["enabled"]))
-            coordinator.save_rules()
+            await coordinator.async_save_rules()
             coordinator.publish(dmx_rules=coordinator.rules.snapshot())
 
         hass.services.async_register(DOMAIN, "create_rule", _create_rule)

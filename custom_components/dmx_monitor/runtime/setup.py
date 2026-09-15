@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -33,14 +34,18 @@ from ..runtime_data import ShowNetworkRuntimeData
 from ..vendor_discovery import async_scan as async_scan_vendor_discovery
 from ..discovery_pipeline import DiscoveryPipeline
 from ..network_discovery import arp_neighbors, ipv4_interfaces, warm_neighbor_cache
-from ..snmp import async_get as async_snmp_get
+from ..snmp import async_get as async_snmp_get, async_walk as async_snmp_walk
 from ..punchlight_network import async_scan as async_scan_punchlight_network
 from ..const import *
 from ..aes70_monitor import AES70Monitor
+from ..avdecc_bridge import AVDECCBridgeMonitor
+from ..rdm_bridge import RDMBridgeMonitor
 from ..audio_health import AudioHealth
 from ..st2110 import ST2110PassiveInspector
 from ..audio_health import AudioHealth
 from ..performance_manager import AdaptivePerformance
+from ..etc_cem3 import CEM3WebMonitor
+from ..tally_ip import TallyIPReceiver
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,7 +96,28 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     community = settings.get(CONF_GIGACORE_COMMUNITY, "public")
     gigacore = GigaCoreMonitor(hosts, community)
     coordinator = ShowNetworkCoordinator(hass, inventory, gigacore)
+    coordinator.config_entry_id = entry.entry_id
+    coordinator.video_ip_supervision.configure(
+        enabled=bool(settings.get(CONF_VIDEO_IP_ENABLED, True)),
+        interface=settings.get(CONF_VIDEO_IP_INTERFACE, settings.get(CONF_INTERFACE, "0.0.0.0")),
+        preview_enabled=bool(settings.get(CONF_VIDEO_IP_PREVIEW_ENABLED, False)),
+    )
+    # RuleStore performs file I/O; load it off the HA event loop before starting
+    # runtime actions so no stale transition can fire during setup.
+    for _rule in await coordinator.rule_store.async_load():
+        try:
+            coordinator.rules.add(_rule)
+        except (ValueError, TypeError):
+            _LOGGER.warning("Ignoring invalid persisted Show Network rule: %s", getattr(_rule, "name", "?"))
     await coordinator.power_manager.start()
+    await hass.async_add_executor_job(coordinator.fixture_control.load)
+    await coordinator.fixture_control.start()
+    await hass.async_add_executor_job(coordinator.dmx_scene_bank.load)
+    from ..network_interfaces import snapshot as _network_interface_snapshot
+    _nics = await hass.async_add_executor_job(_network_interface_snapshot)
+    _local_addrs = {addr for nic in _nics for addr in (nic.get("addresses") or [])}
+    coordinator.dmx_scene_bank.set_local_sources(_local_addrs)
+    await coordinator.dmx_scene_bank.start()
     await hass.async_add_executor_job(coordinator.security.load)
     discovery_pipeline = DiscoveryPipeline(inventory)
     profile = str(settings.get(CONF_PERFORMANCE_PROFILE, "auto")).lower()
@@ -101,6 +127,8 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     resources = ResourceRegistry()
     coordinator.resource_registry = resources
     resources.add(RuntimeResource(ProtocolDriver("power-manager", "LIGHT"), "power-manager", coordinator.power_manager, "stop", {"role": "explicit-active-output", "security_required": True}))
+    resources.add(RuntimeResource(ProtocolDriver("gdtf-fixture-control", "LIGHT"), "gdtf-fixture-control", coordinator.fixture_control, "stop", {"role": "explicit-active-output", "security_required": True, "description": "GDTF fixed-state fixture control"}))
+    resources.add(RuntimeResource(ProtocolDriver("dmx-scene-bank", "LIGHT"), "dmx-scene-bank", coordinator.dmx_scene_bank, "stop", {"role": "explicit-active-output", "security_required": True, "description": "19-scene single-universe HA DMX output"}))
     coordinator.ha_builder_enabled = bool(settings.get(CONF_HA_BUILDER_ENABLED, True))
     # Same reasoning as DeviceInventory above: HABuilder.__init__ loads a JSON
     # file synchronously, so build it off the event loop.
@@ -136,6 +164,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     interface_dante = settings.get(CONF_INTERFACE_DANTE, interface)
     interface_audio = settings.get(CONF_INTERFACE_AUDIO, interface)
     interface_osc = settings.get(CONF_OSC_INPUT_INTERFACE, interface)
+    interface_etc = settings.get(CONF_INTERFACE_ETC, interface)
 
     # Publish the effective Show Network binding configuration so the custom
     # panel can show exactly which NIC each protocol is using.  This contains
@@ -148,6 +177,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
         "interface_dante": interface_dante,
         "interface_audio": interface_audio,
         "interface_osc": interface_osc,
+        "interface_etc": interface_etc,
         "universes": settings.get(CONF_UNIVERSES, "1-16"),
         "dmx_artnet_enabled": bool(settings.get(CONF_DMX_ARTNET_ENABLED, True)),
         "dmx_sacn_enabled": bool(settings.get(CONF_DMX_SACN_ENABLED, True)),
@@ -161,8 +191,23 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
         "ha_builder_enabled": bool(settings.get(CONF_HA_BUILDER_ENABLED, True)),
         "notification_enabled": bool(settings.get(CONF_NOTIFICATION_ENABLED, False)),
         "projector_monitor_enabled": coordinator.projector_monitor_enabled,
+        "etc_cem3_enabled": bool(settings.get(CONF_ETC_CEM3_ENABLED, False)),
+        "etc_cem3_hosts": str(settings.get(CONF_ETC_CEM3_HOSTS, "") or ""),
+        "gdtf_fixture_control": True,
+        "rdm_enabled": bool(settings.get(CONF_RDM_ENABLED, False)),
+        "rdmnet_enabled": bool(settings.get(CONF_RDMNET_ENABLED, False)),
+        "rdm_allow_writes": bool(settings.get(CONF_RDM_ALLOW_WRITES, False)),
         "chaos_enabled": coordinator.chaos_enabled,
     }
+
+    etc_hosts = [h.strip() for h in str(settings.get(CONF_ETC_CEM3_HOSTS, "") or "").replace(";", ",").split(",") if h.strip()]
+    if bool(settings.get(CONF_ETC_CEM3_ENABLED, False)):
+        coordinator.etc_cem3_monitor = CEM3WebMonitor(etc_hosts, source_ip=interface_etc,
+            source_ips=settings.get(CONF_ETC_CEM3_INTERFACES) or None,
+            discovery=bool(settings.get(CONF_ETC_CEM3_DISCOVERY, False)))
+        resources.add(RuntimeResource(ProtocolDriver("etc-cem3-http", "LIGHT"), "etc-cem3-http", coordinator.etc_cem3_monitor, "stop", {"hosts": etc_hosts, "interface": interface_etc, "role": "read-only-monitor", "method": "HTTP GET + fixed read-only POST queries"}))
+    else:
+        coordinator.etc_cem3_monitor = None
 
     ma_listener = None
     if bool(settings.get(CONF_MA_ENABLED, True)) and interface_ma != "0.0.0.0":
@@ -185,6 +230,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     await archive.async_start()
     archive.record("system", "integration_start", {"entry_id": entry.entry_id})
     backup_manager = ConfigBackupManager(hass.config.path(), keep=10)
+    coordinator.config_backups = backup_manager
     await hass.async_add_executor_job(backup_manager.backup, "startup")
     await hass.async_add_executor_job(archive.export_zip)
     async def _archive_periodic(_now): await hass.async_add_executor_job(archive.export_zip)
@@ -219,6 +265,33 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
             _LOGGER.warning("AES70 monitor unavailable; continuing without it: %s", err)
             aes70_monitor = None
     if aes67_monitor: resources.add(RuntimeResource(ProtocolDriver("aes67", "AUDIO"), "aes67", aes67_monitor, "stop", {"interface": interface_audio, "role": "monitor"}))
+    coordinator.avdecc_monitor = None
+    avdecc_url = str(settings.get(CONF_AVDECC_BRIDGE_URL, "") or "").strip()
+    if avdecc_url:
+        avdecc_monitor = AVDECCBridgeMonitor(avdecc_url)
+        try:
+            await avdecc_monitor.start()
+            coordinator.avdecc_monitor = avdecc_monitor
+            resources.add(RuntimeResource(ProtocolDriver("avdecc", "AUDIO"), "avdecc", avdecc_monitor, "stop", {"endpoint": avdecc_url, "role": "read-only-helper-bridge"}))
+        except Exception as err:
+            _LOGGER.warning("AVDECC helper bridge unavailable; continuing without it: %s", err)
+            avdecc_monitor = None
+    coordinator.rdm_allow_writes = bool(settings.get(CONF_RDM_ALLOW_WRITES, False))
+    coordinator.rdm_bridge = None
+    if bool(settings.get(CONF_RDM_ENABLED, False)):
+        rdm_url = str(settings.get(CONF_RDM_BRIDGE_URL, "") or "").strip()
+        if rdm_url:
+            coordinator.rdm_bridge = RDMBridgeMonitor(rdm_url, transport="RDM/OLA")
+            await coordinator.rdm_bridge.start()
+            resources.add(RuntimeResource(ProtocolDriver("rdm", "LIGHT"), "rdm", coordinator.rdm_bridge, "stop", {"endpoint": rdm_url, "role": "read-mostly-helper-bridge", "writes_armed": coordinator.rdm_allow_writes}))
+    coordinator.rdmnet_bridge = None
+    if bool(settings.get(CONF_RDMNET_ENABLED, False)):
+        rdmnet_url = str(settings.get(CONF_RDMNET_BRIDGE_URL, "") or "").strip()
+        if rdmnet_url:
+            coordinator.rdmnet_bridge = RDMBridgeMonitor(rdmnet_url, transport="RDMnet")
+            await coordinator.rdmnet_bridge.start()
+            resources.add(RuntimeResource(ProtocolDriver("rdmnet", "LIGHT"), "rdmnet", coordinator.rdmnet_bridge, "stop", {"endpoint": rdmnet_url, "role": "read-mostly-helper-bridge", "writes_armed": coordinator.rdm_allow_writes}))
+
     coordinator.st2110_monitor = ST2110PassiveInspector(); coordinator.avb_monitor = _adapter("avb")()
 
     enttec_input = None; enttec_device = settings.get(CONF_ENTTEC_DEVICE, "").strip()
@@ -290,8 +363,45 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     coordinator.data["midi_input"]={**coordinator.data.get("midi_input",{}),"enabled":bool(midi_runtime),"connected":bool(midi_runtime),"port":settings.get(CONF_MIDI_DEVICE) if midi_runtime else None,"controller":midi_controller.model if midi_controller else None,"manufacturer":midi_controller.manufacturer if midi_controller else None}
     if osc_receiver: resources.add(RuntimeResource(ProtocolDriver("osc-input","CONTROL"),"osc-input",osc_receiver,"stop",{"role":"receive-only","interface":settings.get(CONF_OSC_INPUT_INTERFACE,interface),"port":int(settings.get(CONF_OSC_INPUT_PORT,8000))}))
     if midi_runtime: resources.add(RuntimeResource(ProtocolDriver("midi-input","CONTROL"),"midi-input",midi_runtime,"async_stop",{"role":"receive-only","port":settings.get(CONF_MIDI_DEVICE)}))
+    # Phase 9 persistent control targets/cues are loaded off the HA event loop.
+    try:
+        coordinator.osc_targets = {x.target_id: x for x in await asyncio.to_thread(coordinator.osc_target_store.load)}
+        coordinator.midi_targets = {x.target_id: x for x in await asyncio.to_thread(coordinator.midi_target_store.load)}
+        await asyncio.to_thread(coordinator.show_control.load)
+    except Exception as err:
+        _LOGGER.warning("Show Control persistent configuration load failed: %s", err)
+    coordinator.publish(
+        osc_targets=[x.__dict__ for x in coordinator.osc_targets.values()],
+        midi_targets=[x.__dict__ for x in coordinator.midi_targets.values()],
+        midi_output=coordinator.midi_output.snapshot(),
+        **coordinator.show_control.snapshot(),
+    )
+
     coordinator.punchlight=punchlight
     if punchlight: resources.add(RuntimeResource(ProtocolDriver("punchlight","CONTROL"),"punchlight",punchlight,"async_stop",{"role":"receive-only","transport":"MIDI endpoint selected by host"}))
+
+    tally_ip = None
+    if bool(settings.get(CONF_TALLY_IP_ENABLED, False)):
+        tally_interface = str(settings.get(CONF_TALLY_IP_INTERFACE, interface) or interface)
+        def _tally_changed(state: dict):
+            coordinator.publish(tally_ip=state)
+        tally_ip = TallyIPReceiver(
+            tally_interface,
+            int(settings.get(CONF_TALLY_IP_PORT, DEFAULT_TALLY_IP_PORT)),
+            _tally_changed,
+            screen=int(settings.get(CONF_TALLY_IP_SCREEN, -1)),
+            index=int(settings.get(CONF_TALLY_IP_INDEX, -1)),
+            stale_timeout=float(settings.get(CONF_TALLY_IP_STALE_TIMEOUT, 10.0)),
+        )
+        try:
+            await tally_ip.start()
+            resources.add(RuntimeResource(ProtocolDriver("tally-ip","CONTROL"),"tally-ip",tally_ip,"stop",{"role":"receive-only","transport":"TSL UMD UDP","interface":tally_interface,"port":int(settings.get(CONF_TALLY_IP_PORT, DEFAULT_TALLY_IP_PORT))}))
+        except Exception as err:
+            _LOGGER.warning("Tally IP receiver unavailable; continuing without it: %s", err)
+            coordinator.publish(tally_ip={"enabled": True, "listening": False, "on": False, "interface": tally_interface, "port": int(settings.get(CONF_TALLY_IP_PORT, DEFAULT_TALLY_IP_PORT)), "last_error": str(err), "receive_only": True})
+            tally_ip = None
+    else:
+        coordinator.publish(tally_ip={"enabled": False, "listening": False, "on": False, "receive_only": True})
 
     coordinator.data["punchlight_network"]=[]
     dmx_network=_adapter("dmx-network")(
@@ -315,7 +425,8 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
 
     async def _vendor_discovery_tick(_now=None, *, active=False):
         manual_scan = bool(active)
-        status = {"state": "running", "mdns_state": "scanning", "mdns_services": 0, "mdns_detail": "using Home Assistant shared Zeroconf; passive DNS-SD scan in progress", "mdns_timeout_s": 4.0, "arp_neighbors": 0, "inventory_total": len(coordinator.inventory.devices), "errors": []}
+        scan_started = time.monotonic()
+        status = {"state": "running", "started_monotonic": scan_started, "mdns_state": "scanning", "mdns_services": 0, "mdns_detail": "using Home Assistant shared Zeroconf; passive DNS-SD scan in progress", "mdns_timeout_s": 4.0, "arp_neighbors": 0, "inventory_total": len(coordinator.inventory.devices), "errors": []}
         coordinator.publish(discovery_status=status)
         rows = []
         try:
@@ -325,14 +436,22 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
             status["mdns_state"] = "observed" if rows else "no_services_observed"
             status["mdns_detail"] = (f"{len(rows)} mDNS service(s) observed via Home Assistant shared Zeroconf" if rows else "shared Zeroconf active; no mDNS service observed during the 4.0 s passive scan window")
             for row in rows:
+                # Phase 10 video-over-IP supervision consumes the same passive
+                # DNS-SD evidence. It does not probe, subscribe, control, or
+                # create Home Assistant entities.
+                coordinator.video_ip_supervision.observe_mdns(row)
                 addresses = row.get("addresses") or []
                 host = (addresses[0] if addresses else None) or row.get("host") or row.get("name")
                 if host:
                     discovery_pipeline.mdns_result(host, row.get("service_type", ""), row.get("name", ""), row.get("properties") or {})
                 if row.get("vendor") == "green_go":
                     coordinator.green_go.observe(host, source="mdns", evidence=row.get("evidence"), last_seen=row.get("observed_at"))
+                    addresses=row.get("addresses") or []; ip=addresses[0] if addresses else None
+                    coordinator.inventory.upsert(ip=ip, hostname=row.get("host") or row.get("name"), manufacturer="Green-GO", category="intercom", protocols={"mDNS"}, sources={"mdns"}, confidence="confirmed", confidence_score=.95, evidence=[{"field":"service_type","value":row.get("service_type"),"source":"mdns","confidence":1.0}], unique_id=f"mdns:{ip or host}")
                 elif row.get("vendor") == "elc":
                     coordinator.elc.observe(host, source="mdns", evidence=row.get("evidence"), last_seen=row.get("observed_at"))
+                    addresses=row.get("addresses") or []; ip=addresses[0] if addresses else None
+                    coordinator.inventory.upsert(ip=ip, hostname=row.get("host") or row.get("name"), manufacturer="ELC Lighting", category="show_control", protocols={"mDNS"}, sources={"mdns"}, confidence="confirmed", confidence_score=.95, evidence=[{"field":"service_type","value":row.get("service_type"),"source":"mdns","confidence":1.0}], unique_id=f"mdns:{ip or host}")
                 elif row.get("vendor") in ("dante", "luminex"):
                     vendor = row.get("vendor")
                     addresses = row.get("addresses") or []
@@ -346,8 +465,8 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                         evidence=[{"field":"service_type","value":row.get("service_type"),"source":"mdns","confidence":1.0}],
                         unique_id=f"mdns:{ip or host}",
                     )
-                elif row.get("vendor") in ("l_acoustics", "d_and_b", "powersoft", "lab_gruppen_lake", "qsc", "yamaha"):
-                    vendor_names={"l_acoustics":"L-Acoustics","d_and_b":"d&b audiotechnik","powersoft":"Powersoft","lab_gruppen_lake":"Lab Gruppen/Lake","qsc":"QSC","yamaha":"Yamaha"}
+                elif row.get("vendor") in ("l_acoustics", "d_and_b", "lab_gruppen_lake", "qsc", "yamaha"):
+                    vendor_names={"l_acoustics":"L-Acoustics","d_and_b":"d&b audiotechnik","lab_gruppen_lake":"Lab Gruppen/Lake","qsc":"QSC","yamaha":"Yamaha"}
                     manufacturer=vendor_names[row.get("vendor")]; addresses=row.get("addresses") or []; ip=addresses[0] if addresses else None
                     coordinator.inventory.upsert(ip=ip,hostname=row.get("host") or row.get("name"),manufacturer=manufacturer,category="audio_amplifier",protocols={"mDNS"},sources={"mdns"},confidence="confirmed",confidence_score=.9,evidence=[{"field":"service_type","value":row.get("service_type"),"source":"mdns","confidence":.9}],unique_id=f"mdns:{ip or host}")
                     coordinator.audio_amplifiers.observe(key=f"{manufacturer}:{ip or host}",manufacturer=manufacturer,host=ip or host,protocol="mDNS",evidence="; ".join(row.get("evidence") or []))
@@ -359,6 +478,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
         try:
             interfaces = await hass.async_add_executor_job(ipv4_interfaces)
             status["interfaces"] = interfaces
+            source_by_interface = {x.get("interface"): x.get("address") for x in interfaces if x.get("interface") and x.get("address")}
             if manual_scan:
                 sweep = await hass.async_add_executor_job(warm_neighbor_cache, interfaces)
                 status["active_inventory_scan"] = sweep
@@ -371,12 +491,13 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                     ip=row.get("ip"), mac=row.get("mac"), protocols={"IPv4/ARP"},
                     sources={"arp_cache"}, confidence="candidate", confidence_score=0.65,
                     evidence=[{"field":"interface","value":row.get("interface"),"source":"arp_cache","confidence":0.9}],
-                    unique_id=f"candidate:{row.get('ip')}",
+                    interface=row.get("interface"),
+                    unique_id=f"candidate:{row.get('ip')}:{row.get('interface') or 'unknown'}",
                 )
                 from ..device_fingerprints import fingerprint_mac
                 macfp=fingerprint_mac(row.get("mac"))
                 if macfp.vendor:
-                    coordinator.inventory.upsert(unique_id=dev.unique_id,ip=row.get("ip"),mac=row.get("mac"),manufacturer=macfp.vendor,category="network_switch" if macfp.vendor=="Luminex" else None,protocols={"IPv4/ARP","MAC/OUI"},sources={"arp_cache","mac_registry"},confidence="confirmed",confidence_score=.98,evidence=[{"field":"mac_vendor","value":"; ".join(macfp.evidence),"source":"mac_registry","confidence":.98}])
+                    coordinator.inventory.upsert(unique_id=dev.unique_id,ip=row.get("ip"),mac=row.get("mac"),interface=row.get("interface"),manufacturer=macfp.vendor,category="network_switch" if macfp.vendor=="Luminex" else None,protocols={"IPv4/ARP","MAC/OUI"},sources={"arp_cache","mac_registry"},confidence="confirmed",confidence_score=.98,evidence=[{"field":"mac_vendor","value":"; ".join(macfp.evidence),"source":"mac_registry","confidence":.98}])
             # Bounded read-only HTTP identity probe. ARP tells us a host exists but
             # cannot identify it. A simple GET / can provide an explicit vendor/model
             # marker on equipment where SNMP is disabled (notably some show-network
@@ -393,12 +514,13 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                 result={"ip":ip,"state":"timeout_or_no_http","manufacturer":None}
                 try:
                     async with http_sem:
-                        reader,writer=await asyncio.wait_for(asyncio.open_connection(ip,80),timeout=.8)
-                        writer.write(f"GET / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: Show-Network/0.14.8\r\nConnection: close\r\n\r\n".encode())
+                        source_ip = source_by_interface.get(row.get("interface"))
+                        reader,writer=await asyncio.wait_for(asyncio.open_connection(ip,80,local_addr=((source_ip,0) if source_ip else None)),timeout=.8)
+                        writer.write(f"GET / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: Show-Network/0.15.0\r\nConnection: close\r\n\r\n".encode())
                         await writer.drain(); raw=await asyncio.wait_for(reader.read(16384),timeout=.8)
                         writer.close();
                         try: await writer.wait_closed()
-                        except Exception: pass
+                        except Exception: logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
                     head,_,body=raw.partition(b"\r\n\r\n"); headers={}
                     for line in head.decode("latin1","ignore").split("\r\n")[1:]:
                         if ":" in line:
@@ -409,10 +531,10 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                         audio_vendors={"L-Acoustics","d&b audiotechnik","Powersoft","Lab Gruppen/Lake","QSC","Yamaha"}
                         category="audio_amplifier" if fp.vendor in audio_vendors else ("network_switch" if fp.vendor in {"Luminex","Aruba","Cisco","NETGEAR","Ubiquiti","MikroTik","TP-Link"} else "network_device")
                         dev=coordinator.inventory.find_by_ip(ip)
-                        coordinator.inventory.upsert(unique_id=(dev.unique_id if dev else f"candidate:{ip}"),ip=ip,manufacturer=fp.vendor,category=category,protocols={"IPv4/ARP","HTTP"},sources={"http_readonly"},confidence="confirmed",confidence_score=.93,evidence=[{"field":"http_marker","value":"; ".join(fp.evidence),"source":"http_readonly","confidence":.93}])
+                        coordinator.inventory.upsert(unique_id=(dev.unique_id if dev else f"candidate:{ip}:{row.get('interface') or 'unknown'}"),ip=ip,interface=row.get("interface"),manufacturer=fp.vendor,category=category,protocols={"IPv4/ARP","HTTP"},sources={"http_readonly"},confidence="confirmed",confidence_score=.93,evidence=[{"field":"http_marker","value":"; ".join(fp.evidence),"source":"http_readonly","confidence":.93},{"field":"interface","value":row.get("interface"),"source":"http_readonly","confidence":1.0}])
                         if category=="audio_amplifier":coordinator.audio_amplifiers.observe(key=f"{fp.vendor}:{ip}",manufacturer=fp.vendor,host=ip,protocol="HTTP fingerprint",evidence="; ".join(fp.evidence))
                 except (OSError,asyncio.TimeoutError):
-                    pass
+                    logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
                 status["http_hosts"].append(result)
             await asyncio.gather(*(_http_identity(r) for r in neighbors))
             status["http_attempted"] = sum(1 for x in status["http_hosts"] if x.get("state") != "ignored")
@@ -445,7 +567,8 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                     ("Juniper", ("juniper",)),
                 )
                 vendor_enterprise_oids = (
-                    ("Luminex", "1.3.6.1.4.1.4413"),
+                    # 1.3.6.1.4.1.4413 is a Broadcom/FastPath enterprise tree and
+                    # is not sufficient evidence of Luminex by itself.
                     ("Cisco", "1.3.6.1.4.1.9"),
                     ("HPE Aruba", "1.3.6.1.4.1.11"),
                     ("MikroTik", "1.3.6.1.4.1.14988"),
@@ -460,27 +583,35 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                     if dev and getattr(dev, "monitor_mode", "auto") == "ignore":
                         status["snmp_hosts"].append({"ip": ip, "state": "ignored", "manufacturer": None, "sys_name": None, "sys_descr": None, "sys_object_id": None}); return
                     result = {"ip": ip, "state": "timeout_or_no_snmp", "manufacturer": None, "sys_name": None, "sys_descr": None, "sys_object_id": None}
+                    source_ip = source_by_interface.get(row.get("interface"))
                     async with sem:
-                        descr, name, obj = await asyncio.gather(
-                            async_snmp_get(ip, community, "1.3.6.1.2.1.1.1.0", timeout=1.0),
-                            async_snmp_get(ip, community, "1.3.6.1.2.1.1.5.0", timeout=1.0),
-                            async_snmp_get(ip, community, "1.3.6.1.2.1.1.2.0", timeout=1.0),
+                        descr, name, obj, luminex_machine, luminex_serial = await asyncio.gather(
+                            async_snmp_get(ip, community, "1.3.6.1.2.1.1.1.0", timeout=1.0, source_ip=source_ip),
+                            async_snmp_get(ip, community, "1.3.6.1.2.1.1.5.0", timeout=1.0, source_ip=source_ip),
+                            async_snmp_get(ip, community, "1.3.6.1.2.1.1.2.0", timeout=1.0, source_ip=source_ip),
+                            async_snmp_get(ip, community, "1.3.6.1.4.1.4413.1.1.1.1.1.3.0", timeout=.8, source_ip=source_ip),
+                            async_snmp_get(ip, community, "1.3.6.1.4.1.4413.1.1.1.1.1.5.0", timeout=.8, source_ip=source_ip),
                         )
-                    if descr is None and name is None and obj is None:
+                    if descr is None and name is None and obj is None and luminex_machine is None:
                         status["snmp_hosts"].append(result); return
                     text = f"{descr or ''} {name or ''} {obj or ''}".lower()
                     manufacturer = next((vendor for vendor, markers in vendor_markers if any(m in text for m in markers)), None)
+                    # Luminex Gen2 exposes GigaCore model/serial through documented
+                    # FastPath inventory OIDs.  Require an explicit GigaCore value;
+                    # never classify every Broadcom 4413 device as Luminex.
+                    if luminex_machine and "gigacore" in str(luminex_machine).lower():
+                        manufacturer = "Luminex"
                     if not manufacturer and obj:
                         manufacturer = next((vendor for vendor, prefix in vendor_enterprise_oids if str(obj).startswith(prefix)), None)
                     switch_vendors = {"Luminex","Cisco","HPE Aruba","NETGEAR","Ubiquiti","MikroTik","TP-Link","Allied Telesis","Juniper"}
                     switch_evidence = manufacturer in switch_vendors or any(x in text for x in ("switch", "ethernet switch", "managed switch", "gigabit ethernet"))
-                    model = str(descr) if descr else None
-                    result.update({"state":"responded", "manufacturer":manufacturer, "sys_name":name, "sys_descr":descr, "sys_object_id":obj, "switch_evidence":switch_evidence})
+                    model = str(luminex_machine) if manufacturer == "Luminex" and luminex_machine else (str(descr) if descr else None)
+                    result.update({"state":"responded", "manufacturer":manufacturer, "sys_name":name, "sys_descr":descr, "sys_object_id":obj, "switch_evidence":switch_evidence, "interface":row.get("interface"), "source_ip":source_ip, "luminex_machine":luminex_machine, "serial":luminex_serial})
                     status["snmp_hosts"].append(result)
                     dev = coordinator.inventory.find_by_ip(ip)
                     coordinator.inventory.upsert(
-                        unique_id=(dev.unique_id if dev else f"candidate:{ip}"), ip=ip,
-                        hostname=(str(name) if name else None), manufacturer=manufacturer, model=model,
+                        unique_id=(dev.unique_id if dev else f"candidate:{ip}:{row.get('interface') or 'unknown'}"), ip=ip, interface=row.get("interface"),
+                        hostname=(str(name) if name else None), manufacturer=manufacturer, model=model, serial=(str(luminex_serial) if manufacturer == "Luminex" and luminex_serial else None),
                         category=("network_switch" if switch_evidence else "network_device"), protocols={"IPv4/ARP", "SNMP"}, sources={"snmp_readonly"},
                         confidence=("confirmed" if manufacturer else "candidate"),
                         confidence_score=(.96 if manufacturer else .8),
@@ -488,6 +619,9 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                             {"field":"sysDescr","value":descr,"source":"snmp","confidence":1.0},
                             {"field":"sysName","value":name,"source":"snmp","confidence":1.0},
                             {"field":"sysObjectID","value":obj,"source":"snmp","confidence":1.0},
+                            {"field":"interface","value":row.get("interface"),"source":"snmp","confidence":1.0},
+                            {"field":"luminexMachineType","value":luminex_machine,"source":"snmp","confidence":1.0},
+                            {"field":"luminexSerial","value":luminex_serial,"source":"snmp","confidence":1.0},
                         ],
                     )
                 await asyncio.gather(*(_snmp_identity(r) for r in neighbors))
@@ -501,31 +635,53 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                 switch_sem=asyncio.Semaphore(8)
                 async def _switch_telemetry(identity):
                     if not identity.get("switch_evidence") or identity.get("state")!="responded":return
-                    ip=identity["ip"]; dev=coordinator.inventory.find_by_ip(ip)
+                    ip=identity["ip"]; interface=identity.get("interface"); source_ip=identity.get("source_ip")
+                    dev=coordinator.inventory.find_by_ip(ip, interface=interface)
                     if dev and getattr(dev,"monitor_mode","auto")=="ignore":return
                     uptime,if_count=await asyncio.gather(
-                        async_snmp_get(ip,community,"1.3.6.1.2.1.1.3.0",timeout=.9),
-                        async_snmp_get(ip,community,"1.3.6.1.2.1.2.1.0",timeout=.9))
-                    try:n=max(0,min(int(if_count or 0),32))
-                    except (TypeError,ValueError):n=0
+                        async_snmp_get(ip,community,"1.3.6.1.2.1.1.3.0",timeout=.9,source_ip=source_ip),
+                        async_snmp_get(ip,community,"1.3.6.1.2.1.2.1.0",timeout=.9,source_ip=source_ip))
+                    # Discover actual ifIndex values with IF-MIB/ifXTable.  This avoids
+                    # assuming 1..ifNumber and works with sparse/non-contiguous indexes.
+                    name_rows = await async_snmp_walk(ip,community,"1.3.6.1.2.1.31.1.1.1.1",timeout=.7,source_ip=source_ip,max_rows=128)
+                    indexes=[]; names={}
+                    for oid,value in name_rows:
+                        try: idx=int(oid.rsplit('.',1)[1])
+                        except (ValueError,IndexError): continue
+                        indexes.append(idx); names[idx]=value
+                    indexes=sorted(set(indexes))[:128]
                     async def _port(i):
                         async with switch_sem:
-                            name,status_v,speed=await asyncio.gather(
-                                async_snmp_get(ip,community,f"1.3.6.1.2.1.31.1.1.1.1.{i}",timeout=.7),
-                                async_snmp_get(ip,community,f"1.3.6.1.2.1.2.2.1.8.{i}",timeout=.7),
-                                async_snmp_get(ip,community,f"1.3.6.1.2.1.31.1.1.1.15.{i}",timeout=.7))
-                        return {"index":i,"name":name or f"if{i}","oper_status":status_v,"up":status_v==1,"speed_mbps":speed}
-                    ports=await asyncio.gather(*(_port(i) for i in range(1,n+1))) if n else []
+                            status_v,speed,alias=await asyncio.gather(
+                                async_snmp_get(ip,community,f"1.3.6.1.2.1.2.2.1.8.{i}",timeout=.7,source_ip=source_ip),
+                                async_snmp_get(ip,community,f"1.3.6.1.2.1.31.1.1.1.15.{i}",timeout=.7,source_ip=source_ip),
+                                async_snmp_get(ip,community,f"1.3.6.1.2.1.31.1.1.1.18.{i}",timeout=.7,source_ip=source_ip))
+                        return {"index":i,"name":names.get(i) or f"if{i}","alias":alias,"oper_status":status_v,"up":status_v==1,"speed_mbps":speed}
+                    ports=await asyncio.gather(*(_port(i) for i in indexes)) if indexes else []
+                    # LLDP-MIB remote system names and port descriptions.  Keys are the
+                    # full LLDP timeMark/localPort/remIndex suffix, so evidence remains explicit.
+                    lldp_names = await async_snmp_walk(ip,community,"1.0.8802.1.1.2.1.4.1.1.9",timeout=.7,source_ip=source_ip,max_rows=128)
+                    lldp_ports = await async_snmp_walk(ip,community,"1.0.8802.1.1.2.1.4.1.1.8",timeout=.7,source_ip=source_ip,max_rows=128)
+                    port_by_suffix={oid[len("1.0.8802.1.1.2.1.4.1.1.8")+1:]: value for oid,value in lldp_ports}
+                    lldp=[]
+                    for oid,value in lldp_names:
+                        suffix=oid[len("1.0.8802.1.1.2.1.4.1.1.9")+1:]
+                        lldp.append({"remote_system":value,"remote_port":port_by_suffix.get(suffix),"index_suffix":suffix})
                     temp=cpu60=memfree=vlan_count=None
                     if identity.get("manufacturer")=="Luminex":
                         temp,cpu60,memfree,vlan_count=await asyncio.gather(
-                            async_snmp_get(ip,community,GIGACORE_TEMP_OID,timeout=.9),
-                            async_snmp_get(ip,community,"1.3.6.1.4.1.4413.1.1.1.1.4.12.0",timeout=.9),
-                            async_snmp_get(ip,community,"1.3.6.1.4.1.4413.1.1.1.1.4.10.0",timeout=.9),
-                            async_snmp_get(ip,community,"1.3.6.1.2.1.17.7.1.1.4.0",timeout=.9),
+                            async_snmp_get(ip,community,GIGACORE_TEMP_OID,timeout=.9,source_ip=source_ip),
+                            async_snmp_get(ip,community,"1.3.6.1.4.1.4413.1.1.1.1.4.12.0",timeout=.9,source_ip=source_ip),
+                            async_snmp_get(ip,community,"1.3.6.1.4.1.4413.1.1.1.1.4.10.0",timeout=.9,source_ip=source_ip),
+                            async_snmp_get(ip,community,"1.3.6.1.2.1.17.7.1.1.4.0",timeout=.9,source_ip=source_ip),
                         )
                         if isinstance(temp,(int,float)) and abs(temp)>200:temp=float(temp)/10.0
-                    switch_rows.append({"ip":ip,"manufacturer":identity.get("manufacturer"),"name":identity.get("sys_name"),"model":identity.get("sys_descr"),"sys_object_id":identity.get("sys_object_id"),"uptime_ticks":uptime,"interface_count":if_count,"ports":ports,"ports_up":sum(1 for p in ports if p["up"]),"temperature_c":temp,"cpu_60s_pct":cpu60,"memory_free_pct":memfree,"vlan_count":vlan_count,"read_only":True})
+                    switch_rows.append({"ip":ip,"interface":interface,"source_ip":source_ip,"manufacturer":identity.get("manufacturer"),"name":identity.get("sys_name"),"model":identity.get("sys_descr"),"sys_object_id":identity.get("sys_object_id"),"uptime_ticks":uptime,"interface_count_reported":if_count,"interface_count":len(ports),"ports":ports,"ports_up":sum(1 for p in ports if p["up"]),"lldp_neighbors":lldp,"temperature_c":temp,"cpu_60s_pct":cpu60,"memory_free_pct":memfree,"vlan_count":vlan_count,"read_only":True})
+                    switch_node = (dev.unique_id if dev else f"switch:{interface}:{ip}")
+                    for neighbor in lldp:
+                        remote = str(neighbor.get("remote_system") or "").strip()
+                        if remote:
+                            coordinator.topology.observe_link(switch_node, f"lldp:{remote}", target_port=neighbor.get("remote_port"), protocol="LLDP", confidence=.98, evidence=f"LLDP-MIB via {interface or 'unknown'}")
                 await asyncio.gather(*(_switch_telemetry(x) for x in status["snmp_hosts"]))
                 coordinator.publish(switch_telemetry=switch_rows)
                 status["switch_telemetry_devices"] = len(switch_rows)
@@ -535,6 +691,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
             status["errors"].append(f"ARP: {err}")
             _LOGGER.warning("Show Network ARP discovery failed: %s", err)
         status["inventory_total"] = len(coordinator.inventory.devices)
+        status["duration_ms"] = round((time.monotonic() - scan_started) * 1000.0, 1)
         status["state"] = "error" if status["errors"] and not (status["mdns_services"] or status["arp_neighbors"]) else "complete"
         coordinator.publish(
             discovery_status=status, vendor_discovery=coordinator.vendor_discovery,
@@ -555,5 +712,5 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     punchlight_discovery_cancel=async_track_time_interval(hass,_punchlight_periodic_discovery,timedelta(seconds=PUNCHLIGHT_DISCOVERY_INTERVAL_S))
     coordinator.async_start_workers(); await coordinator.async_config_entry_first_refresh()
 
-    values={"inventory":inventory,"resource_registry":resources,"coordinator":coordinator,"ma_listener":ma_listener,"ptp_monitor":ptp_monitor,"dante_monitor":dante_monitor,"aes67_monitor":aes67_monitor,"st2110_monitor":coordinator.st2110_monitor,"avb_monitor":coordinator.avb_monitor,"archive":archive,"enttec_input":enttec_input,"punchlight":punchlight,"osc_receiver":osc_receiver,"midi_runtime":midi_runtime,"dmx_network":dmx_network,"backup_cancel":backup_cancel,"archive_backup_cancel":archive_backup_cancel,"vendor_discovery_cancel":vendor_discovery_cancel,"punchlight_discovery_cancel":punchlight_discovery_cancel}
+    values={"inventory":inventory,"resource_registry":resources,"coordinator":coordinator,"fixture_control":coordinator.fixture_control,"dmx_scene_bank":coordinator.dmx_scene_bank,"ma_listener":ma_listener,"ptp_monitor":ptp_monitor,"dante_monitor":dante_monitor,"aes67_monitor":aes67_monitor,"aes70_monitor":getattr(coordinator,"aes70_monitor",None),"avdecc_monitor":getattr(coordinator,"avdecc_monitor",None),"rdm_bridge":getattr(coordinator,"rdm_bridge",None),"rdmnet_bridge":getattr(coordinator,"rdmnet_bridge",None),"st2110_monitor":coordinator.st2110_monitor,"avb_monitor":coordinator.avb_monitor,"archive":archive,"enttec_input":enttec_input,"punchlight":punchlight,"tally_ip":tally_ip,"osc_receiver":osc_receiver,"midi_runtime":midi_runtime,"dmx_network":dmx_network,"backup_cancel":backup_cancel,"archive_backup_cancel":archive_backup_cancel,"vendor_discovery_cancel":vendor_discovery_cancel,"punchlight_discovery_cancel":punchlight_discovery_cancel}
     return RuntimeSetupResult(coordinator,resources,inventory,archive,backup_manager,values)

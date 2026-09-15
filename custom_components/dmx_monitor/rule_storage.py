@@ -4,6 +4,7 @@ Only rule configuration is stored; runtime state/history is intentionally not
 persisted so a Home Assistant restart cannot replay a stale transition.
 """
 from __future__ import annotations
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -68,6 +69,15 @@ class RuleStore:
         except (OSError, ValueError, TypeError, KeyError) as err:
             # Bad persisted configuration must not prevent HA from starting.
             return []
+
+
+    async def async_load(self) -> list[DmxRule]:
+        """Load rules without blocking Home Assistant's event loop."""
+        return await asyncio.to_thread(self.load)
+
+    async def async_save(self, rules: list[DmxRule]) -> None:
+        """Persist rules without blocking Home Assistant's event loop."""
+        await asyncio.to_thread(self.save, rules)
 
     def save(self, rules: list[DmxRule]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

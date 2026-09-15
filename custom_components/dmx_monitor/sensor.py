@@ -1,5 +1,6 @@
 """Read-only Show Network diagnostic sensors."""
 from __future__ import annotations
+import json
 
 import base64
 from datetime import datetime
@@ -14,6 +15,53 @@ from .coordinator import ShowNetworkCoordinator
 from .entity import ShowNetworkEntity, DOMAIN
 from .ha_builder_entities import BuilderSensor, BuilderNumber
 from .projector_platform import sensor_entities as projector_sensor_entities
+
+
+def _bounded_attributes(value, max_bytes: int = 12_000):
+    """Return Recorder-safe attributes while preserving useful diagnostics.
+
+    HA Recorder rejects oversized state attributes. Keep live/raw diagnostics in
+    the coordinator/UI, but expose a bounded representation on the sensor.
+    """
+    def size(obj):
+        try:
+            return len(json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8"))
+        except Exception:
+            return max_bytes + 1
+
+    if size(value) <= max_bytes:
+        return value
+
+    def compact(obj, depth=0):
+        if depth >= 5:
+            return "<truncated>"
+        if isinstance(obj, dict):
+            items = list(obj.items())
+            out = {str(k): compact(v, depth + 1) for k, v in items[:40]}
+            if len(items) > 40:
+                out["_omitted_keys"] = len(items) - 40
+            return out
+        if isinstance(obj, (list, tuple)):
+            out = [compact(v, depth + 1) for v in obj[:20]]
+            if len(obj) > 20:
+                out.append({"_omitted_items": len(obj) - 20})
+            return out
+        if isinstance(obj, str) and len(obj) > 512:
+            return obj[:509] + "..."
+        return obj
+
+    compacted = compact(value)
+    if size(compacted) > max_bytes:
+        # Last-resort summary rather than letting Recorder reject the state.
+        return {
+            "truncated": True,
+            "original_bytes": size(value),
+            "message": "Diagnostics too large for Home Assistant Recorder; full live data remains in Show Network.",
+        }
+    if isinstance(compacted, dict):
+        compacted["_truncated_for_recorder"] = True
+        compacted["_original_bytes"] = size(value)
+    return compacted
 
 SENSORS = (
     ("devices_total", "Appareils découverts / Discovered devices", None),
@@ -71,6 +119,10 @@ SENSORS = (
     ("elc_inventory", "Équipements ELC observés / Observed ELC devices", None),
     ("vendor_discovery", "Découvertes fabricants / Vendor discoveries", None),
     ("etc_sensor_catalog", "Capteurs ETC documentés / ETC documented sensors", None),
+    ("etc_cem3_racks_total", "Racks ETC CEM3 / ETC CEM3 racks", None),
+    ("etc_cem3_racks_online", "Racks ETC CEM3 en ligne / Online ETC CEM3 racks", None),
+    ("etc_cem3_errors_total", "Erreurs ETC CEM3 actives / Active ETC CEM3 errors", None),
+    ("etc_cem3_temperature_max", "Température CPU ETC CEM3 max / Max ETC CEM3 CPU temperature", "°C"),
     ("switch_profiles", "Profils switches disponibles (catalogue) / Available switch profiles (catalogue)", None),
     ("switch_telemetry", "Télémétrie switches / Switch telemetry", None),
     ("projectors_total", "Projecteurs PJLink / PJLink projectors", None),
@@ -111,10 +163,19 @@ SENSORS = (
     ("ha_builder", "Éléments HA Builder / HA Builder items", None),
     ("notification", "Notifications Show Network / Show Network notifications", None),
     ("punchlight_network", "PunchLight réseau / PunchLight network", None),
+    ("midi_output_sent", "Messages MIDI OUT envoyés / MIDI OUT messages sent", None),
+    ("show_control_cue_count", "Cues Show Control / Show Control cues", None),
+    ("show_control_fired", "Cues Show Control déclenchés / Show Control cues fired", None),
     ("power_manager_button_count", "Boutons Power Manager / Power Manager buttons", None),
     ("power_manager_active", "Power Manager actifs / Active Power Manager buttons", None),
     ("power_manager_sent", "Trames Power Manager envoyées / Power Manager frames sent", None),
     ("power_manager_errors", "Erreurs Power Manager / Power Manager errors", None),
+    ("gdtf_library_count", "Profils GDTF / GDTF profiles", None),
+    ("gdtf_patch_count", "Projecteurs GDTF patchés / Patched GDTF fixtures", None),
+    ("gdtf_output_sent", "Trames GDTF envoyées / GDTF frames sent", None),
+    ("gdtf_output_errors", "Erreurs sortie GDTF / GDTF output errors", None),
+    ("rdm_devices_total", "Appareils RDM / RDM devices", None),
+    ("rdm_devices_online", "Appareils RDM en ligne / Online RDM devices", None),
     ("dmx_circuit_group_count", "Groupes DMX surveillés / Monitored DMX circuit groups", None),
     ("dmx_circuit_groups_alert", "Alertes circuits DMX / DMX circuit alerts", None),
     ("watchdog_active", "Watchdogs en alerte / Active watchdogs", None),
@@ -229,8 +290,14 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return {"enabled": self.coordinator.data.get("notification", {}).get("enabled", False), "target_configured": bool(self.coordinator.data.get("notification", {}).get("target"))}
         if self._key == "punchlight_network":
             return {"devices": self.coordinator.data.get("punchlight_network", [])}
+        if self._key == "midi_output_sent":
+            return {"midi_output": self.coordinator.data.get("midi_output", {}), "targets": self.coordinator.data.get("midi_targets", [])}
+        if self._key in {"show_control_cue_count", "show_control_fired"}:
+            return {"enabled": self.coordinator.data.get("show_control_enabled", False), "cues": self.coordinator.data.get("show_control_cues", []), "last_cue": self.coordinator.data.get("show_control_last_cue"), "last_error": self.coordinator.data.get("show_control_last_error")}
         if self._key.startswith("power_manager_"):
             return {"buttons": self.coordinator.data.get("power_manager_buttons", []), "outputs": self.coordinator.data.get("power_manager_outputs", []), "last_error": self.coordinator.data.get("power_manager_last_error")}
+        if self._key.startswith("gdtf_"):
+            return {"library": self.coordinator.data.get("gdtf_library", []), "patches": self.coordinator.data.get("gdtf_fixture_patches", []), "control_enabled": self.coordinator.data.get("gdtf_control_enabled", False), "last_error": self.coordinator.data.get("gdtf_output_last_error"), "note": self.coordinator.data.get("gdtf_note")}
         if self._key.startswith("dmx_circuit_"):
             return {"groups": self.coordinator.data.get("dmx_circuit_groups", [])}
         if self._key in {"watchdog_active", "watchdog_rules"}:
@@ -255,9 +322,11 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
         if self._key == "discovery_status":
             return dict(self.coordinator.data.get("discovery_status", {}))
         if self._key == "protocol_rx_diagnostics":
-            return dict(self.coordinator.data.get("protocol_rx_diagnostics", {}))
+            return _bounded_attributes(dict(self.coordinator.data.get("protocol_rx_diagnostics", {})))
         if self._key in {"projectors_total", "projectors_online", "projectors_errors"}:
             return dict(self.coordinator.data.get("projector_status", {}))
+        if self._key in {"rdm_devices_total", "rdm_devices_online"}:
+            return {"rdm_devices": self.coordinator.data.get("rdm_devices", []), "transports": self.coordinator.data.get("rdm_transports", []), "stale_timeout_s": self.coordinator.data.get("rdm_stale_timeout_s")}
         if self._key in {"ma_packets", "ma_sources", "ma_groups", "ma_stations", "ma_live_stations", "ma_sessions"}:
             return {"ma_remote": self.coordinator.data.get("ma_remote", {}), "rx_diagnostics": self.coordinator.data.get("protocol_rx_diagnostics", {}).get("ma_net3", {})}
         if self._key == "device_inventory":
@@ -270,6 +339,8 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             )} for row in rows]}
         if self._key == "etc_sensor_catalog":
             return {"sensors": self.coordinator.data.get("etc_sensor_catalog", [])}
+        if self._key.startswith("etc_cem3_"):
+            return _bounded_attributes(dict(self.coordinator.data.get("etc_cem3", {})))
         if self._key == "vendor_discovery":
             return {"services": self.coordinator.data.get("vendor_discovery", [])}
         if self._key == "switch_profiles":
@@ -309,6 +380,84 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
         return None
 
 
+class ETCCEM3RackSensor(ShowNetworkEntity, SensorEntity):
+    """One read-only status entity per configured CEM3 rack."""
+    def __init__(self, coordinator, host: str):
+        self.host = host
+        ShowNetworkEntity.__init__(self, coordinator, f"etc_cem3_rack_{host.replace('.', '_').replace(':', '_')}")
+        self._attr_name = f"ETC CEM3 {host}"
+
+    def _row(self):
+        for row in self.coordinator.data.get("etc_cem3", {}).get("racks", []):
+            if row.get("host") == self.host:
+                return row
+        return {}
+
+    @property
+    def native_value(self):
+        return "online" if self._row().get("online") else "offline"
+
+    @property
+    def extra_state_attributes(self):
+        return _bounded_attributes(self._row())
+
+
+class ETCCEM3MetricSensor(ShowNetworkEntity, SensorEntity):
+    METRICS = {
+        "cpu_temperature_c": ("CPU temperature", "°C"),
+        "line_frequency_hz": ("Line frequency", "Hz"),
+        "phase_x_voltage_v": ("Phase X voltage", "V"),
+        "phase_y_voltage_v": ("Phase Y voltage", "V"),
+        "phase_z_voltage_v": ("Phase Z voltage", "V"),
+        "errors_count": ("Active errors", None),
+        "circuits_total": ("Circuits", None),
+        "circuits_active": ("Active circuits", None),
+    }
+
+    def __init__(self, coordinator, host: str, metric: str):
+        self.host = host
+        self.metric = metric
+        label, unit = self.METRICS[metric]
+        self._attr_name = f"ETC CEM3 {host} {label}"
+        self._unit = unit
+        ShowNetworkEntity.__init__(self, coordinator, f"etc_cem3_{host.replace('.', '_').replace(':', '_')}_{metric}")
+
+    def _row(self):
+        for row in self.coordinator.data.get("etc_cem3", {}).get("racks", []):
+            if row.get("host") == self.host:
+                return row
+        return {}
+
+    @property
+    def available(self):
+        return bool(self._row().get("online") and self._row().get("fresh"))
+
+    @property
+    def native_value(self):
+        row = self._row()
+        if self.metric == "errors_count":
+            return row.get("errors_count")
+        if self.metric in {"circuits_total", "circuits_active"}:
+            return (row.get("dimmers") or {}).get(self.metric)
+        return (row.get("data") or {}).get(self.metric)
+
+    @property
+    def native_unit_of_measurement(self):
+        return self._unit
+
+    @property
+    def extra_state_attributes(self):
+        row = self._row()
+        return {
+            "host": self.host,
+            "rack_name": (row.get("data") or {}).get("rack_name"),
+            "rack_number": (row.get("data") or {}).get("rack_number"),
+            "software_version": (row.get("data") or {}).get("software_version"),
+            "last_seen_epoch": row.get("last_seen_epoch"),
+            "read_only": True,
+        }
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -319,6 +468,9 @@ async def async_setup_entry(
     entities.append(DmxUniverseSensor(coordinator))
     entities.append(TimecodeSensor(coordinator))
     entities.extend(projector_sensor_entities(coordinator))
+    etc_hosts = list(getattr(getattr(coordinator, "etc_cem3_monitor", None), "hosts", ()))
+    entities.extend(ETCCEM3RackSensor(coordinator, host) for host in etc_hosts)
+    entities.extend(ETCCEM3MetricSensor(coordinator, host, metric) for host in etc_hosts for metric in ETCCEM3MetricSensor.METRICS)
     entities.extend(BuilderSensor(coordinator, item) for item in coordinator.ha_builder.items.values() if item.entity_type == "sensor" and item.enabled)
     entities.extend(BuilderNumber(coordinator, item) for item in coordinator.ha_builder.items.values() if item.entity_type == "number" and item.enabled)
     async_add_entities(entities)

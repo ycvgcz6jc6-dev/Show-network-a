@@ -4,37 +4,51 @@ from __future__ import annotations
 from homeassistant.core import HomeAssistant
 
 from ..services.common import coordinator_for_call, DOMAIN
-from ..projector import ProjectorController
+
+
+def _target(coordinator, host: str, fallback_port: int) -> tuple[str, dict]:
+    rec = coordinator.projector_monitor.get_record(host) if getattr(coordinator, "projector_monitor", None) else None
+    cfg = coordinator.projector_monitor.config_for(host) if getattr(coordinator, "projector_monitor", None) else {}
+    if rec is not None:
+        cfg.setdefault("port", rec.port)
+        profile = rec.profile
+    else:
+        cfg.setdefault("port", fallback_port)
+        profile = "pjlink"
+    return profile, cfg
+
 
 async def async_register(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, "projector_power"):
-        async def _projector_power(call):
+        async def _execute(call, command: str, value=None):
             coordinator = coordinator_for_call(hass, call)
             ctrl = coordinator.projector_controller
             if not ctrl.control_enabled:
                 raise PermissionError("projector control is disabled")
             coordinator.security.require_unlocked()
             host = str(call.data["host"])
-            port = int(call.data.get("port", 4352))
+            fallback_port = int(call.data.get("port", 4352))
+            profile, cfg = _target(coordinator, host, fallback_port)
+            result = await hass.async_add_executor_job(
+                ctrl.send, host, profile=profile, config=cfg, name=command, value=value
+            )
+            if coordinator.archive:
+                coordinator.archive.record("projector", "projector_command", {
+                    "host": host, "profile": profile, "command": command,
+                    "result": str(result)[:512],
+                })
+            return result
+
+        async def _projector_power(call):
             command = "power_on" if bool(call.data["on"]) else "standby"
-            await hass.async_add_executor_job(ProjectorController.send_pjlink, ctrl, host, port, command, None)
+            await _execute(call, command)
 
         async def _projector_input(call):
-            coordinator = coordinator_for_call(hass, call)
-            ctrl = coordinator.projector_controller
-            if not ctrl.control_enabled:
-                raise PermissionError("projector control is disabled")
-            coordinator.security.require_unlocked()
-            await hass.async_add_executor_job(ProjectorController.send_pjlink, ctrl, str(call.data["host"]), int(call.data.get("port", 4352)), "input", str(call.data["input"]))
+            await _execute(call, "input", str(call.data["input"]))
 
         async def _projector_mute(call):
-            coordinator = coordinator_for_call(hass, call)
-            ctrl = coordinator.projector_controller
-            if not ctrl.control_enabled:
-                raise PermissionError("projector control is disabled")
-            coordinator.security.require_unlocked()
             command = "av_mute_on" if bool(call.data["mute"]) else "av_mute_off"
-            await hass.async_add_executor_job(ProjectorController.send_pjlink, ctrl, str(call.data["host"]), int(call.data.get("port", 4352)), command, None)
+            await _execute(call, command)
 
         async def _projector_control(call):
             coordinator = coordinator_for_call(hass, call)

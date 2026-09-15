@@ -6,6 +6,7 @@ such as OSC OUT and projector/light control. Passwords are never stored in
 clear text.
 """
 from __future__ import annotations
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -99,26 +100,42 @@ class SecurityManager:
             self._salt = self._digest = ""
             self.state.configured = False
 
-    def _save(self) -> None:
+    def _write_credentials(self, salt: str, digest: str) -> None:
+        """Atomically persist credentials before changing in-memory state."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"algorithm": "pbkdf2_sha256", "iterations": 310000, "salt": self._salt, "digest": self._digest}, indent=2), encoding="utf-8")
+        payload = {"algorithm": "pbkdf2_sha256", "iterations": 310000, "salt": salt, "digest": digest}
         try:
-            os.chmod(tmp, 0o600)
-        except OSError:
-            pass
-        tmp.replace(self.path)
+            tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            try:
+                os.chmod(tmp, 0o600)
+            except OSError:
+                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+            tmp.replace(self.path)
+        except Exception:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+            raise
+
+    def _save(self) -> None:
+        self._write_credentials(self._salt, self._digest)
 
     def set_password(self, password: str) -> None:
         if not isinstance(password, str) or len(password) < 8:
             raise ValueError("Password must contain at least 8 characters")
-        self._salt = os.urandom(16).hex()
+        # Build and persist the replacement credentials first. If disk I/O fails,
+        # the currently active credentials and configured flag remain untouched.
+        new_salt = os.urandom(16).hex()
+        new_digest = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(new_salt), 310000).hex()
+        self._write_credentials(new_salt, new_digest)
+        self._salt = new_salt
+        self._digest = new_digest
         self._failed_attempts = 0
         self._locked_until = 0.0
-        self._digest = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(self._salt), 310000).hex()
         self.state.configured = True
         self.state.unlocked_until = 0.0
-        self._save()
 
     def verify(self, password: str) -> bool:
         if not self.state.configured or time.monotonic() < self._locked_until:

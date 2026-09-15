@@ -5,6 +5,7 @@ an advertised mDNS service name/host/property contains an explicit vendor
 marker. No connection, query, control or write is performed against devices.
 """
 from __future__ import annotations
+import logging
 import asyncio
 import time
 from typing import Any
@@ -20,6 +21,7 @@ MARKERS = {
     "elc": ("dmxlan", "elc lighting"),
     "luminex": ("luminex", "gigacore"),
     "dante": ("_netaudio-", "dante", "audinate"),
+    "rdmnet": ("_rdmnet._tcp", "rdmnet"),
 }
 
 
@@ -67,17 +69,19 @@ def _scan_sync(zc, timeout: float = 2.0) -> list[dict[str, Any]]:
             def add_service(self, zc_, service_type, name):
                 if name.endswith("._tcp.local.") or name.endswith("._udp.local."):
                     browsers.append(ServiceBrowser(zc_, name, listener))
-            def update_service(self, zc_, service_type, name): pass
-            def remove_service(self, zc_, service_type, name): pass
+            def update_service(self, zc_, service_type, name):
+                return
+            def remove_service(self, zc_, service_type, name):
+                return
         type_browser = ServiceBrowser(zc, "_services._dns-sd._udp.local.", TypeListener())
         # Also browse the known Dante DNS-SD service types directly.  Some
         # networks/devices do not repeat the DNS-SD meta-service often enough
         # for a short passive scan, while the actual service records are cached.
-        for known_type in ("_netaudio-arc._udp.local.", "_netaudio-dante._udp.local.", "_http._tcp.local.", "_https._tcp.local."):
+        for known_type in ("_netaudio-arc._udp.local.", "_netaudio-dante._udp.local.", "_rdmnet._tcp.local.", "_rtsp._tcp.local.", "_http._tcp.local.", "_https._tcp.local."):
             try:
                 browsers.append(ServiceBrowser(zc, known_type, listener))
             except Exception:
-                pass
+                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
         deadline = time.monotonic() + max(0.5, min(timeout, 5.0))
         while time.monotonic() < deadline:
             time.sleep(0.05)
@@ -88,12 +92,12 @@ def _scan_sync(zc, timeout: float = 2.0) -> list[dict[str, Any]]:
             try:
                 browser.cancel()
             except Exception:
-                pass
+                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
         if type_browser is not None:
             try:
                 type_browser.cancel()
             except Exception:
-                pass
+                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
     return list(found.values())
 
 

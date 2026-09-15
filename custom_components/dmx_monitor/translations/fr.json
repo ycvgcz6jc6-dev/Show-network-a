@@ -58,7 +58,18 @@
           "aes70_hosts": "Hôtes AES70/OCA",
           "aes70_port": "Port AES70/OCA",
           "projector_monitor_enabled": "Activer le monitoring PJLink",
-          "chaos_enabled": "Activer les tests de diagnostic"
+          "chaos_enabled": "Activer les tests de diagnostic",
+          "interface_etc": "Adresse IP de l’interface ETC CEM3",
+          "etc_cem3_enabled": "Activer la supervision ETC Sensor3 / CEM3",
+          "etc_cem3_hosts": "Racks CEM3 (IP ou noms, séparés par des virgules)",
+          "tally_ip_interface": "Adresse IP de l’interface Tally IP",
+          "tally_ip_enabled": "Activer la réception Tally IP",
+          "tally_ip_port": "Port UDP Tally IP",
+          "tally_ip_screen": "Écran TSL (−1 = tous)",
+          "tally_ip_index": "Index TSL (−1 = tous)",
+          "tally_ip_stale_timeout": "Délai sans Tally avant retour OFF (s)",
+          "etc_cem3_discovery": "Découverte prudente ETC CEM3",
+          "etc_cem3_interfaces": "Interfaces IPv4 ETC CEM3 (plusieurs choix)"
         },
         "data_description": {
           "aes70_hosts": "Adresses IP/nom DNS AES70 à interroger, séparées par des virgules."
@@ -121,7 +132,18 @@
           "aes70_hosts": "Hôtes AES70/OCA",
           "aes70_port": "Port AES70/OCA",
           "projector_monitor_enabled": "Activer le monitoring PJLink",
-          "chaos_enabled": "Activer les tests de diagnostic"
+          "chaos_enabled": "Activer les tests de diagnostic",
+          "interface_etc": "Adresse IP de l’interface ETC CEM3",
+          "etc_cem3_enabled": "Activer la supervision ETC Sensor3 / CEM3",
+          "etc_cem3_hosts": "Racks CEM3 (IP ou noms, séparés par des virgules)",
+          "tally_ip_interface": "Adresse IP de l’interface Tally IP",
+          "tally_ip_enabled": "Activer la réception Tally IP",
+          "tally_ip_port": "Port UDP Tally IP",
+          "tally_ip_screen": "Écran TSL (−1 = tous)",
+          "tally_ip_index": "Index TSL (−1 = tous)",
+          "tally_ip_stale_timeout": "Délai sans Tally avant retour OFF (s)",
+          "etc_cem3_discovery": "Découverte prudente ETC CEM3",
+          "etc_cem3_interfaces": "Interfaces IPv4 ETC CEM3 (plusieurs choix)"
         }
       }
     }
@@ -182,7 +204,18 @@
           "capacity_other_mbps": "Capacité autre trafic (Mbit/s)",
           "projectors": "Configuration des projecteurs (JSON)",
           "projector_monitor_enabled": "Activer le monitoring PJLink",
-          "chaos_enabled": "Activer les tests de diagnostic"
+          "chaos_enabled": "Activer les tests de diagnostic",
+          "interface_etc": "Adresse IP de l’interface ETC CEM3",
+          "etc_cem3_enabled": "Activer la supervision ETC Sensor3 / CEM3",
+          "etc_cem3_hosts": "Racks CEM3 (IP ou noms, séparés par des virgules)",
+          "tally_ip_interface": "Adresse IP de l’interface Tally IP",
+          "tally_ip_enabled": "Activer la réception Tally IP",
+          "tally_ip_port": "Port UDP Tally IP",
+          "tally_ip_screen": "Écran TSL (−1 = tous)",
+          "tally_ip_index": "Index TSL (−1 = tous)",
+          "tally_ip_stale_timeout": "Délai sans Tally avant retour OFF (s)",
+          "etc_cem3_discovery": "Découverte prudente ETC CEM3",
+          "etc_cem3_interfaces": "Interfaces IPv4 ETC CEM3 (plusieurs choix)"
         }
       }
     }

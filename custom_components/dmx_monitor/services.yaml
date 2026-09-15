@@ -270,7 +270,7 @@ set_projector_control_enabled:
 
 projector_power:
   name: Projector power
-  description: Send a PJLink power command only when projector control is armed.
+  description: Send a power command using the configured projector transport only when projector control is armed.
   fields:
     entry_id:
       required: false
@@ -296,7 +296,7 @@ projector_power:
 
 projector_input:
   name: Projector input
-  description: Select a PJLink input when projector control is armed.
+  description: Select an input using the configured projector transport when projector control is armed.
   fields:
     entry_id:
       required: false
@@ -322,7 +322,7 @@ projector_input:
 
 projector_mute:
   name: Projector AV mute
-  description: Set PJLink AV mute when projector control is armed.
+  description: Set projector AV mute/shutter using the configured transport when projector control is armed.
   fields:
     entry_id:
       required: false
@@ -807,6 +807,39 @@ archive_backup:
       selector: {text: {}}
 
 
+
+config_backup_create:
+  name: Sauvegarder la configuration Show Network
+  description: Crée un ZIP portable et vérifié de toutes les données utilisateur Show Network. Les secrets ne sont pas inclus.
+  fields:
+    entry_id:
+      required: false
+      selector: {text: {}}
+    reason:
+      required: false
+      default: manual
+      selector: {text: {}}
+
+config_backup_restore:
+  name: Restaurer une sauvegarde Show Network
+  description: Restaure un ZIP de configuration validé depuis show_network_backups. Requiert le déverrouillage sécurité et recharge l'intégration.
+  fields:
+    entry_id:
+      required: false
+      selector: {text: {}}
+    source:
+      required: true
+      description: Chemin complet d'un ZIP situé dans show_network_backups.
+      selector: {text: {}}
+
+diagnostics_export:
+  name: Exporter les diagnostics Show Network
+  description: Crée un bundle support expurgé des secrets avec état runtime, ressources, persistance et journal.
+  fields:
+    entry_id:
+      required: false
+      selector: {text: {}}
+
 ha_builder_create:
   name: Créer un élément HA
   description: Crée un élément Home Assistant typé et persistant géré par Show Network.
@@ -1123,7 +1156,7 @@ power_manager_run:
     button_id:
       required: true
       selector: {text: {}}
-    on:
+    "on":
       name: ON
       required: true
       selector: {boolean: {}}
@@ -1161,3 +1194,185 @@ dmx_circuit_monitor_remove:
     group_id:
       required: true
       selector: {text: {}}
+
+gdtf_import:
+  name: Importer un profil GDTF
+  description: Importe un fichier .gdtf placé dans /config/show_network_gdtf_inbox. Le GDTF sert uniquement à décrire le contrôle DMX du projecteur.
+  fields:
+    filename:
+      name: Fichier
+      required: true
+      example: Ayrton_Rivale_Profile.gdtf
+      selector:
+        text:
+
+fixture_patch_upsert:
+  name: Patcher un projecteur GDTF
+  description: Crée ou met à jour un projecteur à une adresse DMX avec un mode issu du profil GDTF importé.
+  fields:
+    patch_id: {required: true, selector: {text: {}}}
+    name: {required: true, selector: {text: {}}}
+    gdtf_file: {required: true, selector: {text: {}}}
+    mode: {required: true, selector: {text: {}}}
+    universe: {required: true, selector: {number: {min: 1, max: 63999, mode: box}}}
+    address: {required: true, selector: {number: {min: 1, max: 512, mode: box}}}
+    protocol:
+      required: true
+      default: sacn
+      selector: {select: {options: [sacn, artnet]}}
+    host: {selector: {text: {}}}
+    priority: {default: 100, selector: {number: {min: 1, max: 200, mode: box}}}
+
+fixture_patch_remove:
+  name: Supprimer un patch GDTF
+  description: Supprime le patch. Requiert le déverrouillage Show Network.
+  fields:
+    patch_id: {required: true, selector: {text: {}}}
+
+fixture_set_attribute:
+  name: Régler un attribut GDTF
+  description: Applique une valeur physique GDTF et émet la trame sACN/Art-Net correspondante. Requiert le verrou central déverrouillé et la sortie GDTF armée.
+  fields:
+    patch_id: {required: true, selector: {text: {}}}
+    attribute: {required: true, selector: {text: {}}}
+    value: {required: true, selector: {number: {mode: box, step: 0.1}}}
+
+rdm_refresh:
+  name: Refresh RDM / RDMnet
+  description: Poll configured RDM/RDMnet bridges now. Read-only.
+
+rdm_set_start_address:
+  name: Set RDM DMX start address
+  description: Writes DMX_START_ADDRESS through the configured bridge. Requires Show Network unlock and RDM write arming.
+  fields:
+    uid: {required: true, selector: {text: {}}}
+    universe: {required: false, selector: {number: {min: 0, max: 63999, mode: box}}}
+    scope: {required: false, selector: {text: {}}}
+    transport: {required: true, default: "RDM/OLA", selector: {select: {options: ["RDM/OLA", "RDMnet"]}}}
+    value: {required: true, selector: {number: {min: 1, max: 512, mode: box}}}
+
+rdm_set_personality:
+  name: Set RDM personality
+  description: Writes DMX_PERSONALITY through the configured bridge. Requires unlock and RDM write arming.
+  fields:
+    uid: {required: true, selector: {text: {}}}
+    universe: {required: false, selector: {number: {min: 0, max: 63999, mode: box}}}
+    scope: {required: false, selector: {text: {}}}
+    transport: {required: true, default: "RDM/OLA", selector: {select: {options: ["RDM/OLA", "RDMnet"]}}}
+    value: {required: true, selector: {number: {min: 1, max: 255, mode: box}}}
+
+rdm_identify:
+  name: RDM identify device
+  description: Turns IDENTIFY_DEVICE on or off through the configured bridge. Requires unlock and RDM write arming.
+  fields:
+    uid: {required: true, selector: {text: {}}}
+    universe: {required: false, selector: {number: {min: 0, max: 63999, mode: box}}}
+    scope: {required: false, selector: {text: {}}}
+    transport: {required: true, default: "RDM/OLA", selector: {select: {options: ["RDM/OLA", "RDMnet"]}}}
+    value: {required: true, selector: {boolean: {}}}
+
+rdm_link_fixture:
+  name: Link RDM UID to GDTF fixture
+  description: Associates a discovered physical RDM UID with an existing GDTF patch. Does not transmit DMX or RDM.
+  fields:
+    patch_id: {required: true, selector: {text: {}}}
+    uid: {required: true, selector: {text: {}}}
+
+dmx_scene_configure_output:
+  name: Configurer la sortie des scènes DMX
+  description: Configure l'unique univers de sortie utilisé par le mode Scènes DMX. Les scènes n'ont pas leur propre univers.
+  fields:
+    protocol:
+      required: true
+      default: sacn
+      selector: {select: {options: [sacn, artnet, enttec]}}
+    universe: {required: true, selector: {number: {min: 1, max: 63999, mode: box}}}
+    host: {required: false, selector: {text: {}}}
+    port: {required: false, selector: {number: {min: 1, max: 65535, mode: box}}}
+    priority: {required: false, default: 100, selector: {number: {min: 1, max: 200, mode: box}}}
+    enttec_device: {required: false, selector: {text: {}}}
+    external_hold_s:
+      required: false
+      default: 1.5
+      selector: {number: {min: 0.25, max: 10, step: 0.25, mode: box}}
+
+dmx_scene_save:
+  name: Enregistrer une scène DMX
+  description: Enregistre ou remplace une des 19 scènes DMX de 512 canaux maximum.
+  fields:
+    scene_id: {required: true, selector: {text: {}}}
+    name: {required: false, selector: {text: {}}}
+    values: {required: true, selector: {object: {multiple: true}}}
+
+dmx_scene_delete:
+  name: Supprimer une scène DMX
+  fields:
+    scene_id: {required: true, selector: {text: {}}}
+
+dmx_scene_set_enabled:
+  name: Activer/désactiver la sortie Scènes DMX
+  description: L'activation exige que la sécurité centrale Show Network soit déverrouillée. Désactivé au redémarrage. Si une source DMX externe apparaît sur l'univers choisi, la sortie HA se suspend automatiquement et reprend après disparition du signal.
+  fields:
+    enabled: {required: true, selector: {boolean: {}}}
+
+dmx_scene_recall:
+  name: Envoyer une scène DMX
+  description: Rappelle une scène sur l'unique univers configuré et maintient la trame tant que le mode reste armé. Une source DMX externe sur cet univers prend automatiquement la main temporairement.
+  fields:
+    scene_id: {required: true, selector: {text: {}}}
+
+set_midi_output_enabled:
+  name: Activer/désactiver MIDI OUT
+  description: Arme ou désarme la sortie MIDI active. L'activation exige le déverrouillage Show Network et le gate revient OFF après redémarrage.
+  fields:
+    enabled: {required: true, selector: {boolean: {}}}
+
+create_midi_target:
+  name: Créer une cible MIDI OUT
+  description: Enregistre un port MIDI de sortie explicite. Aucun port n'est ouvert tant qu'un message n'est pas envoyé.
+  fields:
+    target_id: {required: true, selector: {text: {}}}
+    name: {required: false, selector: {text: {}}}
+    port_name: {required: true, selector: {text: {}}}
+    enabled: {required: false, default: true, selector: {boolean: {}}}
+
+remove_midi_target:
+  name: Supprimer une cible MIDI OUT
+  fields:
+    target_id: {required: true, selector: {text: {}}}
+
+send_midi:
+  name: Envoyer un message MIDI
+  description: Envoie un message MIDI vers une cible enregistrée. Supporte CC, Note On/Off, Program Change et Pitch Wheel. Exige le déverrouillage central et MIDI OUT armé.
+  fields:
+    target_id: {required: true, selector: {text: {}}}
+    message_type:
+      required: true
+      selector: {select: {options: [control_change, note_on, note_off, program_change, pitchwheel]}}
+    data: {required: true, selector: {object: {}}}
+
+set_show_control_enabled:
+  name: Activer/désactiver Show Control
+  description: Arme le moteur de cues Show Control. L'activation exige le déverrouillage Show Network et le moteur revient OFF après redémarrage.
+  fields:
+    enabled: {required: true, selector: {boolean: {}}}
+
+upsert_show_control_cue:
+  name: Créer ou modifier un cue Show Control
+  description: Enregistre un cue pouvant chaîner jusqu'à 32 actions HA, OSC, MIDI ou scène DMX, avec délais optionnels.
+  fields:
+    cue_id: {required: true, selector: {text: {}}}
+    name: {required: false, selector: {text: {}}}
+    enabled: {required: false, default: true, selector: {boolean: {}}}
+    actions: {required: true, selector: {object: {multiple: true}}}
+
+remove_show_control_cue:
+  name: Supprimer un cue Show Control
+  fields:
+    cue_id: {required: true, selector: {text: {}}}
+
+fire_show_control_cue:
+  name: Déclencher un cue Show Control
+  description: Exécute séquentiellement les actions d'un cue enregistré. Exige le déverrouillage central et le gate Show Control armé; chaque sortie active conserve aussi son propre gate.
+  fields:
+    cue_id: {required: true, selector: {text: {}}}

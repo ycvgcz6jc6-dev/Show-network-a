@@ -7,6 +7,7 @@ scene). Recovery can optionally execute another action after stable signal
 return.
 """
 from __future__ import annotations
+import logging
 
 import asyncio
 from dataclasses import dataclass, field
@@ -54,6 +55,7 @@ class SignalWatchdogManager:
         self._recovery_tasks: dict[str, asyncio.TimerHandle] = {}
         self._last_transition: dict[str, str | None] = {}
         self._last_reason: dict[str, str] = {}
+        self._recovery_started: dict[str, float] = {}
 
     def add_rule(self, rule: SignalWatchdogRule) -> None:
         if rule.universe < 1:
@@ -67,6 +69,14 @@ class SignalWatchdogManager:
         self._states.setdefault(key, False)
         self._last_transition.setdefault(key, None)
         self._last_reason.setdefault(key, "waiting for first valid signal")
+        # A watchdog must also detect silence from startup, before the first packet.
+        try:
+            loop = asyncio.get_running_loop()
+            self._loss_tasks[key] = loop.call_later(rule.loss_timeout_s, self._timer_fire_loss, key)
+        except RuntimeError:
+            # Unit tests/non-async construction may add rules before a loop exists;
+            # the first observation will arm the normal loss timer.
+            logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
 
     def remove_rule(self, name: str) -> None:
         for key, rule in list(self.rules.items()):
@@ -76,6 +86,7 @@ class SignalWatchdogManager:
                 self.rules.pop(key, None)
                 self._last_signal.pop(key, None)
                 self._states.pop(key, None)
+                self._recovery_started.pop(key, None)
 
     def observe(self, protocol: str, universe: int, source: str | None = None) -> None:
         now = monotonic()
@@ -85,16 +96,18 @@ class SignalWatchdogManager:
             if rule.source and rule.source != source:
                 continue
             self._last_signal[key] = now
-            if not self._states.get(key, False):
-                handle = self._recovery_tasks.pop(key, None)
-                self._cancel(handle)
+            # Recovery is only relevant while an alarm is active. Crucially,
+            # continued packets do not restart the recovery delay.
+            if self._states.get(key, False) and key not in self._recovery_tasks:
                 if rule.recovery_delay_s:
+                    self._recovery_started[key] = now
                     loop = asyncio.get_running_loop()
                     self._recovery_tasks[key] = loop.call_later(
                         rule.recovery_delay_s, self._timer_fire_recovery, key
                     )
                 else:
                     self._set_recovered(key)
+                    asyncio.create_task(self._run_recovery_action(key), name=f"dmx-watchdog-recovery-action-{key}")
             handle = self._loss_tasks.pop(key, None)
             self._cancel(handle)
             loop = asyncio.get_running_loop()
@@ -121,6 +134,7 @@ class SignalWatchdogManager:
             self._cancel(self._loss_tasks.pop(k, None))
             self._cancel(self._recovery_tasks.pop(k, None))
             self._states[k] = False
+            self._recovery_started.pop(k, None)
             self._last_transition[k] = "simulation_restore"
             self._last_reason[k] = "SIMULATION: signal restored"
             await self._run_action(rule.recovery_action)
@@ -181,6 +195,10 @@ class SignalWatchdogManager:
                 return
             last = self._last_signal.get(key)
             if last is None or monotonic() - last >= rule.loss_timeout_s:
+                if self._states.get(key, False):
+                    return
+                self._cancel(self._recovery_tasks.pop(key, None))
+                self._recovery_started.pop(key, None)
                 self._states[key] = True
                 self._last_transition[key] = "signal_lost"
                 self._last_reason[key] = f"No valid {rule.protocol} signal for {rule.loss_timeout_s:g}s"
@@ -197,20 +215,32 @@ class SignalWatchdogManager:
             if not rule or not rule.enabled:
                 return
             last = self._last_signal.get(key)
-            if last is not None and monotonic() - last <= delay + 0.5:
+            started = self._recovery_started.get(key)
+            # The loss timer is continuously renewed by valid packets. If it is
+            # still armed here and a packet has been seen since recovery began,
+            # signal has been stable for the requested recovery window.
+            if self._states.get(key, False) and last is not None and started is not None and last >= started:
                 self._set_recovered(key)
+                self._recovery_started.pop(key, None)
                 await self._run_action(rule.recovery_action)
                 self._emit_event("signal_restored", rule, self._last_reason[key])
         except asyncio.CancelledError:
             raise
 
 
+    async def _run_recovery_action(self, key: str) -> None:
+        rule = self.rules.get(key)
+        if not rule or not rule.enabled:
+            return
+        await self._run_action(rule.recovery_action)
+        self._emit_event("signal_restored", rule, self._last_reason.get(key, "Valid signal restored"))
+
     def _emit_event(self, event: str, rule: SignalWatchdogRule, reason: str) -> None:
         if self.event_callback:
             try:
                 self.event_callback(event, rule, reason)
             except Exception:
-                pass
+                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
 
     def _set_recovered(self, key: str) -> None:
         self._states[key] = False

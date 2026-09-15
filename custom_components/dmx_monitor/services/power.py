@@ -25,7 +25,10 @@ async def async_register(hass: HomeAssistant) -> None:
 
     async def _power_run(call):
         c=coordinator_for_call(hass,call); c.security.require_unlocked()
-        await c.power_manager.run(str(call.data['button_id']),bool(call.data.get('on',True)))
+        await c.power_manager.run(
+            str(call.data['button_id']), bool(call.data.get('on',True)),
+            guard=c.security.require_unlocked,
+        )
         if c.archive:c.archive.record('power_manager','sequence',{'button_id':str(call.data['button_id']),'on':bool(call.data.get('on',True))})
         c.publish(**c.power_manager.snapshot())
 

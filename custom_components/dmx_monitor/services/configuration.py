@@ -20,6 +20,8 @@ from ..const import (
     CONF_NOTIFICATION_ENABLED,
     CONF_CHAOS_ENABLED,
     CONF_PROJECTOR_MONITOR_ENABLED,
+    CONF_RDM_ENABLED,
+    CONF_RDMNET_ENABLED,
     CONF_UNIVERSES,
 )
 
@@ -35,6 +37,8 @@ MODULE_KEYS = {
     "notifications": CONF_NOTIFICATION_ENABLED,
     "diagnostics": CONF_CHAOS_ENABLED,
     "projector_monitor": CONF_PROJECTOR_MONITOR_ENABLED,
+    "rdm": CONF_RDM_ENABLED,
+    "rdmnet": CONF_RDMNET_ENABLED,
 }
 
 
