@@ -1,0 +1,67 @@
+# Show Network — PC dashboard pack
+# Add frontend resources once:
+# /local/dmx_monitor/dmx-monitor-panel.js
+# /local/dmx_monitor/rule-builder.js
+# /local/dmx_monitor/dmx-ha-mapping-panel.js
+# /local/dmx_monitor/ma-inspector-panel.js
+# /local/dmx_monitor/topology-panel.js
+# /local/dmx_monitor/signal-watchdog-panel.js
+views:
+  - title: Show Network
+    path: show-network
+    icon: mdi:lan-connect
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        cards:
+          - type: markdown
+            content: |
+              # SHOW NETWORK
+              **LIGHT · AUDIO · NETWORK · PROJECTION · CONTROL · MA REMOTE**
+          - type: entities
+            title: Global health
+            entities:
+              - entity: sensor.dmx_monitor_host_cpu_percent
+              - entity: sensor.dmx_monitor_host_memory_percent
+              - entity: sensor.dmx_monitor_devices_total
+              - entity: sensor.dmx_monitor_network_interfaces_up
+              - entity: sensor.dmx_monitor_topology_nodes
+              - entity: sensor.dmx_monitor_audio_protocols_active
+              - entity: sensor.dmx_monitor_audio_amplifiers_online
+              - entity: sensor.dmx_monitor_audio_amplifiers_errors
+              - entity: sensor.dmx_monitor_audio_amplifier_temperature_max
+      - type: grid
+        cards:
+          - type: custom:enttec-panel
+            entity: switch.dmx_monitor_enttec_dmx_input_listen
+          - type: custom:dmx-monitor-panel
+          - type: custom:dmx-ha-mapping-panel
+          - type: custom:dmx-ha-zones-panel
+          - type: custom:osc-output-panel
+          - type: custom:punchlight-network-panel
+          - type: custom:signal-watchdog-panel
+      - type: grid
+        cards:
+          - type: custom:ma-inspector-panel
+          - type: custom:show-network-topology-panel
+          - type: custom:show-network-rule-builder
+          - type: custom:show-network-reliability-panel
+          - type: custom:show-network-archive-panel
+          - type: custom:show-network-ha-builder-panel
+          - type: custom:show-network-notification-panel
+      - type: grid
+        cards:
+          - type: entities
+            title: Audio / amplifiers
+            entities:
+              - entity: sensor.dmx_monitor_audio_amplifiers_total
+              - entity: sensor.dmx_monitor_audio_amplifiers_online
+              - entity: sensor.dmx_monitor_audio_amplifiers_errors
+              - entity: sensor.dmx_monitor_audio_amplifier_temperature_max
+          - type: entities
+            title: DMX → HA
+            entities:
+              - entity: sensor.dmx_monitor_dmx_ha_mappings_total
+
+          - type: custom:show-network-brand-catalog

@@ -1,0 +1,37 @@
+# Show Network CLASSIQUE — vue HA classique conservée.
+views:
+  - title: Show Network Classic
+    path: show-network-classic
+    icon: mdi:view-dashboard-outline
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        cards:
+          - type: markdown
+            content: |
+              # SHOW NETWORK
+              **Vue classique Home Assistant**
+          - type: entities
+            title: Santé réseau
+            entities:
+              - entity: sensor.dmx_monitor_host_cpu_percent
+              - entity: sensor.dmx_monitor_host_memory_percent
+              - sensor.dmx_monitor_devices_total
+              - sensor.dmx_monitor_network_interfaces_up
+              - sensor.dmx_monitor_network_capacity_utilization
+              - sensor.dmx_monitor_network_capacity_headroom_mbps
+              - sensor.dmx_monitor_topology_nodes
+              - sensor.dmx_monitor_topology_links
+              - sensor.dmx_monitor_chaos_status
+              - sensor.dmx_monitor_journal_archive
+      - type: grid
+        cards:
+          - type: custom:dmx-monitor-panel
+          - type: custom:show-network-topology-panel
+          - type: custom:signal-watchdog-panel
+          - type: custom:show-network-reliability-panel
+          - type: custom:show-network-archive-panel
+          - type: custom:show-network-ha-builder-panel
+
+          - type: custom:show-network-brand-catalog

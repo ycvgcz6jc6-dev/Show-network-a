@@ -1,17 +1,3 @@
-# 0.15.2 EXPERIMENTAL — 2026-09-15
-
-- Base cumulative : archive FULL 0.15.0 fournie, tous ses fichiers conservés.
-- CEM3 : requêtes réelles fixes de lecture, parsers des 72 circuits, propriétés et espaces, validation forte avant POST.
-- Découverte progressive limitée aux NIC choisies, ajout manuel conservé, plafond 32 racks, quatre connexions simultanées.
-- Circuits détaillés par WebSocket authentifié dans le panneau ; agrégats HA préservés et attributs Recorder allégés.
-- États offline/freshness distincts, propriétés en cache, annulation et fermeture des sessions au déchargement.
-- Durcissement réappliqué : 44 exceptions silencieuses journalisées, DOMAIN centralisé, locks State Store/DMX tracker, publication DMX à 5 Hz (mappings inchangés à 20 Hz).
-- Si HA refuse de décharger les plateformes, les ressources restent actives pour éviter une intégration partiellement arrêtée.
-- Tests historiques retrouvés et adaptés aux 80 services, cinq plateformes et version courante ; nouveaux tests CEM3/HTTP/concurrence/cycle de vie.
-- README français puis anglais, provenance et limites de validation explicites.
-
----
-
 # Changelog
 
 ## 0.15.0 — Experimental cumulative release
@@ -160,7 +146,7 @@ Validation: static/unit/syntax only; no claim of real HA/network/hardware valida
 - **Correctif** : le premier scan de découverte mDNS (`runtime/setup.py`) était attendu de façon synchrone en plein `async_setup_entry`, ajoutant au moins 2 secondes garanties au démarrage de l'intégration. Il est maintenant lancé en tâche de fond.
 - **Correctif** : `DeviceInventory` et `HABuilder` étaient construits directement sur la boucle d'événements alors que leurs constructeurs lisent un fichier JSON sur disque — construction déplacée dans l'executor (`hass.async_add_executor_job`).
 - **Correctif** : une tâche asyncio créée pour les callbacks OSC (`osc_receiver.py`) n'était référencée nulle part, ce qui l'exposait à un ramasse-miettes prématuré ; une référence forte est désormais conservée jusqu'à la fin de la tâche.
-- **Non corrigé volontairement** : plusieurs chargements de fichiers JSON restent synchrones dans `ShowNetworkCoordinator.__init__` (règles, mappings DMX→HA, zones, cibles OSC, sécurité). Le correctif propre nécessite de sortir la construction de `self.data` du constructeur pour la rendre asynchrone — un changement plus large qui mérite ses propres tests avant d'être appliqué en production.
+- **Non corrigé volontairement** : plusieurs chargements de fichiers JSON restent synchrones dans `ShowNetworkCoordinator.__init__` (règles, mappings DMX→HA, zones, cibles OSC, sécurité). Le correctif propre nécessite de sortir la construction de `self.data` du constructeur pour la rendre asynchrone — un changement plus large qui mérite ses propres tests avant d'être appliqué en production. Voir `AUDIT_Show_Network_2026-09-13.md`, section 4.
 
 ## 0.12.1
 

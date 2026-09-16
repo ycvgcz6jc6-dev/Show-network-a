@@ -1,6 +1,6 @@
-# Show Network & Stage Control Suite for Home Assistant — 0.15.2 EXPERIMENTAL
+# Show Network & Stage Control Suite for Home Assistant
 
-> **⚠️ EXPÉRIMENTAL / EXPERIMENTAL**
+> **⚠️ EXPÉRIMENTAL / EXPERIMENTAL**  
 > Show Network est un projet expérimental destiné aux réseaux techniques du spectacle vivant. Il ne doit pas être considéré comme un système de sécurité, de protection électrique ou de contrôle critique. Testez chaque fonction sur un réseau et du matériel de test avant toute utilisation en production. Certaines fonctions dépendent du matériel, du firmware, des protocoles réellement exposés et de composants externes.
 
 ---
@@ -100,51 +100,6 @@ Les fonctions de contrôle peuvent agir sur des équipements réels. Utilisez le
 
 Certaines intégrations nécessitent un helper ou une bibliothèque externe. En particulier, le support RDMnet natif dépend d'un bridge compatible ; la présence d'une interface dans Show Network ne signifie pas qu'un protocole propriétaire non documenté a été réimplémenté.
 
-## Version 0.15.2 — CEM3 réel en lecture seule
-
-Le dépôt contient l'intégration complète Show Network 0.15.2 pour Home Assistant, y compris l'interface web, les traductions et les déclarations de services.
-
-### Installation / mise à jour
-
-1. Sauvegarder la configuration Home Assistant et le dossier actuel `custom_components/dmx_monitor`.
-2. Arrêter Home Assistant, remplacer le dossier complet par `custom_components/dmx_monitor` de ce dépôt, puis redémarrer complètement Home Assistant. Les fichiers de configuration Show Network situés à la racine de `/config` doivent être conservés.
-3. Ouvrir **Paramètres → Appareils et services → Show Network → Configurer**, activer ETC CEM3 et enregistrer les options. Un changement d'options recharge l'intégration.
-4. Actualiser le navigateur pour charger le panneau 0.15.2.
-
-### CEM3 : configuration et découverte
-
-- **Ajout manuel** : renseigner des IPv4 de racks séparées par des virgules ou des points-virgules. Maximum : 32 racks. HTTP sur le port 80, sans authentification HTTP ni redirection automatique.
-- **Multi-NIC** : choisir les adresses locales dans « Interfaces IPv4 ETC CEM3 (plusieurs choix) ». Cette sélection prime sur l'ancien champ « interface ETC », qui reste utilisable pour un seul réseau. Chaque connexion est liée à l'adresse source choisie ; aucun repli automatique sur une autre carte.
-- **Découverte** : activer « Découverte prudente ETC CEM3 ». Elle exige une interface IPv4 explicitement sélectionnée ; `0.0.0.0` seul ne déclenche aucun balayage. Huit candidats au maximum par cycle, quatre requêtes simultanées au maximum. Seuls les sous-réseaux /24 ou plus petits sont parcourus (253 voisins au maximum sur un /24 standard). Sur les réseaux plus grands, seuls les voisins ARP complets déjà observés sur la bonne carte sont examinés. Nouveau tour au plus tôt après 300 secondes. Plusieurs sous-réseaux peuvent demander plusieurs minutes.
-- Un rack découvert doit satisfaire **l'identité ETC + CEM3 + Sensor3 ou ressource spécifique CEM3 + libellés système**, puis produire des niveaux, propriétés et espaces cohérents. Une simple page « rack » ou « dimmers » ne suffit pas. Les racks découverts restent en mémoire jusqu'au rechargement ; l'ajout manuel est persistant dans les options.
-- Avec plusieurs NIC, un rack manuel doit appartenir à un sous-réseau sélectionné ; avec une seule NIC, un rack routé peut utiliser cette interface. Des réseaux isolés réutilisant la même IP pour des racks différents ne sont pas pris en charge : le rack est identifié par IP.
-
-### Données et absence de commandes
-
-Requêtes autorisées, et uniquement celles-ci :
-
-```text
-GET /index.asp
-GET /front.asp  (uniquement si index.asp référence explicitement cette frame)
-POST /dimmerlist : <setlevels><get udn="all"/></setlevels>
-POST /dimmerlist : <get_prop udn="all" />
-POST /dimmerlist : <setlevels><get_space_info /></setlevels>
-```
-
-Le conteneur XML `setlevels` contient ici une commande **get**, sans modification de niveau. Aucun Set Levels, Apply Changes, Activate/Deactivate/Record preset, upload de configuration ou firmware n'est implémenté par ce client. Les autres fonctionnalités actives historiques de Show Network restent conservées avec leurs protections existantes.
-
-Les circuits affichent UDN, circuit, space, side, wsource, level brut, control_mode, firing_mode, curve, threshold, module_type et controllable_module. Les espaces affichent name, active_preset et active_sequence. La valeur brute 99 reste 99. Aucune mesure de courant ou charge non reçue n'est inventée.
-
-Le panneau **ETC Sensor3 / CEM3** affiche tous les circuits via un accès WebSocket authentifié au cache. Il ne crée aucune entité par circuit. Les agrégats globaux incluent les racks découverts ; les capteurs par rack existants restent créés pour les racks connus au démarrage. Les attributs Recorder n'embarquent plus les circuits détaillés.
-
-Interrogation au maximum une fois toutes les 5 secondes ; propriétés au maximum une fois par minute sauf changement d'identité des circuits. Le panneau lit le cache toutes les 5 secondes lorsqu'il est ouvert. Les données système/niveaux/espaces deviennent anciennes après 15 secondes ; les propriétés après 180 secondes ou dès une erreur. Une panne conserve la dernière lecture avec son horodatage, mais marque le rack hors ligne. Les tâches et sessions HTTP sont annulées/fermées lors du déchargement.
-
-### Validation et limites
-
-Les fixtures niveaux/propriétés/espaces proviennent des réponses transmises dans la conversation. La page System de test est **synthétique** : les variantes HTML de firmware restent à vérifier sur le vrai rack. Tests HTTP sur serveur local, NIC simulées pour le routage multi-réseau, sockets locaux réels, contrat unload HA avec adaptateur minimal. **Aucune installation Home Assistant complète ni validation sur un CEM3 physique n'a été exécutée ici.** Les helpers natifs et protocoles tiers conservent leurs limites de validation précédentes.
-
-Avant un déploiement de production, validez cette version dans un environnement Home Assistant de test représentatif de votre matériel et de votre réseau.
-
 ## Développement et validation
 
 La branche de développement est contrôlée par tests automatisés, compilation Python et validation syntaxique du frontend. Cela **ne constitue pas une certification matérielle**.
@@ -240,46 +195,6 @@ Show Network is **experimental**. Automated tests validate software behavior, no
 Control features may affect real equipment. Use safety gates, central locking and manufacturer permissions. Never connect an experimental function directly to an action that could endanger people, critical power, stage motion or an installation without suitable independent protection.
 
 Some integrations require an external helper or library. Native RDMnet functionality in particular depends on a compatible bridge; an interface being present in Show Network does not mean an undocumented proprietary protocol has been reverse-engineered or fully implemented.
-
-## Version 0.15.2 — Real read-only CEM3
-
-This repository contains the complete Show Network 0.15.2 Home Assistant integration, including the web frontend, translations and service declarations.
-
-### Installation / update
-
-Back up Home Assistant and the existing integration, stop Home Assistant, replace the entire `/config/custom_components/dmx_monitor` directory with the one from this repository, and restart Home Assistant. Preserve Show Network configuration files outside that directory. Open **Settings → Devices & services → Show Network → Configure**, enable CEM3 and save. Options changes reload the integration. Refresh the browser to load frontend 0.15.2.
-
-### Configuration and discovery
-
-- Manual racks: comma- or semicolon-separated IPv4 addresses, up to 32 racks, HTTP port 80. HTTP authentication and automatic redirects are not supported.
-- Select local IPv4 addresses using **ETC CEM3 IPv4 interfaces (multiple choices)**. This overrides the legacy single ETC interface option. Requests bind to their selected source address, without fallback to another NIC.
-- Enable conservative discovery explicitly. It requires selected IPv4 interfaces; `0.0.0.0` alone never triggers a scan. Up to eight candidates per cycle and four simultaneous requests. Only /24 or smaller subnets are swept; larger networks use complete ARP neighbors already observed on the selected NIC. A new round starts no sooner than 300 seconds; multiple networks may take several minutes.
-- Discovery requires ETC + CEM3 identity, Sensor3 or a CEM3-specific resource, system labels, and consistent levels/properties/spaces. Generic rack/dimmer pages are rejected. Discovered racks are cached until reload; manual addresses persist in options.
-- With multiple NICs, manual racks must match a selected subnet. A single selected NIC may reach a routed rack. Different isolated racks sharing the same IPv4 address are unsupported: rack identity is keyed by IP.
-
-### Read-only protocol and data
-
-The only allowed requests are GET `/index.asp`, GET `/front.asp` when explicitly referenced as a frame by index.asp, and POST `/dimmerlist` with these exact read queries:
-
-```xml
-<setlevels><get udn="all"/></setlevels>
-<get_prop udn="all" />
-<setlevels><get_space_info /></setlevels>
-```
-
-The `setlevels` wrapper contains a **get** command. The CEM3 client implements no Set Levels, Apply Changes, preset activation/deactivation/recording, configuration or firmware upload. Existing active Show Network features and their guards are preserved.
-
-The panel displays UDN, circuit, space, side, wsource, raw level, control mode, firing mode, curve, threshold, module type and controllable-module status. Space name, active preset and active sequence are shown. A raw 99 remains 99; electrical current/load telemetry is not invented.
-
-Circuit details are delivered to the panel through an authenticated cached WebSocket response, with no per-circuit HA entities. Global aggregates include discovered racks; existing per-rack sensors are created for racks known at startup. Recorder attributes exclude circuit arrays.
-
-Polling is limited to one cycle per 5 seconds; properties are cached for 60 seconds unless circuit identity changes. The open panel reads the cache every 5 seconds. System/level/space freshness expires after 15 seconds, properties after 180 seconds or on error. Offline racks retain timestamped previous data but are never marked fresh. Unload cancels tasks and closes HTTP sessions.
-
-### Validation limits
-
-Levels, properties and spaces fixtures originate from the conversation's real responses. The System fixture is **synthetic**; firmware-specific HTML needs physical-rack validation. Tests use real local HTTP/UDP sockets, simulated multi-NIC networks and a minimal HA lifecycle adapter. **No complete Home Assistant installation or physical CEM3 was tested here.** Native helper and third-party protocol limitations remain as previously documented.
-
-Before production deployment, validate this version in a Home Assistant test environment representative of your hardware and network.
 
 ## Development and validation
 
