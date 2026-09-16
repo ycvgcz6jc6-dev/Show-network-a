@@ -6,7 +6,6 @@ until a user explicitly runs a configured button. DMX Monitor itself remains
 receive-only.
 """
 from __future__ import annotations
-import logging
 
 import asyncio
 import json
@@ -288,7 +287,7 @@ class PowerManager:
         serials=list(self._serials.values());self._serials.clear()
         for ser in serials:
             try: await asyncio.to_thread(ser.close)
-            except Exception: logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+            except Exception: pass
 
     async def run(self, button_id: str, turn_on: bool, *, guard=None) -> None:
         button = self.buttons.get(button_id)

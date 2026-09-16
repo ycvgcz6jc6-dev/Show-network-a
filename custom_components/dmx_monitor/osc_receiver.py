@@ -1,6 +1,5 @@
 """Receive-only OSC input with bounded message/bundle parsing and Learn mode."""
 from __future__ import annotations
-import logging
 import asyncio
 import struct
 from .security import ip_allowed, normalize_ip_allowlist
@@ -149,4 +148,4 @@ class _OSCProtocol(asyncio.DatagramProtocol):
     def __init__(self, owner): self.owner = owner
     def datagram_received(self, data, addr):
         try: self.owner.handle(data, addr)
-        except Exception: logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+        except Exception: pass

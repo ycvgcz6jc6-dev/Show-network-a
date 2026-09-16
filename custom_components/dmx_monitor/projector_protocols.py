@@ -7,7 +7,6 @@ The adapters are intentionally conservative:
 - unsupported fields remain absent instead of being synthesized.
 """
 from __future__ import annotations
-import logging
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -162,7 +161,7 @@ class PJLinkClient:
         try:
             s.close()
         except Exception:
-            logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+            pass
         s = socket.create_connection((self.host, self.port), timeout=self.timeout)
         s.settimeout(self.timeout)
         banner2 = _clean_text(_recv_until(s))
@@ -235,7 +234,7 @@ class PJLinkClient:
                     try:
                         out.lamp_hours = int(parts[0])
                     except ValueError:
-                        logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                        pass
             cls = self.value(values.get("pjlink_class", ""))
             if cls:
                 out.raw["pjlink_class"] = cls
@@ -262,7 +261,7 @@ class PJLinkClient:
                     try:
                         out.input_name = self.value(self.command(f"%2INNM ?{out.input_source}"))
                     except Exception:
-                        logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                        pass
                 out.capabilities.append("class2")
         return out
 
@@ -583,12 +582,12 @@ class BarcoPulseJSONRPC:
         if isinstance(temp,dict):
             for k,v in temp.items():
                 try: out.temperatures_c[str(k)]=float(v)
-                except (TypeError,ValueError): logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                except (TypeError,ValueError): pass
         speed=vals.get("environment:Speed")
         if isinstance(speed,dict):
             for k,v in speed.items():
                 try: out.fans_rpm[str(k)]=float(v)
-                except (TypeError,ValueError): logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                except (TypeError,ValueError): pass
         alarms=vals.get("environment.getalarminfo")
         if alarms:
             out.error_detail={"alarms":alarms}; out.errors="reported"

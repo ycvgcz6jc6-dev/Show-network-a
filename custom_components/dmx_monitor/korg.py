@@ -27,3 +27,5 @@ def identify_korg_controller(port_name: str | None) -> KorgControllerProfile | N
     if "nanokontrol2" in name or "nano kontrol2" in name:
         return NANOKONTROL2
     return None
+
+

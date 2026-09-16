@@ -4,7 +4,6 @@ No packets are emitted. The Linux ARP cache is read when available and merged
 with mDNS/protocol observations by the runtime discovery pipeline.
 """
 from __future__ import annotations
-import logging
 from pathlib import Path
 
 def arp_neighbors(path: str = "/proc/net/arp") -> list[dict]:
@@ -44,7 +43,7 @@ def ipv4_interfaces() -> list[dict]:
             if not ipaddress.ip_address(addr).is_loopback:
                 out.append({'interface':name,'address':addr,'netmask':mask,'network':str(net)})
         except OSError:
-            logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+            pass
         finally:
             sock.close()
     return out
@@ -73,7 +72,7 @@ def warm_neighbor_cache(interfaces: list[dict], max_hosts_per_interface: int = 2
             for host in hosts:
                 if str(host)==item['address']: continue
                 try: sock.sendto(b'',(str(host),9)); result['targets']+=1
-                except OSError: logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                except OSError: pass
         finally: sock.close()
         result['interfaces'].append(item)
     return result

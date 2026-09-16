@@ -1,5 +1,4 @@
 from __future__ import annotations
-import logging
 
 import asyncio
 import ipaddress
@@ -208,7 +207,7 @@ class PJLinkMonitor:
                 value = t.raw[key]
                 if key == "filter_hours":
                     try: value = int(value)
-                    except (ValueError, TypeError): logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                    except (ValueError, TypeError): pass
                 setattr(r, key, value)
         if t.raw.get("other_info") is not None:
             r.other_info = str(t.raw["other_info"])
@@ -281,7 +280,7 @@ class PJLinkMonitor:
                     except ValueError:
                         continue
         except Exception:
-            logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+            pass
         return sorted(set(out))
 
     @classmethod

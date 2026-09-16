@@ -35,12 +35,9 @@ class MAStation:
 
     @property
     def proxy_url(self) -> str:
-        """HA-hosted HTTPS/WSS front door for this console's Web Remote
-        (see ma3_web_remote_view.py). Unlike web_remote_url, this one keeps
-        working when Home Assistant is reached over HTTPS (Nabu Casa etc.),
-        since the browser's WebSocket connection stays same-origin/secure
-        instead of hitting mixed-content trying to reach the console's own
-        plain ws:// endpoint directly."""
+        """HA-hosted HTTPS/WSS front door for this console's Web Remote (see
+        ma3_web_remote_view.py). Unlike web_remote_url, this one keeps
+        working when Home Assistant is reached over HTTPS (Nabu Casa etc.)."""
         return f"/api/dmx_monitor/ma_remote/{self.ip}/"
 
     def snapshot(self) -> dict:
@@ -63,40 +60,23 @@ class MARemoteInventory:
 
         Returns (category, model, evidence_marker) where category is one of
         "console", "processing_unit", "node", "software", or (None, None,
-        None) if nothing matched.
-
-        The model names below come from MA Lighting's published product
-        line (verified against malighting.com/official retailer listings),
-        not from a captured MA-Net3 packet -- the *exact* on-wire identity
-        strings a real console/NPU/node broadcasts have not been confirmed
-        against a packet capture. If real identity_hints text turns out to
-        use different wording, extend the marker lists below to match what
-        is actually observed on site rather than assuming these are
-        complete.
-
-        Note: there is no MA Lighting product called "RPU". The closest
-        real product is the "grandMA3 replay unit" -- a playback-only
-        *console* variant (not a processing unit or node) -- classified
-        here accordingly.
+        None) if nothing matched. Model names come from MA Lighting's
+        published product line (verified against malighting.com), not from
+        a captured packet -- extend the marker lists if real identity_hints
+        text differs. There is no MA Lighting product called "RPU"; the
+        closest real product is the "grandMA3 replay unit" (a playback-only
+        *console* variant), classified accordingly here.
         """
         text = " ".join(str(x) for x in (hints or [])).lower()
-
-        # Order matters: more specific markers are checked before generic
-        # ones so e.g. "grandma3 processing unit m" doesn't get caught by
-        # a bare "grandma3" fallback.
         checks = (
-            # -- category: software (runs on a PC, not dedicated hardware) --
             ("software", "grandMA3 onPC", ("onpc", "on pc", "on-pc")),
-            # -- category: processing_unit (headless, no faders/screen) ------
             ("processing_unit", "grandMA3 processing unit XL (NPU XL)", ("processing unit xl", "npu xl")),
             ("processing_unit", "grandMA3 processing unit L (NPU L)", ("processing unit l", "npu l")),
             ("processing_unit", "grandMA3 processing unit M (NPU M)", ("processing unit m", "npu m")),
             ("processing_unit", "grandMA3 processing unit (NPU)", ("processing unit", "npu")),
-            # -- category: node (DMX/network output only, no processing) -----
             ("node", "grandMA3 xPort Node", ("xport node", "xport")),
             ("node", "grandMA3 I/O Node", ("i/o node", "io node")),
             ("node", "grandMA3 Node", ("grandma3 node", "ma3 node", "ma-net3 node")),
-            # -- category: console (full control surface, faders/screen) -----
             ("console", "grandMA3 Replay Unit", ("replay unit",)),
             ("console", "grandMA3 Extension", ("extension console", "grandma3 extension")),
             ("console", "grandMA3 Compact XT", ("compact xt",)),
