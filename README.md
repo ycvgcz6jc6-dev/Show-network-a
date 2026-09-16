@@ -1,6 +1,6 @@
 # Show Network & Stage Control Suite for Home Assistant — 0.15.2 EXPERIMENTAL
 
-> **⚠️ EXPÉRIMENTAL / EXPERIMENTAL**  
+> **⚠️ EXPÉRIMENTAL / EXPERIMENTAL**
 > Show Network est un projet expérimental destiné aux réseaux techniques du spectacle vivant. Il ne doit pas être considéré comme un système de sécurité, de protection électrique ou de contrôle critique. Testez chaque fonction sur un réseau et du matériel de test avant toute utilisation en production. Certaines fonctions dépendent du matériel, du firmware, des protocoles réellement exposés et de composants externes.
 
 ---
@@ -102,14 +102,14 @@ Certaines intégrations nécessitent un helper ou une bibliothèque externe. En 
 
 ## Version 0.15.2 — CEM3 réel en lecture seule
 
-Cette livraison part du **FULL 0.15.0 fourni**, conserve ses fichiers et fonctionnalités, et réapplique les corrections de durcissement identifiables de la 0.15.1 (archive 0.15.1 non fournie). Elle ne prétend pas être une reproduction binaire de cette archive. Voir `AUDIT_0.15.2.md` et `SOURCE_COMPARISON.json`.
+Le dépôt contient l'intégration complète Show Network 0.15.2 pour Home Assistant, y compris l'interface web, les traductions et les déclarations de services.
 
 ### Installation / mise à jour
 
 1. Sauvegarder la configuration Home Assistant et le dossier actuel `custom_components/dmx_monitor`.
-2. Arrêter Home Assistant, remplacer le dossier complet par `custom_components/dmx_monitor` du ZIP UPDATE_ONLY ou FULL, puis redémarrer complètement Home Assistant. Les fichiers de configuration Show Network situés à la racine de `/config` doivent être conservés.
+2. Arrêter Home Assistant, remplacer le dossier complet par `custom_components/dmx_monitor` de ce dépôt, puis redémarrer complètement Home Assistant. Les fichiers de configuration Show Network situés à la racine de `/config` doivent être conservés.
 3. Ouvrir **Paramètres → Appareils et services → Show Network → Configurer**, activer ETC CEM3 et enregistrer les options. Un changement d'options recharge l'intégration.
-4. Actualiser le navigateur pour charger le panneau 0.15.2. L'UPDATE_ONLY contient **tout** `custom_components/dmx_monitor`, pas seulement les fichiers modifiés. Le FULL contient également helpers, dashboards, documentation, tests et audit.
+4. Actualiser le navigateur pour charger le panneau 0.15.2.
 
 ### CEM3 : configuration et découverte
 
@@ -143,7 +143,7 @@ Interrogation au maximum une fois toutes les 5 secondes ; propriétés au maximu
 
 Les fixtures niveaux/propriétés/espaces proviennent des réponses transmises dans la conversation. La page System de test est **synthétique** : les variantes HTML de firmware restent à vérifier sur le vrai rack. Tests HTTP sur serveur local, NIC simulées pour le routage multi-réseau, sockets locaux réels, contrat unload HA avec adaptateur minimal. **Aucune installation Home Assistant complète ni validation sur un CEM3 physique n'a été exécutée ici.** Les helpers natifs et protocoles tiers conservent leurs limites de validation précédentes.
 
-Résultats reproductibles : `TEST_RESULTS.md`. Installer `tests/requirements.txt`, puis lancer `python -m pytest tests -q` et `node tests/test_cem3_frontend.cjs` depuis le FULL décompressé.
+Avant un déploiement de production, validez cette version dans un environnement Home Assistant de test représentatif de votre matériel et de votre réseau.
 
 ## Développement et validation
 
@@ -243,11 +243,11 @@ Some integrations require an external helper or library. Native RDMnet functiona
 
 ## Version 0.15.2 — Real read-only CEM3
 
-Built from the supplied **0.15.0 FULL**, retaining its files and features and reapplying the identifiable 0.15.1 hardening changes. The 0.15.1 archive was not supplied; this is not claimed to be a binary reproduction. See `AUDIT_0.15.2.md` and `SOURCE_COMPARISON.json`.
+This repository contains the complete Show Network 0.15.2 Home Assistant integration, including the web frontend, translations and service declarations.
 
 ### Installation / update
 
-Back up Home Assistant and the existing integration, stop Home Assistant, replace the entire `/config/custom_components/dmx_monitor` directory from either ZIP, and restart Home Assistant. Preserve Show Network configuration files outside that directory. Open **Settings → Devices & services → Show Network → Configure**, enable CEM3 and save. Options changes reload the integration. Refresh the browser to load frontend 0.15.2. UPDATE_ONLY contains the complete integration; FULL also includes helpers, dashboards, documentation, tests and audit.
+Back up Home Assistant and the existing integration, stop Home Assistant, replace the entire `/config/custom_components/dmx_monitor` directory with the one from this repository, and restart Home Assistant. Preserve Show Network configuration files outside that directory. Open **Settings → Devices & services → Show Network → Configure**, enable CEM3 and save. Options changes reload the integration. Refresh the browser to load frontend 0.15.2.
 
 ### Configuration and discovery
 
@@ -279,7 +279,7 @@ Polling is limited to one cycle per 5 seconds; properties are cached for 60 seco
 
 Levels, properties and spaces fixtures originate from the conversation's real responses. The System fixture is **synthetic**; firmware-specific HTML needs physical-rack validation. Tests use real local HTTP/UDP sockets, simulated multi-NIC networks and a minimal HA lifecycle adapter. **No complete Home Assistant installation or physical CEM3 was tested here.** Native helper and third-party protocol limitations remain as previously documented.
 
-See `TEST_RESULTS.md`. From the extracted FULL: install `tests/requirements.txt`, then run `python -m pytest tests -q` and `node tests/test_cem3_frontend.cjs`.
+Before production deployment, validate this version in a Home Assistant test environment representative of your hardware and network.
 
 ## Development and validation
 

@@ -1,0 +1,44 @@
+# Vendor protocol capability catalogue. "implemented" means Show Network has a real wire-level client.
+# "catalogue" means documented capability only; no packets are sent.
+- key: d_and_b_aes70
+  manufacturer: d&b audiotechnik
+  protocol: AES70/OCA (OCP.1)
+  transport: TCP
+  port: 65000
+  status: implemented
+  operations: [device_manager_read, role_map_discovery]
+  control: supported_by_protocol_library_but_not_enabled_by_show_network
+  source: https://www.dbaudio.com/global/en/products/software/beta-software/
+- key: l_acoustics_http_api
+  manufacturer: L-Acoustics
+  protocol: Electronics HTTP API
+  transport: HTTP
+  status: catalogue
+  operations: [vendor_api_capability]
+  note: Official API documentation requires registration and states it must not be reshared; no undocumented endpoints are embedded.
+  source: https://www.l-acoustics.com/result-documentation-center/?choice=LA7.16
+- key: l_acoustics_milan_avdecc
+  manufacturer: L-Acoustics
+  protocol: AVDECC / IEEE 1722.1 / Milan
+  transport: Ethernet
+  status: catalogue
+  operations: [entity_discovery, enumeration, monitoring_capability]
+  note: Native control requires the L-Acoustics LA_avdecc library; Show Network currently keeps its AVB layer passive.
+  source: https://github.com/L-Acoustics/avdecc
+- key: meyer_rms
+  manufacturer: Meyer Sound
+  protocol: RMS
+  transport: Ethernet
+  status: catalogue
+  operations: [health_monitoring_capability]
+  note: Compass/RMServer is documented by Meyer Sound, but no public wire-level RMS API suitable for redistribution was found; no guessed packets are sent.
+  source: https://software.meyersound.com/compass
+
+- key: power_manager_dmx
+  manufacturer: Generic
+  protocol: DMX512 / sACN / Art-Net
+  transport: Ethernet/DMX
+  status: planned
+  operations: [sequenced_power_on, sequenced_power_off, hold_channels]
+  control: disabled
+  note: Dormant specification only; no output path or HA service is registered.

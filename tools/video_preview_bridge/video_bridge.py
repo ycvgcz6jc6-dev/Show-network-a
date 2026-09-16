@@ -212,9 +212,9 @@ class VideoPreviewBridge:
         return {"targets": [t.status(now) for t in self.targets.values()]}
 
 
-# --------------------------------------------------------------------------- 
+# ---------------------------------------------------------------------------
 # Minimal HTTP server (stdlib-only: no extra dependency for a small bridge)
-# --------------------------------------------------------------------------- 
+# ---------------------------------------------------------------------------
 
 async def _handle_client(bridge: VideoPreviewBridge, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     try:

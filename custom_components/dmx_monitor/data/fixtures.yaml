@@ -1,0 +1,122 @@
+generic.dimmer.1ch:
+  profile_id: generic.dimmer.1ch
+  manufacturer: Generic
+  model: Dimmer 1ch
+  channels:
+  - name: Dimmer
+    offset: 0
+    capability:
+      attribute: dimmer
+      dmx_min: 0
+      dmx_max: 255
+      value_min: 0.0
+      value_max: 1.0
+      discrete: false
+  modes:
+  - name: 1ch
+    channels:
+    - Dimmer
+generic.rgb.3ch:
+  profile_id: generic.rgb.3ch
+  manufacturer: Generic
+  model: RGB 3ch
+  channels:
+  - name: Red
+    offset: 0
+    capability:
+      attribute: red
+      dmx_min: 0
+      dmx_max: 255
+      value_min: 0.0
+      value_max: 1.0
+      discrete: false
+  - name: Green
+    offset: 1
+    capability:
+      attribute: green
+      dmx_min: 0
+      dmx_max: 255
+      value_min: 0.0
+      value_max: 1.0
+      discrete: false
+  - name: Blue
+    offset: 2
+    capability:
+      attribute: blue
+      dmx_min: 0
+      dmx_max: 255
+      value_min: 0.0
+      value_max: 1.0
+      discrete: false
+  modes:
+  - name: 3ch
+    channels:
+    - Red
+    - Green
+    - Blue
+generic.rgbw.4ch:
+  profile_id: generic.rgbw.4ch
+  manufacturer: Generic
+  model: RGBW 4ch
+  channels:
+  - name: Red
+    offset: 0
+    capability:
+      attribute: red
+      dmx_min: 0
+      dmx_max: 255
+      value_min: 0.0
+      value_max: 1.0
+      discrete: false
+  - name: Green
+    offset: 1
+    capability:
+      attribute: green
+      dmx_min: 0
+      dmx_max: 255
+      value_min: 0.0
+      value_max: 1.0
+      discrete: false
+  - name: Blue
+    offset: 2
+    capability:
+      attribute: blue
+      dmx_min: 0
+      dmx_max: 255
+      value_min: 0.0
+      value_max: 1.0
+      discrete: false
+  - name: White
+    offset: 3
+    capability:
+      attribute: white
+      dmx_min: 0
+      dmx_max: 255
+      value_min: 0.0
+      value_max: 1.0
+      discrete: false
+  modes:
+  - name: 4ch
+    channels:
+    - Red
+    - Green
+    - Blue
+    - White
+generic.cct.1ch:
+  profile_id: generic.cct.1ch
+  manufacturer: Generic
+  model: CCT 1ch
+  channels:
+  - name: CCT
+    offset: 0
+    capability:
+      attribute: cct
+      dmx_min: 0
+      dmx_max: 255
+      value_min: 1500
+      value_max: 10000
+      discrete: false
+  modes:
+  - name: 1ch
+    channels:
+    - CCT
