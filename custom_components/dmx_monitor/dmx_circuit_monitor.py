@@ -5,7 +5,6 @@ Power Manager (active DMX output). It observes selected DMX slots and reports
 OFF/ON/PARTIAL/SIGNAL_LOST without transmitting anything.
 """
 from __future__ import annotations
-import logging
 from dataclasses import dataclass, asdict, field
 import json
 from pathlib import Path
@@ -38,7 +37,7 @@ class DmxCircuitMonitor:
         except (OSError,ValueError,TypeError): raw=[]
         for item in raw if isinstance(raw,list) else []:
             try:self.upsert(item,persist=False)
-            except (ValueError,TypeError,KeyError):logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+            except (ValueError,TypeError,KeyError):pass
 
     def save(self):
         self.path.parent.mkdir(parents=True,exist_ok=True); tmp=self.path.with_suffix('.tmp')

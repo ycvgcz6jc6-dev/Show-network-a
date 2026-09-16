@@ -539,116 +539,6 @@
   - LLDP
   - multicast
   control_paths: []
-- key: netgear
-  manufacturer: NETGEAR
-  domains:
-  - NETWORK
-  product_families:
-  - M4250 Series
-  - GS/MS Managed switches
-  - AV Line
-  passive_protocols:
-  - SNMP
-  - LLDP
-  diagnostics:
-  - interfaces
-  - link_errors
-  - VLAN
-  - PoE
-  - SFP
-  - port_bandwidth
-  control_paths: []
-- key: ubiquiti
-  manufacturer: Ubiquiti
-  domains:
-  - NETWORK
-  product_families:
-  - UniFi Switch
-  - EdgeSwitch
-  passive_protocols:
-  - SNMP
-  - LLDP
-  diagnostics:
-  - interfaces
-  - link_errors
-  - VLAN
-  - PoE
-  - SFP
-  - cpu_memory
-  control_paths: []
-- key: mikrotik
-  manufacturer: MikroTik
-  domains:
-  - NETWORK
-  product_families:
-  - CRS Series
-  - CSS Series
-  passive_protocols:
-  - SNMP
-  - LLDP
-  diagnostics:
-  - interfaces
-  - link_errors
-  - VLAN
-  - PoE
-  - SFP
-  - temperature
-  - cpu_memory
-  control_paths: []
-- key: tp_link
-  manufacturer: TP-Link
-  domains:
-  - NETWORK
-  product_families:
-  - Omada Managed switches
-  - JetStream
-  passive_protocols:
-  - SNMP
-  - LLDP
-  diagnostics:
-  - interfaces
-  - link_errors
-  - VLAN
-  - PoE
-  - SFP
-  - port_bandwidth
-  control_paths: []
-- key: allied_telesis
-  manufacturer: Allied Telesis
-  domains:
-  - NETWORK
-  product_families:
-  - x-series Managed switches
-  passive_protocols:
-  - SNMP
-  - LLDP
-  diagnostics:
-  - interfaces
-  - link_errors
-  - VLAN
-  - PoE
-  - SFP
-  - temperature
-  control_paths: []
-- key: juniper
-  manufacturer: Juniper
-  domains:
-  - NETWORK
-  product_families:
-  - EX Series
-  - QFX Series
-  passive_protocols:
-  - SNMP
-  - LLDP
-  diagnostics:
-  - interfaces
-  - link_errors
-  - VLAN
-  - PoE
-  - SFP
-  - temperature
-  - cpu_memory
-  control_paths: []
 - key: powersoft
   manufacturer: Powersoft
   domains: [AUDIO, NETWORK]
@@ -677,3 +567,45 @@
   passive_protocols: [mDNS, LLDP]
   diagnostics: [health_monitoring_capability, temperature, faults, network_health]
   control_paths: [Compass, RMServer]
+- key: netgear
+  manufacturer: NETGEAR
+  domains: [NETWORK]
+  product_families: [M4250 Series, Managed Pro / AV switches]
+  passive_protocols: [SNMP, LLDP]
+  diagnostics: [interfaces, link_errors, vlan, poe, sfp, port_bandwidth]
+  control_paths: []
+- key: ubiquiti
+  manufacturer: Ubiquiti
+  domains: [NETWORK]
+  product_families: [UniFi Switch, EdgeSwitch]
+  passive_protocols: [SNMP, LLDP]
+  diagnostics: [interfaces, link_errors, vlan, poe, sfp, cpu_memory]
+  control_paths: []
+- key: mikrotik
+  manufacturer: MikroTik
+  domains: [NETWORK]
+  product_families: [RouterOS switches, CRS Series, CSS Series]
+  passive_protocols: [SNMP, LLDP]
+  diagnostics: [interfaces, link_errors, vlan, poe, sfp, temperature, cpu_memory]
+  control_paths: []
+- key: tp_link
+  manufacturer: TP-Link
+  domains: [NETWORK]
+  product_families: [Omada managed switches, JetStream]
+  passive_protocols: [SNMP, LLDP]
+  diagnostics: [interfaces, link_errors, vlan, poe, sfp, port_bandwidth]
+  control_paths: []
+- key: allied_telesis
+  manufacturer: Allied Telesis
+  domains: [NETWORK]
+  product_families: [Managed switches, x-series]
+  passive_protocols: [SNMP, LLDP]
+  diagnostics: [interfaces, link_errors, vlan, poe, sfp, temperature]
+  control_paths: []
+- key: juniper
+  manufacturer: Juniper
+  domains: [NETWORK]
+  product_families: [EX Series, QFX Series]
+  passive_protocols: [SNMP, LLDP]
+  diagnostics: [interfaces, link_errors, vlan, poe, sfp, temperature, cpu_memory]
+  control_paths: []

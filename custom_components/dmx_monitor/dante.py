@@ -152,5 +152,5 @@ class DanteMonitor:
             try:
                 sock.close()
             except OSError:
-                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                pass
         self._sockets.clear()

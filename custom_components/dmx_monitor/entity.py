@@ -5,7 +5,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import ShowNetworkCoordinator
 
-from .const import DOMAIN
+DOMAIN = "dmx_monitor"
 
 
 class ShowNetworkEntity(CoordinatorEntity[ShowNetworkCoordinator]):

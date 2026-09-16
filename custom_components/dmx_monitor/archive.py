@@ -6,7 +6,6 @@ existing HA-accessible directory (for example /media/show_network, a second
 mounted disk, or a mounted NAS/SMB share).
 """
 from __future__ import annotations
-import logging
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 import hashlib, json, os, shutil, asyncio
@@ -122,7 +121,7 @@ class EventArchive:
                 await asyncio.to_thread(self._record_sync, kind, event, data)
             except Exception:
                 # Journaling must never take down Home Assistant.
-                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                pass
             finally:
                 self._queue.task_done()
 
@@ -192,7 +191,7 @@ class EventArchive:
             try:
                 if path.stat().st_mtime < cutoff: path.unlink()
             except OSError:
-                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                pass
 
     def export_zip(self, target: str | None = None, include_all: bool = True) -> Path:
         self._require_storage()
@@ -237,7 +236,7 @@ class EventArchive:
                     latest = max(candidates, key=lambda item: item.stat().st_mtime)
                     last_success = datetime.fromtimestamp(latest.stat().st_mtime, timezone.utc).isoformat()
             except OSError:
-                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                pass
         return {"destination": str(self.root), "configured_destination": self.destination,
                 "files": len(files), "bytes": size, "retention_days": self.retention_days,
                 "max_bytes_per_file": self.max_bytes, "timeline_file": str(self.root / "show_timeline.jsonl"),

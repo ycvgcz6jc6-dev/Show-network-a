@@ -4,7 +4,6 @@ Receive-only.  Reported jitter is *packet-arrival timing variation*, not PTP
 clock offset.  The observer never participates in BMCA and never adjusts time.
 """
 from __future__ import annotations
-import logging
 
 from dataclasses import dataclass
 import asyncio
@@ -241,5 +240,5 @@ class PTPMonitor:
             try:
                 sock.close()
             except OSError:
-                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                pass
         self._sockets.clear()

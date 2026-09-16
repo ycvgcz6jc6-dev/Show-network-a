@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 import logging
 from .runtime_data import ShowNetworkRuntimeData
 
-from .const import DOMAIN
+DOMAIN = "dmx_monitor"
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["sensor", "binary_sensor", "switch", "number", "scene"]
 
@@ -21,27 +21,19 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         await hass.http.async_register_static_paths([StaticPathConfig("/api/dmx_monitor/static", static_dir, False)])
         hass.data[f"{DOMAIN}_static_registered"] = True
 
-        # grandMA3 Web Remote HTTPS/WSS proxy (see ma3_web_remote_view.py):
-        # fixes the mixed-content ws:// issue that otherwise breaks the
-        # console's own Web Remote when Home Assistant is reached over
-        # HTTPS (Nabu Casa etc). Registered once, like the static path
-        # above, not per config entry.
-        from .ma3_web_remote_view import MA3ProxyHttpView, MA3ProxyWebSocketView
-        hass.http.register_view(MA3ProxyHttpView(hass))
-        hass.http.register_view(MA3ProxyWebSocketView(hass))
-
     # Expose the existing Show Network frontend as a real Home Assistant
     # sidebar panel. Earlier builds served the JS bundle but never registered
     # a panel, so there was no visible interface unless a dashboard was added
     # manually.
-    from .cem3_websocket import async_register as register_cem3_websocket
-    register_cem3_websocket(hass)
     if not hass.data.get(f"{DOMAIN}_video_ip_ws_registered"):
         from .video_ip_websocket import async_register as register_video_ip_websocket
         register_video_ip_websocket(hass)
     if not hass.data.get(f"{DOMAIN}_video_preview_registered"):
         from .video_ip_preview import async_register as register_video_ip_preview
         register_video_ip_preview(hass)
+    if not hass.data.get(f"{DOMAIN}_ma3_proxy_registered"):
+        from .ma3_web_remote_view import async_register as register_ma3_proxy
+        register_ma3_proxy(hass)
 
     if not hass.data.get(f"{DOMAIN}_panel_registered"):
         from homeassistant.components import panel_custom
@@ -49,7 +41,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             hass,
             webcomponent_name="show-network-pro-dashboard",
             frontend_url_path="show-network",
-            module_url="/api/dmx_monitor/static/show-network.js?v=0.15.2",
+            module_url="/api/dmx_monitor/static/show-network.js?v=0.15.0",
             sidebar_title="Show Network",
             sidebar_icon="mdi:network-outline",
             require_admin=True,
@@ -87,8 +79,6 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload platforms and stop every background protocol resource safely."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if not unload_ok:
-        return False
     data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
     registry = data.get("resource_registry")
     if registry is not None:

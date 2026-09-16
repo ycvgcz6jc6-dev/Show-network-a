@@ -39,7 +39,7 @@ def _plain(value: Any) -> Any:
             try:
                 data[key] = _plain(item)
             except Exception:
-                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                pass
         return data or str(value)
     return str(value)
 
@@ -170,7 +170,7 @@ class AES70Monitor:
             try:
                 client.close()
             except Exception:
-                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                pass
         self._clients.clear()
 
     async def _loop(self) -> None:
@@ -287,7 +287,7 @@ class AES70Monitor:
             try:
                 device.close()
             except Exception:
-                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                pass
             self._clients.pop(host, None)
 
     def snapshot(self) -> dict[str, Any]:

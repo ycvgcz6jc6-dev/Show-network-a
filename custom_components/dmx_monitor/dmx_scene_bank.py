@@ -5,7 +5,6 @@ Up to 19 full 512-channel scenes can be stored. Recalling a scene selects one
 frame which is then repeated while the bank safety gate is armed.
 """
 from __future__ import annotations
-import logging
 
 import asyncio
 from dataclasses import asdict, dataclass
@@ -225,7 +224,7 @@ class DmxSceneBank:
             try:
                 await asyncio.to_thread(ser.close)
             except Exception:
-                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                pass
         self.enabled = False
         self.active_scene_id = None
 

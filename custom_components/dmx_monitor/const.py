@@ -90,8 +90,6 @@ CONF_PROJECTOR_MONITOR_ENABLED = "projector_monitor_enabled"
 
 CONF_ETC_CEM3_ENABLED = "etc_cem3_enabled"
 CONF_ETC_CEM3_HOSTS = "etc_cem3_hosts"
-CONF_ETC_CEM3_DISCOVERY = "etc_cem3_discovery"
-CONF_ETC_CEM3_INTERFACES = "etc_cem3_interfaces"
 CONF_INTERFACE_ETC = "interface_etc"
 
 CONF_VIDEO_IP_ENABLED = "video_ip_enabled"
@@ -112,3 +110,5 @@ CONF_NOTIFICATION_MODE = "notification_mode"
 
 CONF_PERFORMANCE_PROFILE = "performance_profile"
 PERFORMANCE_PROFILES = ("auto", "minimal", "standard", "full")
+CONF_ETC_CEM3_DISCOVERY = "etc_cem3_discovery"
+CONF_ETC_CEM3_INTERFACES = "etc_cem3_interfaces"

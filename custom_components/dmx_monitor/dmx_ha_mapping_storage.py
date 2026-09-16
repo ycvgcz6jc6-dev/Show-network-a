@@ -1,5 +1,4 @@
 from __future__ import annotations
-import logging
 import json
 from pathlib import Path
 from .dmx_ha_mapping import DmxHAMapping
@@ -20,7 +19,7 @@ class DmxHAMappingStore:
         for d in raw if isinstance(raw,list) else []:
             try:
                 d=dict(d); d["channels"]=tuple(d.get("channels",[])); out.append(DmxHAMapping(**d))
-            except (TypeError, ValueError): logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+            except (TypeError, ValueError): pass
         return out
 
     def save(self, mappings):

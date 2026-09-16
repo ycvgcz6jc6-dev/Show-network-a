@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from dataclasses import asdict
 
 from datetime import timedelta
 import logging
@@ -52,10 +51,11 @@ from .core.state_store import RuntimeStateStore
 from .host_metrics import snapshot as host_metrics_snapshot
 from .performance_manager import AdaptivePerformance
 from .osc_learn import OSCLearnSession
-from .video_ip_supervision import VideoIPSupervision
 from .manufacturer_profiles import all_profiles as all_manufacturer_profiles, match_manufacturer
 from .osc_profiles import PROFILES as OSC_SOURCE_PROFILES
 from .artnet_discovery import ArtNetNodeInventory
+from dataclasses import asdict
+from .video_ip_supervision import VideoIPSupervision
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,6 +78,13 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         self.elc = ELCInventory()
         self.vendor_discovery = []
         self.gigacore = gigacore
+        # Generic, standards-based SNMP telemetry (identity/uptime/interfaces,
+        # PoE if the device answers it) for ELC/Green-GO-hosting or any other
+        # switch that isn't GigaCore -- complementary to self.elc/self.green_go
+        # above, which are identity-only catalogs fed by mDNS, not live SNMP
+        # telemetry. No vendor-private OIDs are used since none are publicly
+        # documented for ELC/Green-GO.
+        self.generic_switch_monitor = None
         self.etc_cem3_monitor = None
         self.ma_listener = None
         self.ma_remote = MARemoteInventory()
@@ -155,19 +162,18 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         self.midi_targets = {}
         self.show_control = ShowControlBank(hass.config.path("show_network_show_control.json"))
         self.timecode = TimecodeMonitor()
-        # Generic, manufacturer-agnostic Art-Net node discovery (ELC,
-        # Luminex, ETC, or anything else compliant) via standard
-        # ArtPoll/ArtPollReply -- see artnet_discovery.py. Fed the same way
-        # as timecode above: lighting_receiver.py forwards every Art-Net
-        # packet to on_poll_reply, which filters for the right opcode itself.
-        self.artnet_nodes = ArtNetNodeInventory(match_manufacturer=match_manufacturer)
         self.projector_monitor = PJLinkMonitor()
         self.video_ip_supervision = VideoIPSupervision()
         self.security = SecurityManager(hass.config.path(), autoload=False)
-        # Cache for the static manufacturer/OSC reference catalogs (see the
-        # Phase 2 fix in _async_update_data): computed once, not on every
-        # 5s refresh cycle, since this data never changes at runtime.
-        self._profile_catalog_cache: dict | None = None
+        # Cache for the static manufacturer/OSC reference catalogs: computed
+        # once, not on every refresh cycle, since this data never changes at
+        # runtime.
+        self._profile_catalog_cache = None
+        # Generic, manufacturer-agnostic Art-Net node discovery (ELC, Luminex,
+        # ETC, or anything else compliant) via standard ArtPoll/ArtPollReply --
+        # complementary to vendor_discovery.py's mDNS-only approach, since not
+        # every Art-Net node also advertises via mDNS.
+        self.artnet_nodes = ArtNetNodeInventory(match_manufacturer=match_manufacturer)
         self._last_activity = {}
         self.data = {
             "devices_total": 0,
@@ -189,7 +195,6 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             "osc_last_address": None,
             "osc_last_error": None,
             "timecode": self.timecode.snapshot(),
-            **self.artnet_nodes.snapshot(),
             "giga_core_temperature": {},
             "gigacore_status": {},
             "control_mappings": list(self.control_mapping_engine.mappings),
@@ -343,16 +348,16 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         summary = self.inventory.summary()
         if self.gigacore:
             await self.gigacore.async_update()
+        if self.generic_switch_monitor:
+            await self.generic_switch_monitor.async_update()
         if getattr(self, "projector_monitor_enabled", True):
             await self.projector_monitor.async_update()
         if self.etc_cem3_monitor:
             await self.etc_cem3_monitor.async_update()
         snapshot = dict(self.data)
-        # NOTE (audit fix): timecode/artnet_nodes were previously only
-        # snapshotted once at __init__ time and never refreshed again, even
-        # though both objects keep updating live via lighting_receiver.py's
-        # callbacks -- the published state would silently go stale after
-        # startup. Re-read them fresh every cycle.
+        # NOTE (audit fix): timecode/artnet_nodes must be re-read fresh every
+        # cycle -- both objects keep updating live via lighting_receiver.py's
+        # callbacks, so a stale snapshot merged only once would silently drift.
         snapshot["timecode"] = self.timecode.snapshot()
         snapshot.update(self.artnet_nodes.snapshot())
         snapshot["security"] = self.security.snapshot()
@@ -372,6 +377,7 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         )
         snapshot["giga_core_temperature"] = dict(self.gigacore.temperatures) if self.gigacore else {}
         snapshot["gigacore_status"] = self.gigacore.snapshot() if self.gigacore else {}
+        snapshot["generic_switch_status"] = self.generic_switch_monitor.snapshot() if self.generic_switch_monitor else {}
         gg = self.green_go.snapshot()
         snapshot["green_go_devices"] = len(gg)
         snapshot["green_go_sources"] = len({d.get("source") for d in gg if d.get("source")})
@@ -379,13 +385,6 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         snapshot["elc_inventory"] = self.elc.snapshot()
         snapshot["vendor_discovery"] = list(self.vendor_discovery)
         snapshot["etc_sensor_catalog"] = etc_profile().get("sensors", [])
-        # NOTE (Show Network audit): manufacturer_profiles.py and osc_profiles.py
-        # both load real, complete catalog data (manufacturer identification
-        # profiles; a full OSC "lexicon" with setup steps per console brand) but
-        # were never imported anywhere else in this codebase, so this data was
-        # never reachable from the coordinator snapshot or any entity/API. It is
-        # static reference data, so it is computed once and cached rather than
-        # rebuilt on every 5s refresh cycle.
         if self._profile_catalog_cache is None:
             try:
                 self._profile_catalog_cache = {
@@ -579,12 +578,9 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         if self.dante_monitor:
             for row in self.dante_monitor.snapshot().get("dante_inventory", []):
                 # NOTE (Show Network audit): dante_inventory rows never contain a
-                # "markers" key (see DanteInventory.snapshot in dante_inventory.py),
-                # so the previous `row.get("markers", [])` was always empty. The
-                # manufacturer name observed over mDNS (e.g. an instance name like
-                # "L-Acoustics LA12X.local") lives in instances/hostnames/
-                # display_name, not in the service-type strings alone. Scan every
-                # identity field actually produced by DanteInventory.snapshot().
+                # "markers" key, so `row.get("markers", [])` was always empty.
+                # The manufacturer name observed over mDNS lives in
+                # instances/hostnames/display_name too, not just services.
                 identity_fields = (
                     row.get("services", [])
                     + row.get("instances", [])
@@ -898,46 +894,6 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         if self.archive:
             self.archive.record("chaos", "ptp_drift_injection", {"offset_ms": value})
         self.publish(chaos=self.chaos.snapshot(), ptp_simulated_offset_ms=value)
-
-    def show_control_go(self, target: str | int | None = None) -> int:
-        """Advance the Show Control cue bank and dispatch every due action
-        through the same gated paths already used elsewhere in this file --
-        never anything new or unguarded.
-
-        Returns the number of actions dispatched (0 is a normal result: an
-        empty cue, or advancing past the last cue).
-        """
-        actions = self.show_control.go(target)
-        dispatched = 0
-        for action in actions:
-            try:
-                if action.kind == "ha_service":
-                    if action.domain and action.service:
-                        data = {**action.data, **({"entity_id": action.entity_id} if action.entity_id else {})}
-                        if self._ha_dispatcher.submit(ServiceAction(action.domain, action.service, data, "show_control")):
-                            dispatched += 1
-                elif action.kind == "osc":
-                    target_obj = self.osc_targets.get(action.osc_target) if action.osc_target else None
-                    if target_obj and action.osc_address:
-                        self.osc_output.send(target_obj, action.osc_address, action.osc_args)
-                        dispatched += 1
-                elif action.kind == "midi":
-                    target_obj = self.midi_targets.get(action.midi_target) if action.midi_target else None
-                    if target_obj and action.midi_message:
-                        message = dict(action.midi_message)
-                        message_type = message.pop("type", None)
-                        if message_type:
-                            self.hass.async_create_task(self.midi_output.async_send(target_obj, message_type, message))
-                            dispatched += 1
-                elif action.kind == "dmx_scene" and action.dmx_scene_index is not None:
-                    self.hass.async_create_task(self.dmx_scene_bank.recall(str(action.dmx_scene_index)))
-                    dispatched += 1
-            except Exception:
-                _LOGGER.warning("Show Control action failed for cue action %r", action, exc_info=True)
-        if self.archive:
-            self.archive.record("show_control", "go", {"target": target, "actions_dispatched": dispatched})
-        self.publish(**self.show_control.snapshot())
-        return dispatched
 
     def clear_chaos(self) -> None:
         if self.archive:

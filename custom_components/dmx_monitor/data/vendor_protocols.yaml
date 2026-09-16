@@ -14,7 +14,7 @@
   protocol: Electronics HTTP API
   transport: HTTP
   status: catalogue
-  operations: [vendor_api_capability]
+  operations: [vendor_api_capability] 
   note: Official API documentation requires registration and states it must not be reshared; no undocumented endpoints are embedded.
   source: https://www.l-acoustics.com/result-documentation-center/?choice=LA7.16
 - key: l_acoustics_milan_avdecc
@@ -22,7 +22,7 @@
   protocol: AVDECC / IEEE 1722.1 / Milan
   transport: Ethernet
   status: catalogue
-  operations: [entity_discovery, enumeration, monitoring_capability]
+  operations: [entity_discovery, enumeration, monitoring_capability] 
   note: Native control requires the L-Acoustics LA_avdecc library; Show Network currently keeps its AVB layer passive.
   source: https://github.com/L-Acoustics/avdecc
 - key: meyer_rms

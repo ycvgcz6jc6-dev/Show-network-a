@@ -1,5 +1,4 @@
 from __future__ import annotations
-import logging
 
 import hashlib
 import json
@@ -147,7 +146,7 @@ class ConfigBackupManager:
             try:
                 tmp.unlink(missing_ok=True)
             except OSError:
-                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                pass
             raise
 
     def inspect_bundle(self, source: str) -> dict:
@@ -234,7 +233,7 @@ class ConfigBackupManager:
             try:
                 old.unlink()
             except OSError:
-                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                pass
 
     def status(self) -> dict:
         present = self._present_files()

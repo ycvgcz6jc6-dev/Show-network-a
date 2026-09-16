@@ -1,6 +1,5 @@
 """Redacted support-bundle exporter for Show Network."""
 from __future__ import annotations
-import logging
 
 import json
 import os
@@ -73,7 +72,7 @@ class DiagnosticsExporter:
             try:
                 tmp.unlink(missing_ok=True)
             except OSError:
-                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                pass
             raise
 
     def _prune(self, keep: int) -> None:
@@ -82,7 +81,7 @@ class DiagnosticsExporter:
             try:
                 old.unlink()
             except OSError:
-                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                pass
 
     def status(self) -> dict[str, Any]:
         return {"format": self.FORMAT, "last_success": self.last_success, "last_error": self.last_error, "last_path": self.last_path}
