@@ -1,311 +1,284 @@
-"""Unified, read-only IP-video source registry.
+"""Passive video-over-IP supervision kernel.
 
-Combines whatever real evidence is available across three different kinds
-of IP video, without ever fabricating a stream URL:
+Phase 10 is intentionally supervision-only:
+- no Home Assistant entities are created here;
+- no sockets are opened to media endpoints;
+- no streams are subscribed to or controlled;
+- observations come from already-available passive discovery evidence.
 
-- **NDI** (``_ndi._tcp.local.``, a real, documented Bonjour/mDNS service
-  type): identity only (name, host, addresses). NDI requires the
-  proprietary NDI SDK to decode, so no generic HTTP/RTSP URI can play an
-  NDI source in a browser -- ``preview_uri`` is always None for these,
-  exactly as AUDIT_PHASE13_FINAL_ACCEPTANCE.md documents: "NDI is not
-  synthesized into a fake stream URI".
-- **ONVIF/RTSP cameras**: identity via mDNS where advertised; a
-  ``preview_uri`` is only ever set from information the operator explicitly
-  provided (e.g. a known RTSP/MJPEG URL), never guessed from a bare IP.
-- **SMPTE ST 2110**: whatever st2110.py's SAP/SDP discovery already found,
-  surfaced here too for a single consolidated inventory. Still no preview
-  URI: raw ST 2110 video is uncompressed and not browser-playable without a
-  transcoding step this integration does not perform.
-
-This module never creates Home Assistant camera entities or sensors on its
-own (per the README: "supervision séparée, sans création de sensors HA").
-
-External transcoding bridge (optional, not implemented here)
---------------------------------------------------------------
-Neither NDI nor raw ST 2110 is browser-playable as-is. If an operator runs
-a *separate* transcoding bridge (e.g. an ffmpeg process using the NDI SDK,
-or an ffmpeg RTP receiver for a specific ST 2110 flow) that republishes a
-source as plain MJPEG/RTSP, that bridge -- once it exists -- can attach its
-resulting URL to the matching, already-discovered source via
-``set_preview_uri(key, uri)``. This module never starts, manages, or
-assumes such a bridge is running; it only accepts the result if one already
-is, the same way ``observe_rtsp``'s ``preview_uri`` is only ever an
-explicitly supplied value.
+The snapshot is consumed directly by the Show Network panel through an
+authenticated Home Assistant websocket command.
 """
 from __future__ import annotations
 
-import logging
-import time
 from dataclasses import dataclass, field
+import ipaddress
+import socket
+import time
 from typing import Any
+from urllib.parse import quote
 
-_LOGGER = logging.getLogger(__name__)
+_VIDEO_MARKERS = (
+    "video", "camera", "encoder", "decoder", "stream", "ndi", "rtsp",
+    "srt", "h264", "h.264", "h265", "h.265", "hevc", "av-over-ip",
+)
 
-NDI_SERVICE_TYPE = "_ndi._tcp.local."
-_STALE_AFTER_S = 60.0
+
+def _text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
 
 
-@dataclass
-class VideoSource:
+def _haystack(row: dict[str, Any]) -> str:
+    props = row.get("properties") or {}
+    parts = [row.get("service_type"), row.get("name"), row.get("host"), row.get("vendor")]
+    for key, value in props.items():
+        parts.extend((key, value))
+    return " ".join(_text(x).lower() for x in parts if x is not None)
+
+
+def _first_address(row: dict[str, Any]) -> str | None:
+    addresses = row.get("addresses") or []
+    if addresses:
+        return _text(addresses[0]) or None
+    host = _text(row.get("host"))
+    return host or None
+
+
+def _property_path(props: dict[str, Any]) -> str | None:
+    for key in ("path", "url", "uri", "stream", "stream_path"):
+        value = _text(props.get(key))
+        if value:
+            return value
+    return None
+
+
+def _route_source_for_ip(host: str) -> str | None:
+    """Return the local IPv4 address the OS would route toward host.
+
+    UDP connect() selects a route/source address without sending a datagram.
+    This lets supervision honor a selected show-network NIC without active
+    media probing.
+    """
+    try:
+        ipaddress.IPv4Address(host)
+    except (ipaddress.AddressValueError, ValueError):
+        return None
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect((host, 9))
+        return str(sock.getsockname()[0])
+    except OSError:
+        return None
+    finally:
+        sock.close()
+
+
+def _classify_mdns(row: dict[str, Any]) -> tuple[str | None, str]:
+    """Return (protocol, evidence) without guessing from a bare port/IP."""
+    service = _text(row.get("service_type")).lower()
+    hay = _haystack(row)
+    if "ndi" in hay:
+        return "NDI", "explicit NDI marker in mDNS/DNS-SD observation"
+    if service.startswith("_rtsp._tcp") or " rtsp" in f" {hay}":
+        return "RTSP", "RTSP service/marker in mDNS/DNS-SD observation"
+    if "srt" in hay:
+        return "SRT", "explicit SRT marker in mDNS/DNS-SD observation"
+    if service.startswith("_http._tcp") or service.startswith("_https._tcp"):
+        if any(marker in hay for marker in _VIDEO_MARKERS):
+            return "HTTPS" if service.startswith("_https") else "HTTP", "video marker on HTTP(S) DNS-SD service"
+    return None, ""
+
+
+@dataclass(slots=True)
+class VideoIPEndpoint:
     key: str
-    kind: str  # "ndi" | "rtsp" | "st2110" | "other"
+    protocol: str
     name: str | None = None
     host: str | None = None
-    addresses: tuple[str, ...] = field(default_factory=tuple)
     port: int | None = None
-    preview_uri: str | None = None
-    preview_source: str | None = None  # e.g. "operator", "external_bridge:ffmpeg-ndi" -- who supplied preview_uri
-    evidence: str = ""
+    uri: str | None = None
+    discovery: str = "passive"
+    interface: str | None = None
+    evidence: list[str] = field(default_factory=list)
+    properties: dict[str, str] = field(default_factory=dict)
     first_seen: float = field(default_factory=time.time)
     last_seen: float = field(default_factory=time.time)
 
-    def snapshot(self, now: float, stale_after_s: float) -> dict[str, Any]:
+    def public(self, now: float, stale_after_s: float) -> dict[str, Any]:
         age = max(0.0, now - self.last_seen)
         return {
             "key": self.key,
-            "kind": self.kind,
+            "protocol": self.protocol,
             "name": self.name,
             "host": self.host,
-            "addresses": list(self.addresses),
             "port": self.port,
-            "preview_uri": self.preview_uri,
-            "preview_source": self.preview_source,
-            "evidence": self.evidence,
+            "uri": self.uri,
+            "discovery": self.discovery,
+            "interface": self.interface,
+            "evidence": list(self.evidence[-8:]),
+            "properties": dict(list(self.properties.items())[:24]),
             "first_seen": self.first_seen,
             "last_seen": self.last_seen,
             "age_s": round(age, 1),
-            "fresh": age < stale_after_s,
+            "online": age <= stale_after_s,
+            "vlc_direct": self.protocol in {"RTSP", "SRT", "HTTP", "HTTPS"} and bool(self.uri),
         }
 
 
 class VideoIPSupervision:
-    def __init__(self, stale_after_s: float = _STALE_AFTER_S) -> None:
-        self.sources: dict[str, VideoSource] = {}
-        self.stale_after_s = float(stale_after_s)
-        self.discovery_errors: list[str] = []
-        self.last_scan_monotonic: float | None = None
+    """In-memory passive inventory of video-over-IP endpoints."""
 
-    # -- ingestion -----------------------------------------------------------
-    def observe_ndi(self, name: str, host: str | None, addresses: list[str], *, evidence: str = "mDNS _ndi._tcp.local.") -> None:
-        """NDI identity only. Never touches preview_uri -- see set_preview_uri()."""
-        key = f"ndi:{name}"
-        now = time.time()
-        src = self.sources.get(key)
-        if src is None:
-            src = VideoSource(key=key, kind="ndi", first_seen=now)
-            self.sources[key] = src
-        src.name = name
-        src.host = host or src.host
-        src.addresses = tuple(addresses) or src.addresses
-        src.evidence = evidence
-        src.last_seen = now
+    def __init__(self, *, stale_after_s: float = 45.0, max_endpoints: int = 256) -> None:
+        self.stale_after_s = max(5.0, float(stale_after_s))
+        self.max_endpoints = max(16, int(max_endpoints))
+        self.enabled = True
+        self.interface = "0.0.0.0"
+        self.preview_enabled = False
+        self._endpoints: dict[str, VideoIPEndpoint] = {}
+        self.observations = 0
+        self.last_observed_at: float | None = None
 
-    def observe_rtsp(self, name: str, host: str, *, addresses: list[str] | None = None, port: int | None = None,
-                      preview_uri: str | None = None, evidence: str = "mDNS/manual") -> None:
-        key = f"rtsp:{host}:{port or 0}"
-        now = time.time()
-        src = self.sources.get(key)
-        if src is None:
-            src = VideoSource(key=key, kind="rtsp", first_seen=now)
-            self.sources[key] = src
-        src.name = name or src.name
-        src.host = host
-        if addresses:
-            src.addresses = tuple(addresses)
-        if port is not None:
-            src.port = port
-        # A preview URI is only ever accepted from an explicit, known-good
-        # value the caller supplied (e.g. an operator-entered RTSP/MJPEG URL
-        # or one confirmed by a real camera-description response) -- never
-        # synthesized here from a bare host/port guess.
-        if preview_uri:
-            src.preview_uri = preview_uri
-            src.preview_source = "operator"
-        src.evidence = evidence
-        src.last_seen = now
+    def configure(self, *, enabled: bool, interface: str | None = None, preview_enabled: bool = False) -> None:
+        self.enabled = bool(enabled)
+        self.interface = _text(interface) or "0.0.0.0"
+        self.preview_enabled = bool(preview_enabled)
 
-    def observe_st2110(self, sdp_sessions: list[dict[str, Any]]) -> None:
-        """Fold st2110.py's SDP-discovered flows into the same registry."""
-        now = time.time()
-        for row in sdp_sessions or ():
-            dest = row.get("destination")
-            port = row.get("port")
-            if not dest or not port:
-                continue
-            key = f"st2110:{dest}:{port}"
-            src = self.sources.get(key)
-            if src is None:
-                src = VideoSource(key=key, kind="st2110", first_seen=now)
-                self.sources[key] = src
-            src.name = row.get("name") or src.name
-            src.host = dest
-            src.port = int(port)
-            src.evidence = f"SAP/SDP m=video ({row.get('rtpmap') or 'raw'})"
-            src.last_seen = now
+    def endpoint(self, key: str) -> VideoIPEndpoint | None:
+        return self._endpoints.get(str(key))
 
-    # -- external transcoding bridge attachment ---------------------------------
-    def set_preview_uri(self, key: str, uri: str, *, bridge_name: str = "external_bridge") -> bool:
-        """Attach a real preview URL an external bridge is already serving.
-
-        Only ever updates an already-known source (found by its ``key``, as
-        seen in snapshot() rows); it never creates a source on its own and
-        never guesses a URI. Returns False if ``key`` is unknown, so a
-        caller can tell the difference between "attached" and "no such
-        source (yet)".
-        """
-        src = self.sources.get(key)
-        if src is None:
+    def _interface_accepts(self, host: str | None) -> bool:
+        if self.interface in {"", "0.0.0.0"}:
+            return True
+        if not host:
             return False
-        src.preview_uri = uri
-        src.preview_source = bridge_name
+        routed = _route_source_for_ip(host)
+        return routed == self.interface
+
+    def observe_mdns(self, row: dict[str, Any]) -> bool:
+        if not self.enabled:
+            return False
+        protocol, evidence = _classify_mdns(row)
+        if not protocol:
+            return False
+        host = _first_address(row)
+        if not self._interface_accepts(host):
+            return False
+        name = _text(row.get("name")) or None
+        port = int(row.get("port") or 0) or None
+        service = _text(row.get("service_type")).lower()
+        props = {str(k): _text(v) for k, v in (row.get("properties") or {}).items()}
+        observed_at = float(row.get("observed_at") or time.time())
+        path = _property_path(props)
+        uri = None
+        if protocol in {"RTSP", "HTTP", "HTTPS"} and host:
+            scheme = protocol.lower()
+            if path and "://" in path:
+                uri = path
+            else:
+                suffix = path or ""
+                if suffix and not suffix.startswith("/"):
+                    suffix = "/" + quote(suffix, safe="/%?=&:+@")
+                default_port = 443 if protocol == "HTTPS" else 80 if protocol == "HTTP" else 554
+                port_part = f":{port}" if port and port != default_port else ""
+                uri = f"{scheme}://{host}{port_part}{suffix}"
+        elif protocol == "SRT" and host and port:
+            uri = f"srt://{host}:{port}"
+        # NDI deliberately has no synthetic URI. Opening NDI correctly requires
+        # NDI SDK/plugin support; a DNS-SD observation alone is not a media URL.
+        key = f"{protocol.lower()}:{host or 'unknown'}:{port or 0}:{name or service or 'endpoint'}"
+        ep = self._endpoints.get(key)
+        if ep is None:
+            ep = VideoIPEndpoint(key=key, protocol=protocol, first_seen=observed_at)
+            self._endpoints[key] = ep
+        ep.protocol = protocol
+        ep.name = name or ep.name
+        ep.host = host or ep.host
+        ep.port = port or ep.port
+        ep.uri = uri or ep.uri
+        ep.discovery = "mDNS/DNS-SD"
+        ep.interface = (self.interface if self.interface != "0.0.0.0" else (_text(row.get("interface")) or ep.interface))
+        ep.properties = props or ep.properties
+        ep.last_seen = max(ep.last_seen, observed_at)
+        if evidence and evidence not in ep.evidence:
+            ep.evidence.append(evidence)
+        if service:
+            service_evidence = f"service={service}"
+            if service_evidence not in ep.evidence:
+                ep.evidence.append(service_evidence)
+        self.observations += 1
+        self.last_observed_at = observed_at
+        self._trim()
         return True
 
-    def clear_preview_uri(self, key: str) -> None:
-        """Detach a previously-attached bridge preview (e.g. the bridge stopped)."""
-        src = self.sources.get(key)
-        if src is not None:
-            src.preview_uri = None
-            src.preview_source = None
+    def observe_transport(
+        self,
+        protocol: str,
+        *,
+        host: str,
+        port: int | None = None,
+        name: str | None = None,
+        uri: str | None = None,
+        interface: str | None = None,
+        evidence: str = "passive protocol observation",
+        observed_at: float | None = None,
+    ) -> None:
+        """Accept evidence from future passive packet inspectors, without probing."""
+        if not self.enabled:
+            return
+        proto = _text(protocol).upper()
+        if proto not in {"NDI", "SRT", "RTSP", "HTTP", "HTTPS", "UDP"}:
+            raise ValueError(f"unsupported video supervision protocol: {protocol}")
+        when = float(observed_at or time.time())
+        key = f"{proto.lower()}:{host}:{int(port or 0)}:{name or 'endpoint'}"
+        ep = self._endpoints.get(key) or VideoIPEndpoint(key=key, protocol=proto, first_seen=when)
+        ep.host = host
+        ep.port = int(port) if port else None
+        ep.name = name or ep.name
+        ep.uri = uri or ep.uri
+        ep.interface = interface or ep.interface
+        ep.discovery = "passive traffic"
+        ep.last_seen = when
+        if evidence and evidence not in ep.evidence:
+            ep.evidence.append(evidence)
+        self._endpoints[key] = ep
+        self.observations += 1
+        self.last_observed_at = when
+        self._trim()
 
-    async def async_poll_preview_bridge(self, base_url: str, *, timeout: float = 3.0) -> int:
-        """Poll a running tools/video_preview_bridge/video_bridge.py instance.
+    def _trim(self) -> None:
+        if len(self._endpoints) <= self.max_endpoints:
+            return
+        for key, _ep in sorted(self._endpoints.items(), key=lambda kv: kv[1].last_seen)[: len(self._endpoints) - self.max_endpoints]:
+            self._endpoints.pop(key, None)
 
-        GETs ``<base_url>/status`` and, for every target it reports healthy,
-        attaches ``<base_url>/preview/<key>`` as that source's preview_uri;
-        for every target it no longer reports healthy, detaches any
-        previously-attached preview. Returns the number of sources currently
-        attached. Never raises on a network error (bridge not running yet is
-        a completely normal state); errors are recorded in
-        ``self.discovery_errors`` for the snapshot to surface instead.
-        """
-        import json as _json
-        import urllib.error
-        import urllib.request
-        from urllib.parse import quote as _quote
-
-        def _fetch() -> dict:
-            with urllib.request.urlopen(f"{base_url.rstrip('/')}/status", timeout=timeout) as resp:
-                return _json.loads(resp.read().decode("utf-8"))
-
-        try:
-            import asyncio as _asyncio
-            data = await _asyncio.to_thread(_fetch)
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            self.discovery_errors = [f"preview bridge unreachable: {exc}"]
-            return 0
-
-        self.discovery_errors = [e for e in self.discovery_errors if not e.startswith("preview bridge unreachable")]
-        attached = 0
-        for target in data.get("targets", []):
-            key = target.get("key")
-            if not key or key not in self.sources:
-                continue
-            if target.get("healthy"):
-                self.set_preview_uri(key, f"{base_url.rstrip('/')}/preview/{_quote(key, safe='')}", bridge_name="external_bridge:video_bridge.py")
-                attached += 1
-            else:
-                self.clear_preview_uri(key)
-        return attached
-
-    # -- mDNS discovery --------------------------------------------------------
-    async def async_scan_ndi(self, hass, timeout: float = 3.0) -> int:
-        """Discover NDI sources via Home Assistant's shared Zeroconf instance."""
-        try:
-            from homeassistant.components import zeroconf as ha_zeroconf
-        except ImportError:
-            self.discovery_errors = ["homeassistant.components.zeroconf unavailable"]
-            return 0
-
-        try:
-            zc = await ha_zeroconf.async_get_instance(hass)
-            import asyncio as _asyncio
-
-            found = await _asyncio.to_thread(self._scan_ndi_sync, zc, timeout)
-        except Exception as exc:
-            self.discovery_errors = [str(exc)]
-            _LOGGER.debug("NDI mDNS scan failed", exc_info=True)
-            return 0
-
-        self.discovery_errors = []
-        self.last_scan_monotonic = time.monotonic()
-        for row in found:
-            self.observe_ndi(row["name"], row.get("host"), row.get("addresses", []))
-        return len(found)
-
-    @staticmethod
-    def _scan_ndi_sync(zc, timeout: float) -> list[dict[str, Any]]:
-        try:
-            from zeroconf import ServiceBrowser, ServiceListener
-        except ImportError:
-            return []
-
-        found: dict[str, dict[str, Any]] = {}
-
-        class Listener(ServiceListener):
-            def add_service(self, zc, service_type, name):
-                self._update(zc, service_type, name)
-
-            def update_service(self, zc, service_type, name):
-                self._update(zc, service_type, name)
-
-            def remove_service(self, zc, service_type, name):
-                found.pop(name, None)
-
-            def _update(self, zc, service_type, name):
-                try:
-                    info = zc.get_service_info(service_type, name, timeout=1200)
-                    if not info:
-                        return
-                    addresses = []
-                    for addr in info.addresses_by_version(4):
-                        try:
-                            addresses.append(".".join(str(b) for b in addr))
-                        except Exception:
-                            continue
-                    label = str(name).removesuffix(service_type).rstrip(".")
-                    found[name] = {
-                        "name": label or name,
-                        "host": str(info.server or "").rstrip(".") or None,
-                        "addresses": addresses,
-                    }
-                except Exception as exc:
-                    _LOGGER.debug("NDI mDNS service parse failed for %s: %s", name, exc)
-
-        browser = None
-        try:
-            listener = Listener()
-            browser = ServiceBrowser(zc, NDI_SERVICE_TYPE, listener)
-            import time as _time
-            deadline = _time.monotonic() + max(0.5, min(timeout, 10.0))
-            while _time.monotonic() < deadline:
-                _time.sleep(0.05)
-        finally:
-            if browser is not None:
-                try:
-                    browser.cancel()
-                except Exception:
-                    pass
-        return list(found.values())
-
-    # -- reporting -------------------------------------------------------------
     def snapshot(self) -> dict[str, Any]:
         now = time.time()
-        rows = [src.snapshot(now, self.stale_after_s) for src in self.sources.values()]
-        rows.sort(key=lambda r: (r["kind"], r["name"] or r["key"]))
+        endpoints = [ep.public(now, self.stale_after_s) for ep in self._endpoints.values()]
+        endpoints.sort(key=lambda x: (not x["online"], x["protocol"], x.get("name") or x.get("host") or ""))
+        protocols: dict[str, int] = {}
+        for item in endpoints:
+            protocols[item["protocol"]] = protocols.get(item["protocol"], 0) + 1
         return {
-            "video_ip_sources": rows,
-            "video_ip_source_count": len(rows),
-            "video_ip_fresh_count": sum(1 for r in rows if r["fresh"]),
-            "video_ip_by_kind": {
-                kind: sum(1 for r in rows if r["kind"] == kind)
-                for kind in sorted({r["kind"] for r in rows})
-            },
-            "video_ip_discovery_errors": list(self.discovery_errors),
-            "video_ip_note": (
-                "NDI and raw ST 2110 sources never get a synthesized preview_uri "
-                "(neither is browser-playable without proprietary/transcoding "
-                "support this integration does not provide). RTSP preview_uri "
-                "is only ever a value explicitly supplied by the operator or a "
-                "confirmed camera response, never guessed from a bare address."
-            ),
+            "mode": "supervision_only",
+            "enabled": self.enabled,
+            "interface": self.interface,
+            "preview_enabled": self.preview_enabled,
+            "entities_created": 0,
+            "active_probes": False,
+            "stream_subscriptions": False,
+            "control_available": False,
+            "endpoint_count": len(endpoints),
+            "online_count": sum(1 for item in endpoints if item["online"]),
+            "protocols": protocols,
+            "observations": self.observations,
+            "last_observed_at": self.last_observed_at,
+            "endpoints": endpoints,
+            "notes": [
+                "Supervision only: no Home Assistant sensor/entity is created by this module.",
+                "NDI discovery evidence does not imply a playable URI; NDI SDK/plugin support is required to open NDI media.",
+                "SRT has no generic discovery probe here; it is shown only when explicit passive evidence is observed.",
+                "Low-quality preview is opt-in and opens a media subscription only while the preview is viewed.",
+            ],
         }

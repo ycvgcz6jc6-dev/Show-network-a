@@ -1,7 +1,7 @@
 """Shared Home Assistant service helpers."""
 from __future__ import annotations
 from homeassistant.core import HomeAssistant
-from ..const import DOMAIN
+DOMAIN = "dmx_monitor"
 
 def coordinator_for_call(hass: HomeAssistant, call):
     """Resolve a coordinator without assuming the first configured entry."""

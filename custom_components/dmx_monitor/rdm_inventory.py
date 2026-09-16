@@ -1,142 +1,133 @@
-"""Passive RDM / RDMnet device inventory.
+"""RDM / RDMnet device inventory.
 
-This module never speaks RDM itself. It only normalizes whatever device
-rows an external bridge exposes -- typically an OLA (Open Lighting
-Architecture) RDM client or an RDMnet gateway -- into one consistent
-snapshot shape. RDM *writes* (identify, DMX address changes, personality
-changes) are handled, if at all, by the bridge itself and are outside this
-module's scope entirely: this is read-only identity/telemetry aggregation.
-
-Note for whoever wires this up in runtime/setup.py: as of this audit,
-neither ``rdm_bridge`` nor ``rdmnet_bridge`` exist anywhere in this
-codebase, so this inventory will legitimately stay empty until one is
-built. Accepting both dict-like and attribute-style rows here is a
-deliberate hedge against not knowing that future bridge's exact row shape.
+The inventory only exposes values that came from an RDM/RDMnet transport.
+Discovery identity and telemetry freshness are kept separate so a cached UID does
+not keep a responder artificially online.
 """
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
+import re
+import time
 from typing import Any
 
-_STALE_AFTER_S = 60.0
+_UID_RE = re.compile(r"^[0-9a-fA-F]{4}:[0-9a-fA-F]{8}$")
 
 
-def _field(row: Any, name: str) -> Any:
-    if isinstance(row, dict):
-        return row.get(name)
-    return getattr(row, name, None)
+def normalize_uid(value: str) -> str:
+    value = str(value or "").strip().lower().replace("-", ":")
+    if not _UID_RE.match(value):
+        raise ValueError(f"Invalid RDM UID: {value!r}")
+    return value
 
 
 @dataclass
 class RDMDevice:
     uid: str
     transport: str
-    manufacturer: str | None = None
-    model: str | None = None
-    label: str | None = None
-    dmx_address: int | None = None
-    footprint: int | None = None
-    personality: int | None = None
+    universe: int | None = None
+    scope: str | None = None
+    manufacturer_label: str | None = None
+    model_description: str | None = None
+    device_label: str | None = None
+    software_version_label: str | None = None
+    dmx_start_address: int | None = None
+    dmx_footprint: int | None = None
+    current_personality: int | None = None
     personality_count: int | None = None
-    sensors: list[Any] = field(default_factory=list)
+    sub_device_count: int | None = None
+    sensor_count: int | None = None
+    supported_parameters: list[str] = field(default_factory=list)
+    sensors: list[dict[str, Any]] = field(default_factory=list)
+    status_messages: list[dict[str, Any]] = field(default_factory=list)
+    extra: dict[str, Any] = field(default_factory=dict)
     first_seen: float = field(default_factory=time.time)
     last_seen: float = field(default_factory=time.time)
+    last_telemetry: float | None = None
+    source: str | None = None
+
+    def update(self, row: dict[str, Any], observed_at: float) -> None:
+        self.last_seen = max(self.last_seen, observed_at)
+        for key in (
+            "manufacturer_label", "model_description", "device_label",
+            "software_version_label", "dmx_start_address", "dmx_footprint",
+            "current_personality", "personality_count", "sub_device_count",
+            "sensor_count", "scope", "universe", "source",
+        ):
+            if row.get(key) is not None:
+                setattr(self, key, row[key])
+        for key in ("supported_parameters", "sensors", "status_messages"):
+            if isinstance(row.get(key), list):
+                setattr(self, key, list(row[key]))
+        if isinstance(row.get("extra"), dict):
+            self.extra.update({str(k): v for k, v in row["extra"].items() if v is not None})
+        if any(row.get(k) is not None for k in (
+            "manufacturer_label", "model_description", "device_label",
+            "software_version_label", "dmx_start_address", "dmx_footprint",
+            "current_personality", "supported_parameters", "sensors", "status_messages",
+        )):
+            self.last_telemetry = max(self.last_telemetry or 0.0, observed_at)
+
+    def snapshot(self, now: float, stale_s: float) -> dict[str, Any]:
+        age = max(0.0, now - self.last_seen)
+        tele_age = None if self.last_telemetry is None else max(0.0, now - self.last_telemetry)
+        return {
+            "uid": self.uid,
+            "transport": self.transport,
+            "universe": self.universe,
+            "scope": self.scope,
+            "manufacturer_label": self.manufacturer_label,
+            "model_description": self.model_description,
+            "device_label": self.device_label,
+            "software_version_label": self.software_version_label,
+            "dmx_start_address": self.dmx_start_address,
+            "dmx_footprint": self.dmx_footprint,
+            "current_personality": self.current_personality,
+            "personality_count": self.personality_count,
+            "sub_device_count": self.sub_device_count,
+            "sensor_count": self.sensor_count,
+            "supported_parameters": list(self.supported_parameters),
+            "sensors": list(self.sensors),
+            "status_messages": list(self.status_messages),
+            "extra": dict(self.extra),
+            "source": self.source,
+            "first_seen": self.first_seen,
+            "last_seen": self.last_seen,
+            "last_telemetry": self.last_telemetry,
+            "age_s": round(age, 3),
+            "telemetry_age_s": None if tele_age is None else round(tele_age, 3),
+            "online": age <= stale_s,
+            "stale": age > stale_s,
+        }
 
 
 class RDMInventory:
-    def __init__(self, stale_after_s: float = _STALE_AFTER_S) -> None:
-        self.devices: dict[str, RDMDevice] = {}
-        self.stale_after_s = float(stale_after_s)
+    def __init__(self, stale_s: float = 45.0) -> None:
+        self.stale_s = float(stale_s)
+        self._devices: dict[tuple[str, str], RDMDevice] = {}
 
-    def ingest(self, rows: list[Any] | None, transport: str) -> None:
-        """Merge a batch of device rows from one bridge (OLA/RDMnet).
-
-        Rows may be plain dicts or objects; whichever fields are present are
-        used, missing ones are left as-is on an existing record (a
-        newer partial observation never blanks out a previously known
-        manufacturer/model, for example).
-        """
-        now = time.time()
-        for row in rows or ():
-            raw_uid = _field(row, "uid")
-            if raw_uid is None:
-                raw_uid = _field(row, "UID")
-            if not raw_uid:
+    def ingest(self, rows: list[dict[str, Any]], *, transport: str, observed_at: float | None = None) -> None:
+        now = float(observed_at if observed_at is not None else time.time())
+        for row in rows or []:
+            try:
+                uid = normalize_uid(row.get("uid", ""))
+            except ValueError:
                 continue
-            uid = str(raw_uid)
-            device = self.devices.get(uid)
-            if device is None:
-                device = RDMDevice(uid=uid, transport=transport, first_seen=now, last_seen=now)
-                self.devices[uid] = device
-            device.transport = transport
-            device.last_seen = now
-            device.manufacturer = _field(row, "manufacturer") or device.manufacturer
-            device.model = _field(row, "model") or device.model
-            device.label = _field(row, "label") or _field(row, "device_label") or device.label
-
-            address = _field(row, "dmx_address")
-            if address is None:
-                address = _field(row, "start_address")
-            if address is not None:
-                try:
-                    device.dmx_address = int(address)
-                except (TypeError, ValueError):
-                    pass
-
-            footprint = _field(row, "footprint")
-            if footprint is not None:
-                try:
-                    device.footprint = int(footprint)
-                except (TypeError, ValueError):
-                    pass
-
-            personality = _field(row, "personality")
-            if personality is not None:
-                try:
-                    device.personality = int(personality)
-                except (TypeError, ValueError):
-                    pass
-
-            personality_count = _field(row, "personality_count")
-            if personality_count is not None:
-                try:
-                    device.personality_count = int(personality_count)
-                except (TypeError, ValueError):
-                    pass
-
-            sensors = _field(row, "sensors")
-            if sensors:
-                try:
-                    device.sensors = list(sensors)
-                except TypeError:
-                    pass
+            key = (transport, uid)
+            rec = self._devices.get(key)
+            if rec is None:
+                rec = RDMDevice(uid=uid, transport=transport, universe=row.get("universe"), scope=row.get("scope"), source=row.get("source"), first_seen=now, last_seen=now)
+                self._devices[key] = rec
+            rec.update(row, float(row.get("last_seen") or now))
 
     def snapshot(self) -> dict[str, Any]:
         now = time.time()
-        rows = []
-        for device in sorted(self.devices.values(), key=lambda d: d.uid):
-            age = max(0.0, now - device.last_seen)
-            rows.append({
-                "uid": device.uid,
-                "transport": device.transport,
-                "manufacturer": device.manufacturer,
-                "model": device.model,
-                "label": device.label,
-                "dmx_address": device.dmx_address,
-                "footprint": device.footprint,
-                "personality": device.personality,
-                "personality_count": device.personality_count,
-                "sensors": device.sensors,
-                "first_seen": device.first_seen,
-                "last_seen": device.last_seen,
-                "age_s": round(age, 1),
-                "fresh": age < self.stale_after_s,
-            })
+        rows = [d.snapshot(now, self.stale_s) for d in self._devices.values()]
+        rows.sort(key=lambda d: (d["transport"], d.get("universe") or 0, d["uid"]))
         return {
             "rdm_devices": rows,
-            "rdm_device_count": len(rows),
-            "rdm_fresh_count": sum(1 for r in rows if r["fresh"]),
-            "rdm_transports": sorted({d.transport for d in self.devices.values()}),
-            "rdm_note": "Populated only when an OLA (RDM) or RDMnet gateway bridge is configured and running; this module never speaks RDM itself.",
+            "rdm_devices_total": len(rows),
+            "rdm_devices_online": sum(1 for r in rows if r["online"]),
+            "rdm_stale_timeout_s": self.stale_s,
+            "rdm_transports": sorted({r["transport"] for r in rows}),
         }

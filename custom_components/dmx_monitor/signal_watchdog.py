@@ -1,198 +1,271 @@
-"""Signal-presence watchdogs (distinct from the value-based rule engine).
+"""Signal watchdogs for receive-only show-network sources.
 
-A watchdog does not look at DMX *values* (rules.py does that); it only cares
-whether packets for a given protocol/universe/(optional source) keep
-arriving. If nothing is observed for ``timeout_s``, the watchdog declares
-"signal_lost" and, if configured, calls one Home Assistant service
-(``action_lost``); when packets resume it declares "signal_restored" and
-optionally calls ``action_restored``. This mirrors the DMX Circuit Monitor's
-OFF/ON/SIGNAL_LOST idea but at the *rule/action* level instead of the raw
-per-channel level, and -- unlike the rule engine -- is allowed to call the
-Home Assistant service itself directly, gated by ``action_guard``, since the
-constructor is handed ``hass`` for exactly that purpose.
+A watchdog watches the *presence* of valid incoming telemetry. It never
+transmits DMX, sACN or Art-Net. When a source stays silent for the configured
+period, an optional Home Assistant action can be executed (for example a Hue
+scene). Recovery can optionally execute another action after stable signal
+return.
 """
 from __future__ import annotations
 
 import asyncio
-import logging
-import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
-
-_LOGGER = logging.getLogger(__name__)
-
-_CHECK_INTERVAL_S = 1.0
+from time import monotonic
+from typing import Any
 
 
 @dataclass
-class WatchdogRule:
+class SignalWatchdogRule:
     name: str
-    protocol: str = "*"
-    universe: int = 1
+    protocol: str
+    universe: int
     source: str | None = None
-    timeout_s: float = 5.0
-    action_lost: dict[str, Any] | None = None
-    action_restored: dict[str, Any] | None = None
+    loss_timeout_s: float = 10.0
+    recovery_delay_s: float = 3.0
+    loss_action: dict[str, Any] | None = None
+    recovery_action: dict[str, Any] | None = None
     enabled: bool = True
 
-    # -- runtime state -------------------------------------------------------
-    last_seen: float | None = field(default=None, compare=False)
-    lost: bool = field(default=False, compare=False)
-    simulated_lost: bool = field(default=False, compare=False)
 
-    def matches(self, protocol: str, universe: int, source: str | None) -> bool:
-        if self.protocol != "*" and self.protocol.lower() != str(protocol).lower():
-            return False
-        if self.universe != universe:
-            return False
-        if self.source is not None and self.source != source:
-            return False
-        return True
-
-    def snapshot(self, now: float) -> dict:
-        age = None if self.last_seen is None else max(0.0, now - self.last_seen)
-        return {
-            "name": self.name,
-            "protocol": self.protocol,
-            "universe": self.universe,
-            "source": self.source,
-            "timeout_s": self.timeout_s,
-            "enabled": self.enabled,
-            "lost": self.lost,
-            "simulated_lost": self.simulated_lost,
-            "age_s": None if age is None else round(age, 1),
-            "has_action_lost": self.action_lost is not None,
-            "has_action_restored": self.action_restored is not None,
-        }
+@dataclass(frozen=True)
+class WatchdogState:
+    key: str
+    signal_ok: bool
+    active: bool
+    last_signal_age_s: float | None
+    loss_timeout_s: float
+    last_transition: str | None
+    reason: str
 
 
 class SignalWatchdogManager:
-    """Tracks signal presence per rule and reacts on loss/restore edges."""
+    """Manage signal-loss timers and optional HA actions."""
 
-    def __init__(
-        self,
-        hass,
-        *,
-        action_guard: Callable[[dict[str, Any]], bool] | None = None,
-        event_callback: Callable[[str, WatchdogRule, str], None] | None = None,
-        check_interval_s: float = _CHECK_INTERVAL_S,
-    ) -> None:
+    def __init__(self, hass, action_guard=None, event_callback=None) -> None:
         self.hass = hass
-        self.action_guard = action_guard or (lambda action: True)
+        self.action_guard = action_guard
         self.event_callback = event_callback
-        self.check_interval_s = float(check_interval_s)
-        self.rules: dict[str, WatchdogRule] = {}
-        self._task: asyncio.Task | None = None
+        self.rules: dict[str, SignalWatchdogRule] = {}
+        self._last_signal: dict[str, float] = {}
+        self._states: dict[str, bool] = {}
+        # Timer handles avoid creating/cancelling an asyncio Task for every
+        # high-rate packet. A coroutine task is created only when a timer fires.
+        self._loss_tasks: dict[str, asyncio.TimerHandle] = {}
+        self._recovery_tasks: dict[str, asyncio.TimerHandle] = {}
+        self._last_transition: dict[str, str | None] = {}
+        self._last_reason: dict[str, str] = {}
+        self._recovery_started: dict[str, float] = {}
 
-    # -- configuration -------------------------------------------------------
-    def add(self, rule: WatchdogRule) -> None:
-        self.rules[rule.name] = rule
-
-    def remove(self, name: str) -> None:
-        self.rules.pop(name, None)
-
-    def set_rules(self, rules: list[WatchdogRule]) -> None:
-        self.rules = {r.name: r for r in rules}
-
-    # -- observation -----------------------------------------------------------
-    def observe(self, protocol: str, universe: int, source: str | None) -> None:
-        now = time.time()
-        for rule in self.rules.values():
-            if not rule.enabled or not rule.matches(protocol, universe, source):
-                continue
-            was_lost = rule.lost or rule.simulated_lost
-            rule.last_seen = now
-            rule.simulated_lost = False
-            if was_lost:
-                rule.lost = False
-                self._handle_transition(rule, "signal_restored", "signal observed again")
-
-    # -- background loop -------------------------------------------------------
-    def start(self) -> None:
-        if self._task is None or self._task.done():
-            self._task = asyncio.get_event_loop().create_task(self._run(), name="show-network-signal-watchdog")
-
-    async def _run(self) -> None:
+    def add_rule(self, rule: SignalWatchdogRule) -> None:
+        if rule.universe < 1:
+            raise ValueError("universe must be >= 1")
+        if rule.loss_timeout_s <= 0:
+            raise ValueError("loss_timeout_s must be > 0")
+        if rule.recovery_delay_s < 0:
+            raise ValueError("recovery_delay_s must be >= 0")
+        key = self._key(rule)
+        self.rules[key] = rule
+        self._states.setdefault(key, False)
+        self._last_transition.setdefault(key, None)
+        self._last_reason.setdefault(key, "waiting for first valid signal")
+        # A watchdog must also detect silence from startup, before the first packet.
         try:
-            while True:
-                await asyncio.sleep(self.check_interval_s)
-                self._check_all()
+            loop = asyncio.get_running_loop()
+            self._loss_tasks[key] = loop.call_later(rule.loss_timeout_s, self._timer_fire_loss, key)
+        except RuntimeError:
+            # Unit tests/non-async construction may add rules before a loop exists;
+            # the first observation will arm the normal loss timer.
+            pass
+
+    def remove_rule(self, name: str) -> None:
+        for key, rule in list(self.rules.items()):
+            if rule.name == name:
+                self._cancel(self._loss_tasks.pop(key, None))
+                self._cancel(self._recovery_tasks.pop(key, None))
+                self.rules.pop(key, None)
+                self._last_signal.pop(key, None)
+                self._states.pop(key, None)
+                self._recovery_started.pop(key, None)
+
+    def observe(self, protocol: str, universe: int, source: str | None = None) -> None:
+        now = monotonic()
+        for key, rule in self.rules.items():
+            if rule.protocol.lower() != protocol.lower() or rule.universe != universe:
+                continue
+            if rule.source and rule.source != source:
+                continue
+            self._last_signal[key] = now
+            # Recovery is only relevant while an alarm is active. Crucially,
+            # continued packets do not restart the recovery delay.
+            if self._states.get(key, False) and key not in self._recovery_tasks:
+                if rule.recovery_delay_s:
+                    self._recovery_started[key] = now
+                    loop = asyncio.get_running_loop()
+                    self._recovery_tasks[key] = loop.call_later(
+                        rule.recovery_delay_s, self._timer_fire_recovery, key
+                    )
+                else:
+                    self._set_recovered(key)
+                    asyncio.create_task(self._run_recovery_action(key), name=f"dmx-watchdog-recovery-action-{key}")
+            handle = self._loss_tasks.pop(key, None)
+            self._cancel(handle)
+            loop = asyncio.get_running_loop()
+            self._loss_tasks[key] = loop.call_later(
+                rule.loss_timeout_s, self._timer_fire_loss, key
+            )
+
+    async def simulate_loss(self, key: str | None = None) -> None:
+        """Inject a logical loss for testing without touching the network."""
+        selected = self._select(key)
+        for k, rule in selected:
+            self._cancel(self._loss_tasks.pop(k, None))
+            self._cancel(self._recovery_tasks.pop(k, None))
+            self._states[k] = True
+            self._last_transition[k] = "simulation_loss"
+            self._last_reason[k] = "SIMULATION: signal loss injected"
+            await self._run_action(rule.loss_action)
+            self._emit_event("simulation_loss", rule, self._last_reason[k])
+
+    async def simulate_restore(self, key: str | None = None) -> None:
+        """Inject a logical recovery for testing without touching the network."""
+        selected = self._select(key)
+        for k, rule in selected:
+            self._cancel(self._loss_tasks.pop(k, None))
+            self._cancel(self._recovery_tasks.pop(k, None))
+            self._states[k] = False
+            self._recovery_started.pop(k, None)
+            self._last_transition[k] = "simulation_restore"
+            self._last_reason[k] = "SIMULATION: signal restored"
+            await self._run_action(rule.recovery_action)
+            self._emit_event("simulation_restore", rule, self._last_reason[k])
+
+    def _select(self, key: str | None):
+        if key:
+            if key not in self.rules:
+                raise ValueError(f"Unknown watchdog: {key}")
+            return [(key, self.rules[key])]
+        return list(self.rules.items())
+
+    async def async_stop(self) -> None:
+        handles = list(self._loss_tasks.values()) + list(self._recovery_tasks.values())
+        for handle in handles:
+            self._cancel(handle)
+        self._loss_tasks.clear()
+        self._recovery_tasks.clear()
+
+    def snapshot(self) -> dict[str, Any]:
+        now = monotonic()
+        states = []
+        for key, rule in self.rules.items():
+            last = self._last_signal.get(key)
+            states.append({
+                "key": key,
+                "name": rule.name,
+                "protocol": rule.protocol,
+                "universe": rule.universe,
+                "source": rule.source,
+                "signal_ok": last is not None and now - last < rule.loss_timeout_s,
+                "active": self._states.get(key, False),
+                "last_signal_age_s": None if last is None else round(max(0.0, now - last), 3),
+                "loss_timeout_s": rule.loss_timeout_s,
+                "recovery_delay_s": rule.recovery_delay_s,
+                "last_transition": self._last_transition.get(key),
+                "reason": self._last_reason.get(key, ""),
+                "enabled": rule.enabled,
+            })
+        return {"watchdog_rules": states, "watchdog_active": sum(1 for x in states if x["active"])}
+
+    def _timer_fire_loss(self, key: str) -> None:
+        self._loss_tasks.pop(key, None)
+        if key in self.rules:
+            asyncio.create_task(self._lose_after(key, 0), name=f"dmx-watchdog-loss-{key}")
+
+    def _timer_fire_recovery(self, key: str) -> None:
+        self._recovery_tasks.pop(key, None)
+        if key in self.rules:
+            asyncio.create_task(self._recover_after(key, 0), name=f"dmx-watchdog-recovery-{key}")
+
+    async def _lose_after(self, key: str, timeout: float) -> None:
+        try:
+            if timeout:
+                await asyncio.sleep(timeout)
+            rule = self.rules.get(key)
+            if not rule or not rule.enabled:
+                return
+            last = self._last_signal.get(key)
+            if last is None or monotonic() - last >= rule.loss_timeout_s:
+                if self._states.get(key, False):
+                    return
+                self._cancel(self._recovery_tasks.pop(key, None))
+                self._recovery_started.pop(key, None)
+                self._states[key] = True
+                self._last_transition[key] = "signal_lost"
+                self._last_reason[key] = f"No valid {rule.protocol} signal for {rule.loss_timeout_s:g}s"
+                await self._run_action(rule.loss_action)
+                self._emit_event("signal_lost", rule, self._last_reason[key])
         except asyncio.CancelledError:
+            raise
+
+    async def _recover_after(self, key: str, delay: float) -> None:
+        try:
+            if delay:
+                await asyncio.sleep(delay)
+            rule = self.rules.get(key)
+            if not rule or not rule.enabled:
+                return
+            last = self._last_signal.get(key)
+            started = self._recovery_started.get(key)
+            # The loss timer is continuously renewed by valid packets. If it is
+            # still armed here and a packet has been seen since recovery began,
+            # signal has been stable for the requested recovery window.
+            if self._states.get(key, False) and last is not None and started is not None and last >= started:
+                self._set_recovered(key)
+                self._recovery_started.pop(key, None)
+                await self._run_action(rule.recovery_action)
+                self._emit_event("signal_restored", rule, self._last_reason[key])
+        except asyncio.CancelledError:
+            raise
+
+
+    async def _run_recovery_action(self, key: str) -> None:
+        rule = self.rules.get(key)
+        if not rule or not rule.enabled:
             return
+        await self._run_action(rule.recovery_action)
+        self._emit_event("signal_restored", rule, self._last_reason.get(key, "Valid signal restored"))
 
-    def _check_all(self) -> None:
-        now = time.time()
-        for rule in self.rules.values():
-            if not rule.enabled or rule.simulated_lost:
-                continue
-            if rule.last_seen is None:
-                continue
-            if not rule.lost and (now - rule.last_seen) > rule.timeout_s:
-                rule.lost = True
-                self._handle_transition(rule, "signal_lost", f"no packet for {rule.timeout_s:g}s")
-
-    def _handle_transition(self, rule: WatchdogRule, event: str, reason: str) -> None:
+    def _emit_event(self, event: str, rule: SignalWatchdogRule, reason: str) -> None:
         if self.event_callback:
             try:
                 self.event_callback(event, rule, reason)
             except Exception:
-                _LOGGER.warning("Watchdog event callback failed for %s", rule.name, exc_info=True)
-        action = rule.action_lost if event == "signal_lost" else rule.action_restored
-        if action:
-            self._dispatch_action(action)
+                pass
 
-    def _dispatch_action(self, action: dict[str, Any]) -> None:
-        if not self.action_guard(action):
+    def _set_recovered(self, key: str) -> None:
+        self._states[key] = False
+        self._last_transition[key] = "signal_restored"
+        self._last_reason[key] = "Valid signal restored"
+
+    async def _run_action(self, action: dict[str, Any] | None) -> None:
+        if not action:
             return
         domain = action.get("domain")
         service = action.get("service")
         if not domain or not service:
             return
-        data = dict(action.get("data") or {})
-        entity_id = action.get("entity_id")
-        if entity_id:
-            data["entity_id"] = entity_id
-        if self.hass and self.hass.services.has_service(domain, service):
-            self.hass.async_create_task(self.hass.services.async_call(domain, service, data))
-        else:
-            _LOGGER.warning("Watchdog action service not found: %s.%s", domain, service)
+        if self.action_guard and not self.action_guard(action):
+            return
+        service_data = dict(action.get("data") or {})
+        target = action.get("entity_id")
+        if target:
+            service_data.setdefault("entity_id", target)
+        await self.hass.services.async_call(domain, service, service_data, blocking=False)
 
-    # -- simulation (for the Chaos/reliability testing tools) -------------------
-    async def simulate_loss(self, key: str | None = None) -> None:
-        for rule in self._targets(key):
-            if not rule.lost:
-                rule.lost = True
-                rule.simulated_lost = True
-                self._handle_transition(rule, "simulation_loss", "manually simulated signal loss")
+    @staticmethod
+    def _key(rule: SignalWatchdogRule) -> str:
+        return f"{rule.protocol.lower()}:{rule.universe}:{rule.source or '*'}:{rule.name}"
 
-    async def simulate_restore(self, key: str | None = None) -> None:
-        for rule in self._targets(key):
-            if rule.lost:
-                rule.lost = False
-                rule.simulated_lost = False
-                rule.last_seen = time.time()
-                self._handle_transition(rule, "signal_restored", "manually simulated signal restore")
-
-    def _targets(self, key: str | None) -> list[WatchdogRule]:
-        if key is None:
-            return list(self.rules.values())
-        rule = self.rules.get(key)
-        return [rule] if rule else []
-
-    # -- reporting -------------------------------------------------------------
-    def snapshot(self) -> dict:
-        now = time.time()
-        rows = [r.snapshot(now) for r in self.rules.values()]
-        return {
-            "watchdog_rules": rows,
-            "watchdog_active": sum(1 for r in rows if r["lost"]),
-        }
-
-    async def async_stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            self._task = None
+    @staticmethod
+    def _cancel(handle: asyncio.TimerHandle | asyncio.Task | None) -> None:
+        if handle and not handle.cancelled():
+            handle.cancel()

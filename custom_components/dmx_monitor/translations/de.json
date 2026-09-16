@@ -61,9 +61,7 @@
           "tally_ip_port": "Tally IP UDP port",
           "tally_ip_screen": "TSL screen (-1 = any)",
           "tally_ip_index": "TSL index (-1 = any)",
-          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)",
-          "etc_cem3_discovery": "Conservative ETC CEM3 discovery",
-          "etc_cem3_interfaces": "ETC CEM3 IPv4 interfaces (multiple choices)"
+          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)"
         },
         "data_description": {
           "aes70_hosts": "Comma-separated AES70 hostnames or IP addresses to query."
@@ -129,9 +127,7 @@
           "tally_ip_port": "Tally IP UDP port",
           "tally_ip_screen": "TSL screen (-1 = any)",
           "tally_ip_index": "TSL index (-1 = any)",
-          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)",
-          "etc_cem3_discovery": "Conservative ETC CEM3 discovery",
-          "etc_cem3_interfaces": "ETC CEM3 IPv4 interfaces (multiple choices)"
+          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)"
         }
       }
     }
@@ -195,9 +191,7 @@
           "tally_ip_port": "Tally IP UDP port",
           "tally_ip_screen": "TSL screen (-1 = any)",
           "tally_ip_index": "TSL index (-1 = any)",
-          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)",
-          "etc_cem3_discovery": "Conservative ETC CEM3 discovery",
-          "etc_cem3_interfaces": "ETC CEM3 IPv4 interfaces (multiple choices)"
+          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)"
         }
       }
     }

@@ -1,180 +1,226 @@
-"""DMX-value-triggered rule engine.
-
-A Rule watches one DMX universe/source for a set of channel conditions
-(all AND-ed together). It fires ``action`` on the rising edge (conditions
-become true after having been false) and, optionally, ``action_off`` on the
-falling edge. This is deliberately separate from dmx_ha_mapping.py /
-dmx_ha_zones.py (continuous value -> light state mapping): a Rule is a
-discrete trigger, evaluated only when its conditions transition, with a
-cooldown to avoid re-firing on every single DMX frame.
-
-Like the rest of this codebase, the rule engine only ever proposes a
-RuleAction; it never calls a Home Assistant service itself. coordinator.py's
-``_execute_rule_action`` is the single, security-gated place that actually
-dispatches to Home Assistant.
-"""
+"""Receive-only rule engine for the Show Network integration."""
 from __future__ import annotations
-
-import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
+from time import monotonic
 from typing import Any
 
-_VALID_OPS = (">=", "<=", "==", "!=", ">", "<")
-
-
-def _compare(value: int, op: str, threshold: int) -> bool:
-    if op == ">=":
-        return value >= threshold
-    if op == "<=":
-        return value <= threshold
-    if op == "==":
-        return value == threshold
-    if op == "!=":
-        return value != threshold
-    if op == ">":
-        return value > threshold
-    if op == "<":
-        return value < threshold
-    raise ValueError(f"Unsupported rule operator: {op!r}")
-
-
 @dataclass(frozen=True)
-class RuleCondition:
-    channel: int  # 1-512, DMX channel number (not zero-based index)
-    op: str
-    value: int
-
+class DmxCondition:
+    channels: tuple[int, ...]
+    mode: str = "any"
+    threshold_on: int = 10
+    threshold_off: int | None = None
+    x: int = 1
     def __post_init__(self):
-        if not 1 <= self.channel <= 512:
-            raise ValueError("channel must be 1..512")
-        if self.op not in _VALID_OPS:
-            raise ValueError(f"unsupported operator: {self.op!r}")
-        if not 0 <= self.value <= 255:
-            raise ValueError("value must be 0..255")
-
-    def evaluate(self, frame: bytes) -> bool:
-        actual = frame[self.channel - 1] if self.channel - 1 < len(frame) else 0
-        return _compare(actual, self.op, self.value)
-
+        if self.mode not in {"any", "all", "x_of_y"}: raise ValueError("mode must be any, all or x_of_y")
+        if not self.channels or any(c < 1 or c > 512 for c in self.channels): raise ValueError("DMX channels must be 1..512")
+        if not 0 <= self.threshold_on <= 255: raise ValueError("threshold_on must be 0..255")
+        off = self.threshold_off if self.threshold_off is not None else self.threshold_on
+        if not 0 <= off <= 255: raise ValueError("threshold_off must be 0..255")
+        if self.mode == "x_of_y" and not 1 <= self.x <= len(self.channels): raise ValueError("x must be within selected channels")
 
 @dataclass(frozen=True)
-class RuleAction:
+class DmxAction:
     domain: str
     service: str
     entity_id: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
-class Rule:
+class DmxRule:
     name: str
-    protocol: str = "*"  # "*" matches any protocol
-    universe: int = 1
-    source: str | None = None  # None matches any source
-    conditions: tuple[RuleCondition, ...] = field(default_factory=tuple)
-    action: RuleAction | None = None
-    action_off: RuleAction | None = None
-    cooldown_s: float = 2.0
-    enabled: bool = True
+    universe: int
+    condition: DmxCondition
+    action: DmxAction | None = None
+    off_action: DmxAction | None = None
+    source: str | None = None
+    on_delay_ms: int = 0
+    off_delay_ms: int = 0
+    enabled: bool = False
+    test_mode: bool = False
 
-    # -- runtime state, not persisted as rule configuration -----------------
-    matched: bool = field(default=False, compare=False)
-    last_triggered: float | None = field(default=None, compare=False)
-    last_evaluated: float | None = field(default=None, compare=False)
+@dataclass(frozen=True)
+class RuleTrace:
+    active: bool; target: bool; selected: tuple[int, ...]; active_channels: tuple[int, ...]
+    count_active: int; required: int; threshold: int; pending: str | None; reason: str
 
-    def matches_source(self, protocol: str, universe: int, source: str | None) -> bool:
-        if not self.enabled:
-            return False
-        if self.protocol != "*" and self.protocol.lower() != str(protocol).lower():
-            return False
-        if self.universe != universe:
-            return False
-        if self.source is not None and self.source != source:
-            return False
-        return True
+class DmxRuleEvaluator:
+    def __init__(self, rule: DmxRule):
+        self.rule = rule; self.state = False; self._candidate_since: float | None = None
+    def _required(self) -> int:
+        n = len(self.rule.condition.channels)
+        return n if self.rule.condition.mode == "all" else (self.rule.condition.x if self.rule.condition.mode == "x_of_y" else 1)
+    def evaluate(self, values: list[int] | bytes, now: float | None = None) -> RuleTrace:
+        c=self.rule.condition; now=monotonic() if now is None else now
+        threshold=c.threshold_off if (self.state and c.threshold_off is not None) else c.threshold_on
+        comparison = (lambda value: value >= threshold) if not self.state else (lambda value: value > threshold)
+        active_channels=tuple(ch for ch in c.channels if ch <= len(values) and comparison(int(values[ch-1])))
+        count=len(active_channels); required=self._required(); target=count >= required; pending=None
+        if target != self.state:
+            if self._candidate_since is None: self._candidate_since=now
+            delay_ms=self.rule.on_delay_ms if target else self.rule.off_delay_ms
+            if (now-self._candidate_since)*1000 >= max(0, delay_ms): self.state=target; self._candidate_since=None
+            else: pending="on" if target else "off"
+        else: self._candidate_since=None
+        reason=(f"{count}/{len(c.channels)} selected channels meet threshold {threshold}" if not pending else f"target {'ON' if target else 'OFF'} pending ({pending} delay)")
+        return RuleTrace(self.state,target,c.channels,active_channels,count,required,threshold,pending,reason)
 
-    def evaluate_conditions(self, frame: bytes) -> bool:
-        if not self.conditions:
-            return False
-        return all(c.evaluate(frame) for c in self.conditions)
+def parse_channel_selection(value) -> tuple[int, ...]:
+    """Parse DMX channel selections from HA/UI friendly formats.
 
-    def snapshot(self) -> dict:
-        return {
-            "name": self.name,
-            "protocol": self.protocol,
-            "universe": self.universe,
-            "source": self.source,
-            "conditions": [asdict(c) for c in self.conditions],
-            "action": asdict(self.action) if self.action else None,
-            "action_off": asdict(self.action_off) if self.action_off else None,
-            "cooldown_s": self.cooldown_s,
-            "enabled": self.enabled,
-            "matched": self.matched,
-            "last_triggered": self.last_triggered,
-        }
+    Accepts lists/tuples/sets, comma/range strings (``1,2,5-8``) and the
+    bracketed JSON-ish form often produced by frontend controls (``[1, 2]``).
+    """
+    if isinstance(value, (list, tuple, set)):
+        parts = list(value)
+    else:
+        text = str(value or "").strip()
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1]
+        parts = text.replace(" ", "").split(",")
+    result=set()
+    for raw in parts:
+        part=str(raw).strip().strip('\"\'')
+        if not part: continue
+        if "-" in part:
+            a,b=part.split("-",1); start,end=int(a),int(b); result.update(range(min(start,end),max(start,end)+1))
+        else: result.add(int(part))
+    if not result or any(c<1 or c>512 for c in result):
+        raise ValueError("selection must contain DMX channels 1..512")
+    return tuple(sorted(result))
 
 
 @dataclass
-class RuleEvalResult:
+class RuleEvaluation:
+    """Result of evaluating a named rule against one DMX snapshot."""
     rule_name: str
-    matched: bool
-    transitioned: bool
-    action_due: RuleAction | None = None
+    trace: RuleTrace
+    action_due: DmxAction | None = None
+    transitioned: bool = False
 
 
 class RuleSet:
-    """Holds rules and evaluates them against each observed DMX frame."""
+    """In-memory collection of DMX rules with safe simulation and tracing."""
+    def __init__(self) -> None:
+        self.rules: dict[str, DmxRule] = {}
+        self._evaluators: dict[str, DmxRuleEvaluator] = {}
+        self.history: list[RuleEvaluation] = []
+        self.max_history = 200
 
-    def __init__(self, *, trace_limit: int = 200) -> None:
-        self.rules: dict[str, Rule] = {}
-        self._trace: list[dict] = []
-        self._trace_limit = int(trace_limit)
-
-    # -- configuration -------------------------------------------------------
-    def add(self, rule: Rule) -> None:
+    def add(self, rule: DmxRule) -> None:
+        if not rule.name.strip():
+            raise ValueError("rule name cannot be empty")
         self.rules[rule.name] = rule
+        self._evaluators[rule.name] = DmxRuleEvaluator(rule)
+
+    def update(self, name: str, rule: DmxRule) -> None:
+        """Replace a rule definition while resetting its runtime evaluator safely."""
+        if name not in self.rules:
+            raise KeyError(name)
+        if not rule.name.strip():
+            raise ValueError("rule name cannot be empty")
+        if rule.name != name and rule.name in self.rules:
+            raise ValueError("rule name must be unique")
+        self.rules.pop(name)
+        self._evaluators.pop(name, None)
+        self.history = [item for item in self.history if item.rule_name != name]
+        self.add(rule)
 
     def remove(self, name: str) -> None:
         self.rules.pop(name, None)
+        self._evaluators.pop(name, None)
+        self.history = [item for item in self.history if item.rule_name != name]
 
-    def set_rules(self, rules: list[Rule]) -> None:
-        self.rules = {r.name: r for r in rules}
+    def set_test_mode(self, name: str, enabled: bool) -> None:
+        if name not in self.rules:
+            raise KeyError(name)
+        self.rules[name].test_mode = enabled
 
-    # -- evaluation ------------------------------------------------------------
-    def evaluate_snapshot(self, protocol: str, universe: int, source: str | None, values: bytes) -> list[RuleEvalResult]:
-        now = time.time()
-        frame = bytes(values[:512])
-        results: list[RuleEvalResult] = []
-        for rule in self.rules.values():
-            if not rule.matches_source(protocol, universe, source):
+    def duplicate(self, name: str, new_name: str) -> None:
+        if name not in self.rules:
+            raise KeyError(name)
+        if not new_name.strip() or new_name in self.rules:
+            raise ValueError("new rule name must be unique and non-empty")
+        import copy
+        rule = copy.deepcopy(self.rules[name])
+        rule.name = new_name
+        rule.enabled = False
+        self.add(rule)
+
+    def set_enabled(self, name: str, enabled: bool) -> None:
+        if name not in self.rules:
+            raise KeyError(name)
+        self.rules[name].enabled = enabled
+        if not enabled:
+            self._evaluators[name].state = False
+            self._evaluators[name]._candidate_since = None
+
+    def test(self, rule: DmxRule, values: list[int] | bytes, now: float | None = None) -> RuleEvaluation:
+        """Evaluate a rule against a snapshot without mutating its live evaluator/history."""
+        evaluator = DmxRuleEvaluator(rule)
+        trace = evaluator.evaluate(values, now)
+        return RuleEvaluation(rule.name, trace, None, False)
+
+    def simulate(self, name: str, values: list[int] | bytes, now: float | None = None) -> RuleEvaluation:
+        if name not in self.rules:
+            raise KeyError(name)
+        rule = self.rules[name]
+        evaluator = self._evaluators[name]
+        before = evaluator.state
+        trace = evaluator.evaluate(values, now)
+        transitioned = before != trace.active
+        # Simulation/test never executes a Home Assistant service. It only proposes it.
+        action = None
+        if transitioned and rule.enabled and not rule.test_mode:
+            action = rule.action if trace.active else rule.off_action
+        result = RuleEvaluation(name, trace, action, transitioned)
+        self.history.append(result)
+        if len(self.history) > self.max_history:
+            del self.history[:-self.max_history]
+        return result
+
+    def evaluate_snapshot(self, protocol: str, universe: int, source: str | None,
+                          values: list[int] | bytes, now: float | None = None) -> list[RuleEvaluation]:
+        results: list[RuleEvaluation] = []
+        for name, rule in self.rules.items():
+            if not rule.enabled or rule.universe != universe:
                 continue
-            rule.last_evaluated = now
-            currently_matched = rule.evaluate_conditions(frame)
-            was_matched = rule.matched
-            action_due = None
-            transitioned = currently_matched != was_matched
-            if transitioned:
-                cooled_down = rule.last_triggered is None or (now - rule.last_triggered) >= rule.cooldown_s
-                if currently_matched and rule.action and cooled_down:
-                    action_due = rule.action
-                    rule.last_triggered = now
-                elif not currently_matched and rule.action_off and cooled_down:
-                    action_due = rule.action_off
-                    rule.last_triggered = now
-            rule.matched = currently_matched
-            result = RuleEvalResult(rule_name=rule.name, matched=currently_matched, transitioned=transitioned, action_due=action_due)
-            results.append(result)
-            if transitioned:
-                self._trace.append({
-                    "ts": now, "rule": rule.name, "matched": currently_matched,
-                    "action_fired": action_due is not None,
-                })
-                self._trace = self._trace[-self._trace_limit:]
+            if rule.source and rule.source != source and rule.source != protocol:
+                continue
+            results.append(self.simulate(name, values, now))
         return results
 
-    # -- reporting -------------------------------------------------------------
-    def snapshot(self) -> list[dict]:
-        return [rule.snapshot() for rule in self.rules.values()]
+    def snapshot(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": r.name,
+                "universe": r.universe,
+                "source": r.source,
+                "channels": list(r.condition.channels),
+                "mode": r.condition.mode,
+                "threshold_on": r.condition.threshold_on,
+                "threshold_off": r.condition.threshold_off,
+                "on_delay_ms": r.on_delay_ms,
+                "off_delay_ms": r.off_delay_ms,
+                "enabled": r.enabled,
+                "test_mode": r.test_mode,
+                "state": self._evaluators[name].state,
+            }
+            for name, r in self.rules.items()
+        ]
 
-    def trace_snapshot(self) -> list[dict]:
-        return list(self._trace[-50:])
+    def trace_snapshot(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "rule": item.rule_name,
+                "active": item.trace.active,
+                "target": item.trace.target,
+                "active_channels": list(item.trace.active_channels),
+                "count_active": item.trace.count_active,
+                "required": item.trace.required,
+                "threshold": item.trace.threshold,
+                "pending": item.trace.pending,
+                "reason": item.trace.reason,
+            }
+            for item in self.history[-50:]
+        ]

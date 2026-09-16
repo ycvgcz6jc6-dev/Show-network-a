@@ -1,59 +1,62 @@
-"""Scene entities for Show Network: the DMX scene bank (dmx_scene_bank.py).
-
-Each stored DmxScene becomes a native Home Assistant scene; activating it
-calls the bank's own recall(scene_id) -- already gated by the scene bank's
-own output-armed state (see dmx_scene_bank.py), nothing new here.
-
-Show Control cues (show_control.py) are deliberately NOT exposed here: a
-theatrical cue stack ("GO to the next cue") does not fit HA's idempotent
-"activate this fixed scene" model. Use the show_control_go service instead.
-"""
+"""Home Assistant Scene entities backed by Show Network DMX scenes."""
 from __future__ import annotations
 
 from homeassistant.components.scene import Scene
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
-
 from .const import DOMAIN
 
 
-class DmxSceneEntity(CoordinatorEntity, Scene):
-    _attr_has_entity_name = True
+class ShowNetworkDmxScene(Scene):
+    _attr_icon = "mdi:palette-swatch"
 
-    def __init__(self, coordinator, scene_id: str) -> None:
-        super().__init__(coordinator)
+    def __init__(self, coordinator, scene_id: str):
+        self.coordinator = coordinator
         self.scene_id = scene_id
-        self._attr_unique_id = f"show_network_dmx_scene_{scene_id}"
+        scene = coordinator.dmx_scene_bank.scenes[scene_id]
+        safe = "".join(ch.lower() if ch.isalnum() else "_" for ch in scene_id).strip("_")
+        self._attr_unique_id = f"dmx_scene_{safe}"
+        self._attr_name = f"DMX {scene.name}"
 
     @property
-    def name(self) -> str:
-        scene = self.coordinator.dmx_scene_bank.scenes.get(self.scene_id)
-        return scene.name if scene else self.scene_id
-
-    @property
-    def available(self) -> bool:
+    def available(self):
         return self.scene_id in self.coordinator.dmx_scene_bank.scenes
 
     @property
     def extra_state_attributes(self):
-        scene = self.coordinator.dmx_scene_bank.scenes.get(self.scene_id)
-        return scene.public() if scene else {}
+        bank = self.coordinator.dmx_scene_bank
+        scene = bank.scenes.get(self.scene_id)
+        return {
+            "show_network_dmx_scene": True,
+            "scene_id": self.scene_id,
+            "active": bank.active_scene_id == self.scene_id,
+            "output_enabled": bank.enabled,
+            "protocol": bank.output.protocol,
+            "universe": bank.output.universe,
+            "active_channels": sum(1 for value in scene.values if value) if scene else None,
+            "external_override": bank.external_active(),
+            "external_source": bank.external_source,
+            "external_protocol": bank.external_protocol,
+            "resume_delay_s": bank.output.external_hold_s,
+        }
 
     async def async_activate(self, **kwargs) -> None:
+        self.coordinator.security.require_unlocked()
         await self.coordinator.dmx_scene_bank.recall(self.scene_id)
         self.coordinator.publish(**self.coordinator.dmx_scene_bank.snapshot())
+        self.async_write_ha_state()
 
 
-async def async_setup_entry(hass, entry, async_add_entities) -> None:
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-
+async def async_setup_entry(hass, entry, async_add_entities):
+    c = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     seen: set[str] = set()
 
-    def _sync_scenes() -> None:
-        new_ids = [sid for sid in coordinator.dmx_scene_bank.scenes if sid not in seen]
-        if not new_ids:
-            return
-        seen.update(new_ids)
-        async_add_entities([DmxSceneEntity(coordinator, sid) for sid in new_ids])
+    def refresh():
+        entities = []
+        for scene_id in c.dmx_scene_bank.scenes:
+            if scene_id not in seen:
+                seen.add(scene_id)
+                entities.append(ShowNetworkDmxScene(c, scene_id))
+        if entities:
+            async_add_entities(entities)
 
-    _sync_scenes()
-    coordinator.dmx_scene_bank_refresh_callback = _sync_scenes
+    refresh()
+    c.dmx_scene_refresh_callback = refresh

@@ -5,7 +5,6 @@ an advertised mDNS service name/host/property contains an explicit vendor
 marker. No connection, query, control or write is performed against devices.
 """
 from __future__ import annotations
-import logging
 import asyncio
 import time
 from typing import Any
@@ -81,7 +80,7 @@ def _scan_sync(zc, timeout: float = 2.0) -> list[dict[str, Any]]:
             try:
                 browsers.append(ServiceBrowser(zc, known_type, listener))
             except Exception:
-                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                pass
         deadline = time.monotonic() + max(0.5, min(timeout, 5.0))
         while time.monotonic() < deadline:
             time.sleep(0.05)
@@ -92,12 +91,12 @@ def _scan_sync(zc, timeout: float = 2.0) -> list[dict[str, Any]]:
             try:
                 browser.cancel()
             except Exception:
-                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                pass
         if type_browser is not None:
             try:
                 type_browser.cancel()
             except Exception:
-                logging.getLogger(__name__).debug('Non-fatal error in %s', __name__, exc_info=True)
+                pass
     return list(found.values())
 
 

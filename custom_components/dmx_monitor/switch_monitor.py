@@ -27,7 +27,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 
-from .snmp import async_get, SNMPError
+from .snmp import async_get
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ class GenericSwitchMonitor:
         async def get(oid: str):
             try:
                 return await async_get(host, self.community, oid)
-            except SNMPError:
+            except Exception:
                 return None
 
         results = await asyncio.gather(
