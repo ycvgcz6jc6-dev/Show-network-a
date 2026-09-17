@@ -8,16 +8,36 @@ mounted disk, or a mounted NAS/SMB share).
 from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
-import hashlib, json, os, shutil, asyncio
+import hashlib, json, os, shutil, asyncio, logging, time
 from collections import deque
 from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 from .security import redact, validate_archive_limits
 
+_LOGGER = logging.getLogger(__name__)
+# Minimum seconds between repeated log lines for the same error category --
+# an audited installation could otherwise flood the log during a sustained
+# failure (disk full, permissions lost mid-show) instead of one clear
+# warning plus a running counter, which is what operators actually need.
+_LOG_RATE_LIMIT_S = 60.0
+
 DEFAULT_RETENTION_DAYS = 7
 DEFAULT_MAX_BYTES = 5 * 1024 * 1024
 DEFAULT_DESTINATION = "show_network_archive"
+# Per-file rotation threshold: how big a single *.jsonl category file (or
+# show_timeline.jsonl) is allowed to grow before being rotated into a
+# timestamped file. Deliberately much smaller than the total quota below --
+# previously max_bytes was used for BOTH this AND the (never actually
+# enforced) total quota, which is exactly the "limite par fichier" vs
+# "quota total" confusion an external audit correctly flagged.
+PER_FILE_ROTATE_BYTES = 512 * 1024
+# How many show_network_journal_*.zip exports to keep at most, regardless of
+# age. A ZIP export bundles every current *.jsonl file; with an export every
+# few hours (see runtime/setup.py), age-based retention alone lets dozens of
+# near-duplicate ZIPs accumulate -- confirmed as the dominant contributor to
+# an audited installation reaching ~63 MB against a configured 5 MB quota.
+MAX_ZIP_EXPORTS = 5
 
 class EventArchive:
     def __init__(self, config_dir: str, retention_days: int = DEFAULT_RETENTION_DAYS,
@@ -29,6 +49,17 @@ class EventArchive:
         self._last_backup_success: str | None = None
         self._last_backup_error: str | None = None
         self._last_backup_path: str | None = None
+        # NOTE (audit fix Z-07): every failure path below used to be a bare
+        # `except Exception: pass` / `except asyncio.QueueFull: return` with
+        # no counter and no log line -- an operator had no way to know
+        # events were silently being lost (queue overflow, a write failing,
+        # a rotation failing) short of noticing missing data much later.
+        self._dropped_events = 0
+        self._write_errors = 0
+        self._rotate_errors = 0
+        self._last_error: str | None = None
+        self._last_error_at: str | None = None
+        self._last_logged_at: dict[str, float] = {}
         self._queue: asyncio.Queue[tuple[str, str, dict[str, Any] | None] | None] = asyncio.Queue(maxsize=2000)
         self._worker: asyncio.Task | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -86,6 +117,16 @@ class EventArchive:
             "free_bytes": free_bytes,
         }
 
+    def _record_error(self, category: str, message: str) -> None:
+        """Record + rate-limited-log a failure. Never raises."""
+        self._last_error = message
+        self._last_error_at = datetime.now(timezone.utc).isoformat()
+        now = time.monotonic()
+        last = self._last_logged_at.get(category, 0.0)
+        if now - last >= _LOG_RATE_LIMIT_S:
+            self._last_logged_at[category] = now
+            _LOGGER.warning("Show Network archive %s: %s", category, message)
+
     def _require_storage(self) -> dict[str, Any]:
         status = self._storage_check()
         if not status["ready"]:
@@ -119,9 +160,11 @@ class EventArchive:
             kind, event, data = item
             try:
                 await asyncio.to_thread(self._record_sync, kind, event, data)
-            except Exception:
-                # Journaling must never take down Home Assistant.
-                pass
+            except Exception as exc:
+                # Journaling must never take down Home Assistant, but it
+                # must not vanish without a trace either (audit fix Z-07).
+                self._write_errors += 1
+                self._record_error("write", f"{type(exc).__name__}: {exc}")
             finally:
                 self._queue.task_done()
 
@@ -133,6 +176,8 @@ class EventArchive:
                 self._queue.put_nowait((kind, event, data))
                 return
             except asyncio.QueueFull:
+                self._dropped_events += 1
+                self._record_error("queue_full", f"journal queue saturated (maxsize={self._queue.maxsize}); event dropped ({self._dropped_events} total)")
                 return
         # Synchronous fallback is used only before the async writer starts.
         self._record_sync(kind, event, data)
@@ -176,22 +221,78 @@ class EventArchive:
 
     def _rotate(self, path: Path) -> None:
         try:
-            if path.stat().st_size <= self.max_bytes: return
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            path.rename(path.with_name(f"{path.stem}.{stamp}.jsonl"))
-        except OSError:
-            return
+            if path.stat().st_size <= PER_FILE_ROTATE_BYTES: return
+            # NOTE (audit fix): second-precision timestamps let two
+            # rotations within the same second collide and silently
+            # overwrite each other. Microseconds make a collision
+            # astronomically unlikely; the counter suffix loop is a hard
+            # guarantee even so.
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            target = path.with_name(f"{path.stem}.{stamp}.jsonl")
+            suffix = 0
+            while target.exists():
+                suffix += 1
+                target = path.with_name(f"{path.stem}.{stamp}.{suffix}.jsonl")
+            path.rename(target)
+        except OSError as exc:
+            self._rotate_errors += 1
+            self._record_error("rotate", f"could not rotate {path.name}: {exc}")
 
     def cleanup(self) -> None:
         status = self._storage_check()
         if not status["ready"]:
             return
         cutoff = datetime.now(timezone.utc).timestamp() - self.retention_days * 86400
+
+        # 1) Age-based purge, as before.
         for path in (*self.root.glob("*.jsonl"), *self.root.glob("show_network_journal_*.zip")):
             try:
                 if path.stat().st_mtime < cutoff: path.unlink()
             except OSError:
                 pass
+
+        # 2) Cap the number of ZIP exports regardless of age -- a ZIP export
+        # bundles every current *.jsonl file, so an export every few hours
+        # (see runtime/setup.py) is the dominant contributor to archive
+        # bloat if left to accumulate for the full retention window.
+        try:
+            zips = sorted(self.root.glob("show_network_journal_*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
+            for old_zip in zips[MAX_ZIP_EXPORTS:]:
+                try:
+                    old_zip.unlink()
+                except OSError:
+                    pass
+        except OSError:
+            pass
+
+        # 3) Global quota: max_bytes is the TOTAL archive size (jsonl +
+        # zip), not a per-file limit (see PER_FILE_ROTATE_BYTES for that).
+        # If still over quota after the age/count-based purges above,
+        # delete the oldest remaining files (by mtime, any type) until back
+        # under the limit. show_timeline.jsonl is deliberately never
+        # deleted by this step (it is the canonical hash-chained record);
+        # only its own rotated .jsonl copies are eligible.
+        try:
+            all_files = sorted(
+                (*self.root.glob("*.jsonl"), *self.root.glob("show_network_journal_*.zip")),
+                key=lambda p: p.stat().st_mtime,
+            )
+        except OSError:
+            return
+        total = sum(p.stat().st_size for p in all_files if p.exists())
+        if total <= self.max_bytes:
+            return
+        for path in all_files:
+            if total <= self.max_bytes:
+                break
+            if path.name == "show_timeline.jsonl":
+                continue
+            try:
+                size = path.stat().st_size
+                path.unlink()
+                total -= size
+            except OSError:
+                continue
 
     def export_zip(self, target: str | None = None, include_all: bool = True) -> Path:
         self._require_storage()
@@ -226,8 +327,11 @@ class EventArchive:
 
     def status(self) -> dict[str, Any]:
         storage = self._storage_check()
-        files = list(self.root.glob("*.jsonl")) if storage["ready"] else []
-        size = sum(p.stat().st_size for p in files if p.exists())
+        jsonl_files = list(self.root.glob("*.jsonl")) if storage["ready"] else []
+        zip_files = list(self.root.glob("show_network_journal_*.zip")) if storage["ready"] else []
+        bytes_jsonl = sum(p.stat().st_size for p in jsonl_files if p.exists())
+        bytes_zip = sum(p.stat().st_size for p in zip_files if p.exists())
+        bytes_total = bytes_jsonl + bytes_zip
         last_success = self._last_backup_success
         if not last_success and storage["ready"]:
             try:
@@ -238,14 +342,25 @@ class EventArchive:
             except OSError:
                 pass
         return {"destination": str(self.root), "configured_destination": self.destination,
-                "files": len(files), "bytes": size, "retention_days": self.retention_days,
-                "max_bytes_per_file": self.max_bytes, "timeline_file": str(self.root / "show_timeline.jsonl"),
+                "files": len(jsonl_files) + len(zip_files), "bytes": bytes_total, "retention_days": self.retention_days,
+                # NOTE: "bytes" is kept for backward compatibility with existing
+                # readers (== bytes_total below); prefer the split fields.
+                "bytes_jsonl": bytes_jsonl, "bytes_zip": bytes_zip, "bytes_total": bytes_total,
+                "max_bytes_total": self.max_bytes, "max_bytes_per_file": PER_FILE_ROTATE_BYTES,
+                "max_zip_exports": MAX_ZIP_EXPORTS, "zip_export_count": len(zip_files),
+                "over_limit": bytes_total > self.max_bytes,
+                "timeline_file": str(self.root / "show_timeline.jsonl"),
                 "storage_ready": storage["ready"], "storage_mounted": storage["mounted"],
                 "storage_requires_mount": storage["requires_mount"], "storage_writable": storage["writable"],
                 "storage_free_bytes": storage["free_bytes"],
                 "last_backup_success": last_success,
                 "last_backup_error": self._last_backup_error,
                 "last_backup_path": self._last_backup_path,
+                "dropped_events": self._dropped_events,
+                "write_errors": self._write_errors,
+                "rotate_errors": self._rotate_errors,
+                "last_error": self._last_error,
+                "last_error_at": self._last_error_at,
                 "recent_events": list(self._recent)}
 
     @staticmethod

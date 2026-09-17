@@ -90,10 +90,11 @@ class AVDECCEntity:
 
 
 class AVDECCBridgeMonitor:
-    def __init__(self, endpoint: str, interval_s: float = 5.0, timeout_s: float = 2.5) -> None:
+    def __init__(self, endpoint: str, interval_s: float = 5.0, timeout_s: float = 2.5, token: str | None = None) -> None:
         self.endpoint = endpoint.strip()
         self.interval_s = float(interval_s)
         self.timeout_s = float(timeout_s)
+        self.token = str(token).strip() if token else None
         self.records: dict[str, AVDECCEntity] = {}
         self.last_error: str | None = None
         self.last_poll: float | None = None
@@ -116,7 +117,10 @@ class AVDECCBridgeMonitor:
             await asyncio.sleep(self.interval_s)
 
     def _fetch(self) -> dict[str, Any]:
-        req = Request(self.endpoint, headers={"Accept": "application/json", "User-Agent": "Show-Network/0.15.0"})
+        headers = {"Accept": "application/json", "User-Agent": "Show-Network/0.15.3"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        req = Request(self.endpoint, headers=headers)
         with urlopen(req, timeout=self.timeout_s) as response:  # nosec B310 - admin-configured local endpoint
             data = response.read(2 * 1024 * 1024 + 1)
         if len(data) > 2 * 1024 * 1024:

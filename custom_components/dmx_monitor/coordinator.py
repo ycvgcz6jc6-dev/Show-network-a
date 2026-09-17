@@ -54,6 +54,7 @@ from .osc_learn import OSCLearnSession
 from .manufacturer_profiles import all_profiles as all_manufacturer_profiles, match_manufacturer
 from .osc_profiles import PROFILES as OSC_SOURCE_PROFILES
 from .artnet_discovery import ArtNetNodeInventory
+from .attribute_bounds import bound_attributes
 from dataclasses import asdict
 from .video_ip_supervision import VideoIPSupervision
 
@@ -687,6 +688,14 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             "avb": self.avb_monitor.snapshot() if self.avb_monitor else {},
         }
         snapshot["protocol_rx_diagnostics"] = rx_diag
+        # NOTE (audit fix): sensor.diagnostics_reception_protocoles_
+        # protocol_receive_diagnostics was confirmed taking ~0.6s per
+        # update in production. The cause: its extra_state_attributes
+        # property ran _bounded_attributes() -- a full json.dumps() of this
+        # whole nested dict, sometimes twice -- on every single entity
+        # attribute read, not once per actual data update. Precompute it
+        # here instead, once per refresh cycle, off the event loop.
+        snapshot["protocol_rx_diagnostics_bounded"] = await self.hass.async_add_executor_job(bound_attributes, dict(rx_diag))
         # Publication time is deliberately separate from protocol packet ages.
         # The frontend can therefore distinguish "HA refreshed" from "fresh network data".
         import time as _time

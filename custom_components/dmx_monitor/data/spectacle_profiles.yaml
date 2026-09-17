@@ -609,3 +609,18 @@
   passive_protocols: [SNMP, LLDP]
   diagnostics: [interfaces, link_errors, vlan, poe, sfp, temperature, cpu_memory]
   control_paths: []
+- key: audiofocus
+  manufacturer: AUDIOFOCUS
+  domains: [AUDIO]
+  product_families: [A Series SCiO amplifiers, ELIZ, ISOLDE, ARRoCC, CYRIS, CARYS line arrays and loudspeakers]
+  # Confirmed from AUDIOFOCUS's own A Series Operation Manual (v1.1): "The
+  # communication protocol used by the A Series is UDP/IP based... Unicast
+  # ...for the remote control of properties... and Multicast...for
+  # auto-discovery of devices and property changes (such as driving meters
+  # within SCIO)." No further detail (multicast group/port, packet format)
+  # is publicly documented anywhere found -- see audiofocus.py for the
+  # passive listener scaffold awaiting a real packet capture before any
+  # parsing logic is written.
+  passive_protocols: [UDP multicast (undocumented format)]
+  diagnostics: []
+  control_paths: [SCiO WebUI (no published API)]

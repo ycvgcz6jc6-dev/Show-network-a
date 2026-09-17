@@ -28,6 +28,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     if not hass.data.get(f"{DOMAIN}_video_ip_ws_registered"):
         from .video_ip_websocket import async_register as register_video_ip_websocket
         register_video_ip_websocket(hass)
+    if not hass.data.get(f"{DOMAIN}_device_inventory_ws_registered"):
+        from .device_inventory_websocket import async_register as register_device_inventory_websocket
+        register_device_inventory_websocket(hass)
     if not hass.data.get(f"{DOMAIN}_video_preview_registered"):
         from .video_ip_preview import async_register as register_video_ip_preview
         register_video_ip_preview(hass)
@@ -41,7 +44,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             hass,
             webcomponent_name="show-network-pro-dashboard",
             frontend_url_path="show-network",
-            module_url="/api/dmx_monitor/static/show-network.js?v=0.15.0",
+            module_url="/api/dmx_monitor/static/show-network.js?v=0.15.3",
             sidebar_title="Show Network",
             sidebar_icon="mdi:network-outline",
             require_admin=True,

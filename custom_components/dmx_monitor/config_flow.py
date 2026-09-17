@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
@@ -33,7 +34,50 @@ def _notification_choices(hass, current: str = "") -> list[str]:
     return choices
 
 
-async def _choices_for_hass(hass):
+def _udp_port_available(host: str, port: int) -> bool:
+    """Best-effort check: can a UDP socket bind to (host, port) right now?
+
+    Not a guarantee (another process could grab the port between this check
+    and the real integration startup), but it catches the common case --
+    the exact scenario an audit found in production, where OSC silently
+    failed to start because port 8000 was already taken by something else
+    -- at configuration time instead of only in the log afterwards.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.bind((host or "0.0.0.0", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+async def _osc_port_conflict_error(hass, data: dict, *, previous_port: int | None = None) -> dict[str, str]:
+    """Return {"osc_input_port": "port_in_use"} if OSC is enabled and its
+    configured port cannot be bound right now, else an empty dict.
+
+    ``previous_port``: when editing an existing entry's options, pass the
+    port that entry is *currently* running with. If the submitted port is
+    unchanged, the bind check is skipped entirely -- the running OSC
+    receiver already legitimately holds that port itself, so re-saving
+    unchanged options must never be blocked by a false-positive conflict
+    against the entry's own listener.
+    """
+    if not data.get(const.CONF_OSC_INPUT_ENABLED):
+        return {}
+    host = str(data.get(const.CONF_OSC_INPUT_INTERFACE) or "0.0.0.0")
+    try:
+        port = int(data.get(const.CONF_OSC_INPUT_PORT, 8000))
+    except (TypeError, ValueError):
+        return {}
+    if previous_port is not None and port == previous_port:
+        return {}
+    available = await hass.async_add_executor_job(_udp_port_available, host, port)
+    return {} if available else {"osc_input_port": "port_in_use"}
+
+
+
     rows, enttec_ports, midi_ports = await asyncio.gather(
         hass.async_add_executor_job(network_interface_snapshot),
         hass.async_add_executor_job(discover_ports),
@@ -72,10 +116,13 @@ def _schema_for_hass(hass, data: dict | None, interfaces: list[str], enttec_port
         vol.Optional(const.CONF_AES70_HOSTS, default=data.get(const.CONF_AES70_HOSTS, "")): str,
         vol.Optional(const.CONF_AES70_PORT, default=data.get(const.CONF_AES70_PORT, 65000)): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
         vol.Optional(const.CONF_AVDECC_BRIDGE_URL, default=data.get(const.CONF_AVDECC_BRIDGE_URL, "")): str,
+        vol.Optional(const.CONF_AVDECC_BRIDGE_TOKEN, default=data.get(const.CONF_AVDECC_BRIDGE_TOKEN, "")): str,
         vol.Optional(const.CONF_RDM_ENABLED, default=data.get(const.CONF_RDM_ENABLED, False)): bool,
         vol.Optional(const.CONF_RDM_BRIDGE_URL, default=data.get(const.CONF_RDM_BRIDGE_URL, "")): str,
+        vol.Optional(const.CONF_RDM_BRIDGE_TOKEN, default=data.get(const.CONF_RDM_BRIDGE_TOKEN, "")): str,
         vol.Optional(const.CONF_RDMNET_ENABLED, default=data.get(const.CONF_RDMNET_ENABLED, False)): bool,
         vol.Optional(const.CONF_RDMNET_BRIDGE_URL, default=data.get(const.CONF_RDMNET_BRIDGE_URL, "")): str,
+        vol.Optional(const.CONF_RDMNET_BRIDGE_TOKEN, default=data.get(const.CONF_RDMNET_BRIDGE_TOKEN, "")): str,
         vol.Optional(const.CONF_RDM_ALLOW_WRITES, default=data.get(const.CONF_RDM_ALLOW_WRITES, False)): bool,
         vol.Optional(const.CONF_ENTTEC_DEVICE, default=data.get(const.CONF_ENTTEC_DEVICE, "")): vol.In([""] + enttec_ports),
         vol.Optional(const.CONF_ENTTEC_MODEL, default=data.get(const.CONF_ENTTEC_MODEL, "auto")): vol.In(["auto", "DMX USB Pro", "DMX USB Pro Mk2"]),
@@ -142,6 +189,9 @@ class DmxMonitorConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
                     raise ValueError
             except (TypeError, ValueError, json.JSONDecodeError):
                 return self.async_show_form(step_id="user", data_schema=self._schema(data, interfaces, enttec_ports, midi_ports), errors={"projectors": "invalid_json"})
+            osc_errors = await _osc_port_conflict_error(self.hass, data)
+            if osc_errors:
+                return self.async_show_form(step_id="user", data_schema=self._schema(data, interfaces, enttec_ports, midi_ports), errors=osc_errors)
             return self.async_create_entry(title="Show Network", data=data)
         return self.async_show_form(step_id="user", data_schema=self._schema({}, interfaces, enttec_ports, midi_ports))
 
@@ -163,6 +213,12 @@ class DmxMonitorOptionsFlow(config_entries.OptionsFlow):
                     raise ValueError
             except (TypeError, ValueError, json.JSONDecodeError):
                 return self.async_show_form(step_id="init", data_schema=_schema_for_hass(self.hass, data, interfaces, enttec_ports, midi_ports), errors={"projectors": "invalid_json"})
+            osc_errors = await _osc_port_conflict_error(
+                self.hass, data,
+                previous_port=int({**self.config_entry.data, **self.config_entry.options}.get(const.CONF_OSC_INPUT_PORT, 8000)),
+            )
+            if osc_errors:
+                return self.async_show_form(step_id="init", data_schema=_schema_for_hass(self.hass, data, interfaces, enttec_ports, midi_ports), errors=osc_errors)
             return self.async_create_entry(data=data)
         data = {**self.config_entry.data, **self.config_entry.options}
         return self.async_show_form(step_id="init", data_schema=_schema_for_hass(self.hass, data, interfaces, enttec_ports, midi_ports))

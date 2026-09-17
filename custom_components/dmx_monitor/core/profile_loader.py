@@ -15,6 +15,74 @@ class ProfileDataError(ValueError):
     """Raised when a static profile catalogue is malformed."""
 
 
+class LazyCatalog:
+    """Sequence/mapping-like proxy that defers ``loader()`` until first real
+    access, or until ``warm()`` is called explicitly (e.g. from an executor
+    job during async Home Assistant setup).
+
+    fixture_profiles.py already hand-rolled this exact pattern (its
+    ``_LazyProfiles`` dict subclass) to avoid the blocking synchronous YAML
+    read that ``load_yaml_catalog`` performs happening on Home Assistant's
+    event loop at module-import time -- an audited, confirmed-in-production
+    issue (5 blocking-I/O warnings logged at startup). This is the same
+    idea generalized so every other catalogue module (osc_profiles.py,
+    switch_profiles.py, spectacle_profiles.py, manufacturer_profiles.py,
+    midi_profiles.py) can use it too, for both tuple- and dict-shaped
+    catalogues, without duplicating the proxy machinery in each file.
+
+    If nothing ever calls ``warm()`` from an executor, correctness is not
+    affected -- the first real access still triggers the load, just
+    synchronously and possibly on the event loop, exactly like before this
+    fix existed. ``warm()`` is what actually moves the I/O off the loop.
+    """
+
+    def __init__(self, loader: Callable[[], Any]) -> None:
+        self._loader = loader
+        self._value: Any = None
+        self._loaded = False
+
+    def warm(self) -> Any:
+        """Force the load now. Call this from hass.async_add_executor_job."""
+        if not self._loaded:
+            self._value = self._loader()
+            self._loaded = True
+        return self._value
+
+    def _ensure(self) -> Any:
+        return self._value if self._loaded else self.warm()
+
+    def __iter__(self):
+        return iter(self._ensure())
+
+    def __len__(self):
+        return len(self._ensure())
+
+    def __getitem__(self, key):
+        return self._ensure()[key]
+
+    def __contains__(self, item):
+        return item in self._ensure()
+
+    def __bool__(self):
+        return bool(self._ensure())
+
+    def get(self, key, default=None):
+        value = self._ensure()
+        return value.get(key, default) if hasattr(value, "get") else default
+
+    def items(self):
+        return self._ensure().items()
+
+    def values(self):
+        return self._ensure().values()
+
+    def keys(self):
+        return self._ensure().keys()
+
+    def __repr__(self):
+        return f"LazyCatalog(loaded={self._loaded}, value={self._value!r})"
+
+
 def load_yaml_catalog(filename: str, validator: Callable[[Any], None]) -> Any:
     path = Path(__file__).resolve().parent.parent / "data" / filename
     try:
