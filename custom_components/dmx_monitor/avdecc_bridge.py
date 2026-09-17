@@ -117,7 +117,7 @@ class AVDECCBridgeMonitor:
             await asyncio.sleep(self.interval_s)
 
     def _fetch(self) -> dict[str, Any]:
-        headers = {"Accept": "application/json", "User-Agent": "Show-Network/0.15.4"}
+        headers = {"Accept": "application/json", "User-Agent": "Show-Network/0.15.5"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         req = Request(self.endpoint, headers=headers)

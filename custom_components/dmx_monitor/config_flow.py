@@ -77,7 +77,8 @@ async def _osc_port_conflict_error(hass, data: dict, *, previous_port: int | Non
     return {} if available else {"osc_input_port": "port_in_use"}
 
 
-
+async def _choices_for_hass(hass) -> tuple[list[str], list[str], list[str]]:
+    """Discover form choices without blocking Home Assistant's event loop."""
     rows, enttec_ports, midi_ports = await asyncio.gather(
         hass.async_add_executor_job(network_interface_snapshot),
         hass.async_add_executor_job(discover_ports),
