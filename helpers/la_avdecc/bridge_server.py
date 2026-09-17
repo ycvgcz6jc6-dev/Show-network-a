@@ -1,13 +1,37 @@
 #!/usr/bin/env python3
-"""Tiny read-only HTTP bridge for Show Network + LA_avdecc JSON dumps."""
+"""Tiny read-only HTTP bridge for Show Network + LA_avdecc JSON dumps.
+
+SECURITY (audit fix): this bridge previously listened on 0.0.0.0 with no
+authentication, letting any machine that could reach the port read the full
+AV entity inventory. This revision listens on 127.0.0.1 by default and
+requires a shared bearer token (AVDECC_AUTH_TOKEN env var; auto-generated
+and logged once at startup if unset). This bridge has no write endpoint, so
+the remaining risk after this fix is read-only information disclosure to
+whoever holds the token -- still worth protecting, but there is no
+equivalent of the RDM bridge's SET-authorization concern here.
+"""
 from __future__ import annotations
 import argparse
+import hmac
 import json
+import logging
 import os
+import secrets
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+_LOGGER = logging.getLogger("la_avdecc_bridge")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+AUTH_TOKEN = os.getenv("AVDECC_AUTH_TOKEN") or secrets.token_urlsafe(24)
+if not os.getenv("AVDECC_AUTH_TOKEN"):
+    _LOGGER.warning(
+        "AVDECC_AUTH_TOKEN not set -- generated a token for this run (changes "
+        "on every restart): %s -- set AVDECC_AUTH_TOKEN to pin it. Clients "
+        "must send 'Authorization: Bearer <token>'.", AUTH_TOKEN,
+    )
 
 
 def _walk(value: Any):
@@ -104,11 +128,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers(); self.wfile.write(data)
 
+    def _authorized(self) -> bool:
+        header = self.headers.get("Authorization", "")
+        if not header.startswith("Bearer "):
+            return False
+        return hmac.compare_digest(header[len("Bearer "):].strip(), AUTH_TOKEN)
+
     def do_GET(self):
         if self.path == "/health":
+            # No sensitive data here -- left open for monitoring/Show Network reachability checks.
             exists = self.dump_path.exists()
             age = None if not exists else max(0.0, time.time() - self.dump_path.stat().st_mtime)
             return self._json(200 if exists else 503, {"ok": exists, "dump": str(self.dump_path), "age_s": age})
+        if not self._authorized():
+            return self._json(401, {"error": "unauthorized"})
         if self.path != "/v1/entities":
             return self._json(404, {"error": "not found"})
         try:
@@ -118,7 +151,8 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.dump_path.read_text(encoding="utf-8"))
             return self._json(200, normalize_dump(payload, mtime=stat.st_mtime))
         except Exception as exc:
-            return self._json(503, {"entities": [], "error": f"{type(exc).__name__}: {exc}"})
+            _LOGGER.warning("Could not read/parse AVDECC dump: %s", exc)
+            return self._json(503, {"entities": [], "error": "dump unavailable"})
 
     def log_message(self, fmt, *args):
         print("[bridge] " + (fmt % args), flush=True)
@@ -126,11 +160,14 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--listen", default="0.0.0.0")
+    ap.add_argument("--listen", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--dump", default=os.environ.get("AVDECC_DUMP", "/data/avdecc-network.json"))
     args = ap.parse_args()
     Handler.dump_path = Path(args.dump)
+    if args.listen == "0.0.0.0":
+        _LOGGER.warning("--listen 0.0.0.0: listening on all interfaces. Put this behind a firewall, "
+                         "an isolated network, or a TLS-terminating reverse proxy/SSH tunnel.")
     ThreadingHTTPServer((args.listen, args.port), Handler).serve_forever()
 
 if __name__ == "__main__":

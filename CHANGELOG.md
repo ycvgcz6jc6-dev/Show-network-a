@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.15.3 — CEM3 real read-only, security hardening, multi-vendor node discovery
+
+- **Versioning fix**: previous packages shipped with `manifest.json` reporting `0.15.0` while other artifacts referenced `0.15.2`, with no changelog entry for the latter and no single source of truth. This release consolidates everything into one consistent version.
+- **Security fix (SSRF)**: the grandMA3 Web Remote proxy (`ma3_web_remote_view.py`) previously accepted any `station_ip` from the request URL with no validation, allowing an authenticated Home Assistant user to make Home Assistant issue outbound requests to arbitrary hosts (including internal/cloud-metadata addresses). It now only proxies to an IP already present in that config entry's own passively-observed MA-Net3 station inventory, requires an explicit `entry_id` when more than one Show Network entry exists, and caps the upstream response size.
+- **ETC Sensor3/CEM3**: real read-only XML client (`etc_cem3.py`, `cem3_websocket.py`) replacing the earlier catalogue-only status page — queries the rack's System/Dimmers/Spaces pages directly, with XXE/entity-expansion hardening and duplicate/size limits.
+- **New: grandMA3 device classification**: MA-Net3 stations are now classified into `console` / `processing_unit` / `node` / `software` categories with accurate grandMA3 product names (previous classification lumped everything under a handful of loosely-matched labels, including a non-existent "RPU" product).
+- **New: grandMA3 Web Remote HTTPS/WSS proxy**: fixes the mixed-content issue that broke the console's own Web Remote when Home Assistant is reached over HTTPS (e.g. Nabu Casa) — the console's page hardcodes a plain `ws://` WebSocket URL, which browsers refuse under HTTPS. Not yet verified against real console hardware; validate on-site before relying on it for a show.
+- **New: manufacturer-agnostic Art-Net node discovery** (`artnet_discovery.py`) via standard ArtPoll/ArtPollReply — identifies ELC, Luminex, ETC, or any other Art-Net-compliant node regardless of brand, complementing the existing mDNS-only vendor discovery.
+- **New: generic SNMP switch telemetry** (`switch_monitor.py`) for switches with no vendor-private OID support in this codebase (e.g. ELC, Green-GO-hosting switches) — identity/uptime/interface-count via standard SNMPv2-MIB/IF-MIB, PoE via POWER-ETHERNET-MIB if answered; no vendor-private OIDs are guessed at.
+- Fixed: Aruba switch profile key mismatch (`aruba` vs `hpe_aruba`) between `switches.yaml` and `spectacle_profiles.yaml`/`manufacturers.yaml`, which silently broke manufacturer matching and profile selection for HPE Aruba switches.
+- Fixed: Dante-observed amplifier manufacturer detection referenced a `markers` field that dante_inventory rows never populate, making the match effectively always fail; now scans services/instances/hostnames/display_name.
+- Fixed: six switch vendors present in `switches.yaml` (Netgear, Ubiquiti, MikroTik, TP-Link, Allied Telesis, Juniper) had no matching entry in `spectacle_profiles.yaml`, so `match_manufacturer()` could never identify them from network evidence.
+- Fixed: `manifest.json`'s `documentation`/`issue_tracker` pointed at the project's old repository name.
+- Corrected repository links to the current repository name.
+
 ## 0.15.0 — Experimental cumulative release
 
 - Cumulative reconciliation of development phases 1–12.
