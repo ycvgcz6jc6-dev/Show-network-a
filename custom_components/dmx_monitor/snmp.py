@@ -8,7 +8,24 @@ from __future__ import annotations
 import asyncio
 import random
 import socket
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
+
+# NOTE (stability fix): every SNMP call in this project funnels through
+# _async_request() below. It used to run its blocking socket recv() on
+# Home Assistant's SHARED default executor (run_in_executor(None, ...)).
+# With several configured switches/amplifiers that are unreachable (wrong
+# IP, powered off, etc.), each one ties up a shared-pool worker for up to
+# its own timeout (typically 0.7-0.9s) before failing -- with enough such
+# devices probed concurrently (see runtime/setup.py's vendor discovery,
+# which gathers every switch's telemetry at once every 180s), this can
+# starve Home Assistant's shared pool of workers for unrelated core
+# operations, a plausible contributor to reports of WebSocket ping/pong
+# timeouts and DMX reception instability that had no other clear cause.
+# A small dedicated pool means Show Network's own network probing can
+# never compete with Home Assistant's core executor usage, no matter how
+# many configured devices are unreachable.
+_SNMP_EXECUTOR = ThreadPoolExecutor(max_workers=16, thread_name_prefix="show_network_snmp")
 
 
 def _len(n: int) -> bytes:
@@ -113,7 +130,7 @@ async def _async_request(host: str, community: str, oid: str, *, timeout: float=
             s.sendto(packet,(host,161))
             return s.recvfrom(4096)[0]
     try:
-        data=await loop.run_in_executor(None,recv)
+        data=await loop.run_in_executor(_SNMP_EXECUTOR,recv)
         return parse_response_varbind(data,request_id)
     except (OSError, asyncio.TimeoutError, TimeoutError):
         return None

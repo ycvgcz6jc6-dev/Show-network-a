@@ -242,6 +242,22 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     else:
         coordinator.etc_cem3_monitor = None
 
+    ontime_host = str(settings.get(CONF_ONTIME_HOST, "") or "").strip()
+    if bool(settings.get(CONF_ONTIME_ENABLED, False)) and ontime_host:
+        from ..ontime_supervision import OntimeMonitor
+        coordinator.ontime_monitor = OntimeMonitor(ontime_host, int(settings.get(CONF_ONTIME_PORT, 4001)))
+        resources.add(RuntimeResource(ProtocolDriver("ontime-http", "SYSTEM"), "ontime-http", coordinator.ontime_monitor, "stop", {"host": ontime_host, "role": "read-only-monitor", "method": "HTTP GET /api/poll only"}))
+    else:
+        coordinator.ontime_monitor = None
+
+    qlcplus_host = str(settings.get(CONF_QLCPLUS_HOST, "") or "").strip()
+    if bool(settings.get(CONF_QLCPLUS_ENABLED, False)) and qlcplus_host:
+        from ..qlcplus_bridge import QlcPlusBridge
+        coordinator.qlcplus_bridge = QlcPlusBridge(qlcplus_host, int(settings.get(CONF_QLCPLUS_PORT, 9999)))
+        resources.add(RuntimeResource(ProtocolDriver("qlcplus-ws", "LIGHT"), "qlcplus-ws", coordinator.qlcplus_bridge, "stop", {"host": qlcplus_host, "role": "discovery-plus-gated-control", "method": "WebSocket"}))
+    else:
+        coordinator.qlcplus_bridge = None
+
     ma_listener = None
     if bool(settings.get(CONF_MA_ENABLED, True)) and interface_ma != "0.0.0.0":
         ma_listener = _adapter("ma-net3")(interface_ma, port=MA_NET3_PORT)
@@ -582,7 +598,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                     async with http_sem:
                         source_ip = source_by_interface.get(row.get("interface"))
                         reader,writer=await asyncio.wait_for(asyncio.open_connection(ip,80,local_addr=((source_ip,0) if source_ip else None)),timeout=.8)
-                        writer.write(f"GET / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: Show-Network/0.15.4\r\nConnection: close\r\n\r\n".encode())
+                        writer.write(f"GET / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: Show-Network/0.15.10\r\nConnection: close\r\n\r\n".encode())
                         await writer.drain(); raw=await asyncio.wait_for(reader.read(16384),timeout=.8)
                         writer.close();
                         try: await writer.wait_closed()
@@ -699,7 +715,9 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                 # No SET/WALK is used; ports are queried only after switch evidence.
                 switch_rows=[]
                 switch_sem=asyncio.Semaphore(8)
+                switch_telemetry_sem=asyncio.Semaphore(4)
                 async def _switch_telemetry(identity):
+                  async with switch_telemetry_sem:
                     if not identity.get("switch_evidence") or identity.get("state")!="responded":return
                     ip=identity["ip"]; interface=identity.get("interface"); source_ip=identity.get("source_ip")
                     dev=coordinator.inventory.find_by_ip(ip, interface=interface)

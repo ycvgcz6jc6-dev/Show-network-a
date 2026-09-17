@@ -40,6 +40,8 @@ SENSORS = (
     ("ma_live_stations", "Stations MA actives / Live MA stations", None),
     ("ma_sessions", "Sessions MA observées / Observed MA sessions", None),
     ("osc_messages", "Messages OSC / OSC messages", None),
+    ("osc_source_profiles", "Bibliothèque de commandes OSC / OSC command library", None),
+    ("osc_targets", "Cibles OSC configurées / Configured OSC targets", None),
     ("osc_input_state", "État entrée OSC / OSC input state", None),
     ("control_mapping_events", "Événements mappings CONTROL / CONTROL mapping events", None),
     ("osc_sent", "OSC envoyés / OSC sent", None),
@@ -124,6 +126,9 @@ SENSORS = (
     ("show_control_cue_count", "Cues Show Control / Show Control cues", None),
     ("show_control_fired", "Cues Show Control déclenchés / Show Control cues fired", None),
     ("power_manager_button_count", "Boutons Power Manager / Power Manager buttons", None),
+    ("dmx_scene_bank_count", "Scènes DMX / DMX scenes", None),
+    ("ontime_status", "Ontime / Ontime run-of-show", None),
+    ("qlcplus_status", "QLC+ / QLC+ Virtual Console", None),
     ("power_manager_active", "Power Manager actifs / Active Power Manager buttons", None),
     ("power_manager_sent", "Trames Power Manager envoyées / Power Manager frames sent", None),
     ("power_manager_errors", "Erreurs Power Manager / Power Manager errors", None),
@@ -235,6 +240,24 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             if not osc_input:
                 return "disabled"
             return osc_input.get("state") or ("listening" if osc_input.get("enabled") else "disabled")
+        if self._key == "osc_source_profiles":
+            return len(self.coordinator.data.get("osc_source_profiles", []))
+        if self._key == "osc_targets":
+            return len(self.coordinator.data.get("osc_targets", []))
+        if self._key == "dmx_scene_bank_count":
+            return self.coordinator.data.get("dmx_scene_bank_count", 0)
+        if self._key == "ontime_status":
+            ontime = self.coordinator.data.get("ontime")
+            if not ontime:
+                return "disabled"
+            if not ontime.get("online"):
+                return "offline"
+            return ontime.get("timer_playback") or "unknown"
+        if self._key == "qlcplus_status":
+            qlc = self.coordinator.data.get("qlcplus")
+            if not qlc:
+                return "disabled"
+            return "online" if qlc.get("online") else "offline"
         value = self.coordinator.data.get(self._key, 0)
         if self._key in ("audio_protocols_active", "audio_protocols_stale"):
             return len(value or [])
@@ -291,6 +314,42 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
                 "last_error": osc_input.get("last_error"),
                 "messages": osc_input.get("messages", 0),
             }
+        if self._key == "osc_source_profiles":
+            return {"profiles": self.coordinator.data.get("osc_source_profiles", [])}
+        if self._key == "osc_targets":
+            return {"targets": self.coordinator.data.get("osc_targets", [])}
+        if self._key == "dmx_scene_bank_count":
+            d = self.coordinator.data
+            return {
+                "enabled": d.get("dmx_scene_bank_enabled", False),
+                "limit": d.get("dmx_scene_bank_limit", 19),
+                "scenes": d.get("dmx_scene_bank_scenes", []),
+                "output": d.get("dmx_scene_bank_output", {}),
+                "active": d.get("dmx_scene_bank_active"),
+                "external_override": d.get("dmx_scene_bank_external_override", False),
+                "external_source": d.get("dmx_scene_bank_external_source"),
+                "sent": d.get("dmx_scene_bank_sent", 0),
+                "errors": d.get("dmx_scene_bank_errors", 0),
+                "last_error": d.get("dmx_scene_bank_last_error"),
+            }
+        if self._key == "ontime_status":
+            return dict(self.coordinator.data.get("ontime") or {})
+        if self._key == "qlcplus_status":
+            return dict(self.coordinator.data.get("qlcplus") or {})
+        if self._key == "osc_sent":
+            return {
+                "osc_output_enabled": self.coordinator.data.get("osc_output_enabled", False),
+                "osc_sent": self.coordinator.data.get("osc_sent", 0),
+                "osc_errors": self.coordinator.data.get("osc_errors", 0),
+                "osc_last_target": self.coordinator.data.get("osc_last_target"),
+                "osc_last_address": self.coordinator.data.get("osc_last_address"),
+            }
+        if self._key == "performance_level":
+            # NOTE: was previously scalar-only (just "level"); exposing the
+            # full dict here since the adaptive behavior (profile choice,
+            # whether discovery/secondary polling are currently throttled)
+            # was real but had no visibility anywhere in the interface.
+            return dict(self.coordinator.data.get("performance", {}))
         if self._key == "control_mapping_events":
             from dataclasses import asdict, is_dataclass
             mappings=[]
@@ -301,7 +360,7 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             from .hue_catalog import snapshot as hue_catalog_snapshot
             return {"zones": self.coordinator.data.get("dmx_ha_zones", []), "rdm": self.coordinator.data.get("dmx_ha_rdm", {}), "hue_catalog": hue_catalog_snapshot()}
         if self._key == "dmx_ha_mappings_total":
-            return {"mappings": self.coordinator.data.get("dmx_ha_mappings", [])}
+            return {"mappings": self.coordinator.data.get("dmx_ha_mappings", []), "light_sync_enabled": self.coordinator.data.get("light_sync_enabled", False)}
         if self._key in {"topology_nodes", "topology_links"}:
             return {"topology": self.coordinator.data.get("topology", {"nodes": [], "links": []})}
         if self._key == "journal_archive":
@@ -317,7 +376,7 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
                 return bounded
             return _bounded_attributes(dict(self.coordinator.data.get("protocol_rx_diagnostics", {})))
         if self._key in {"projectors_total", "projectors_online", "projectors_errors"}:
-            return dict(self.coordinator.data.get("projector_status", {}))
+            return {**self.coordinator.data.get("projector_status", {}), "control_enabled": self.coordinator.data.get("projector_control_enabled", False)}
         if self._key in {"rdm_devices_total", "rdm_devices_online"}:
             return {"rdm_devices": self.coordinator.data.get("rdm_devices", []), "transports": self.coordinator.data.get("rdm_transports", []), "stale_timeout_s": self.coordinator.data.get("rdm_stale_timeout_s")}
         if self._key in {"ma_packets", "ma_sources", "ma_groups", "ma_stations", "ma_live_stations", "ma_sessions"}:
@@ -341,7 +400,11 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
         if self._key == "switch_telemetry":
             return {"switches": self.coordinator.data.get("switch_telemetry", [])}
         if self._key in {"audio_amplifiers_total", "audio_amplifiers_online", "audio_amplifiers_errors", "audio_amplifier_temperature_max"}:
-            return {"amplifiers": self.coordinator.data.get("audio_amplifiers", []), "stale_timeout_s": self.coordinator.data.get("audio_amplifier_stale_timeout_s")}
+            return {
+                "amplifiers": self.coordinator.data.get("audio_amplifiers", []),
+                "stale_timeout_s": self.coordinator.data.get("audio_amplifier_stale_timeout_s"),
+                "audiofocus_note": self.coordinator.data.get("audiofocus_note"),
+            }
         if self._key in {"aes67_sap_packets", "aes67_sap_sources", "aes67_session_count", "aes67_fresh_sessions"}:
             return {"sessions": self.coordinator.data.get("aes67_sessions", []), "last_seen": self.coordinator.data.get("aes67_last_seen"), "sap_group": self.coordinator.data.get("aes67_sap_group"), "sap_port": self.coordinator.data.get("aes67_sap_port")}
         if self._key in {"ptp_clock_present", "ptp_clock_age_s", "ptp_last_version", "ptp_dante_v1_observed", "ptp_v2_observed"}:

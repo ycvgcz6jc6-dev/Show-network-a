@@ -37,7 +37,23 @@ async def async_register(hass: HomeAssistant) -> None:
         await c.fixture_control.send_now(str(call.data["patch_id"]))
         c.publish(**c.fixture_control.snapshot())
 
+    async def _set_control_enabled(call):
+        # NOTE (audit fix): FixtureControlEngine.set_control_enabled() existed
+        # but nothing ever called it -- fixture_set_attribute always raised
+        # "Fixture control is not armed" unconditionally, with no way to arm
+        # it from anywhere, including Developer Tools. Mirrors
+        # services/projector.py's set_projector_control_enabled exactly.
+        c = coordinator_for_call(hass, call)
+        enabled = bool(call.data.get("enabled", False))
+        if enabled:
+            c.security.require_unlocked()
+        c.fixture_control.set_control_enabled(enabled)
+        c.publish(**c.fixture_control.snapshot())
+        if c.archive:
+            c.archive.record("system", "gdtf_control_gate_changed", {"enabled": c.fixture_control.control_enabled})
+
     hass.services.async_register(DOMAIN, "gdtf_import", _import)
     hass.services.async_register(DOMAIN, "fixture_patch_upsert", _patch_upsert)
     hass.services.async_register(DOMAIN, "fixture_patch_remove", _patch_remove)
     hass.services.async_register(DOMAIN, "fixture_set_attribute", _set_attribute)
+    hass.services.async_register(DOMAIN, "set_fixture_control_enabled", _set_control_enabled)
