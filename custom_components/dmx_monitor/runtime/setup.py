@@ -100,13 +100,16 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     from ..spectacle_profiles import PROFILES as _spectacle_profiles
     from ..midi_profiles import PROFILES as _midi_profiles
     from ..manufacturer_profiles import _ALIASES as _manufacturer_aliases
+    from ..core.profile_loader import warm_catalogs
 
     def _warm_remaining_catalogs():
-        _osc_profiles.warm()
-        _switch_profiles.warm()
-        _spectacle_profiles.warm()
-        _midi_profiles.warm()
-        _manufacturer_aliases.warm()
+        warm_catalogs(
+            _osc_profiles,
+            _switch_profiles,
+            _spectacle_profiles,
+            _midi_profiles,
+            _manufacturer_aliases,
+        )
 
     await hass.async_add_executor_job(_warm_remaining_catalogs)
     # DeviceInventory reads a JSON overrides file synchronously in __init__;
@@ -579,7 +582,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                     async with http_sem:
                         source_ip = source_by_interface.get(row.get("interface"))
                         reader,writer=await asyncio.wait_for(asyncio.open_connection(ip,80,local_addr=((source_ip,0) if source_ip else None)),timeout=.8)
-                        writer.write(f"GET / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: Show-Network/0.15.3\r\nConnection: close\r\n\r\n".encode())
+                        writer.write(f"GET / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: Show-Network/0.15.4\r\nConnection: close\r\n\r\n".encode())
                         await writer.drain(); raw=await asyncio.wait_for(reader.read(16384),timeout=.8)
                         writer.close();
                         try: await writer.wait_closed()
