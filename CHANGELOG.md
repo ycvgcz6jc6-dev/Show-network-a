@@ -1,5 +1,168 @@
 # Changelog
 
+## 0.15.10 — Fresh audit pass
+
+Requested full re-audit of everything built this session. Checked version
+consistency, residual TODOs, orphaned modules, duplicate sensor keys,
+security-gate coverage on new active-output services, and duplicate/
+missing custom-element registrations.
+
+- Fixed: `audiofocus.py` (the honest NotImplementedError scaffold for the
+  two Audiofocus commands still awaiting a real packet capture) was never
+  imported anywhere -- dead code only discoverable by reading the source.
+  Now instantiated in the coordinator and its status note surfaced
+  alongside the amplifiers sensor, so "not yet implemented, capture
+  needed" is visible in the interface rather than silently absent.
+- Everything else checked came back clean; several apparent issues
+  turned out to be false positives from the audit script's own regexes
+  (quote-style differences, a tuple membership check that looked like a
+  duplicate sensor definition) rather than real problems -- noted here
+  for the record rather than silently discarded.
+
+## 0.15.9 — Topology root cause + Araneo-style health check
+
+- **Diagnosed the "30 nodes, 0 links" topology issue** confirmed in a live
+  audit: LLDP-based link discovery only runs for switches that first
+  respond successfully to SNMP identification -- meaning the SNMP
+  executor-pool starvation fixed in 0.15.6 was very likely the actual
+  root cause of both "topology shows zero links" and the earlier
+  "switch/amp monitoring doesn't work" reports, not two separate bugs.
+  Confirmed the frontend topology panel already renders links correctly
+  when present -- no display-side fix was needed, only the underlying
+  SNMP reliability fix already shipped.
+- **New: cross-switch health check**, inspired by Luminex Araneo's
+  consistency checking -- flags VLAN count or model/firmware string
+  mismatches between switches sharing the same identified manufacturer,
+  and switches reporting zero UP interfaces despite having some. Computed
+  entirely from telemetry this project already collects; nothing new is
+  probed or invented, and a single switch of a given manufacturer never
+  triggers a false comparison.
+
+## 0.15.8 — Ontime and QLC+ integrations
+
+New, real, verified-against-source integrations, added following this
+project's standing rule: only build against confirmed real protocol
+behavior, never guessed formats.
+
+- **New: Ontime supervision.** Passive HTTP polling of Ontime's real,
+  documented `/api/poll` endpoint (every field verified against
+  docs.getontime.no/api/data/runtime-data/). Dashboard card shows
+  playback state, time remaining, and schedule offset (running ahead or
+  behind). Deliberately supervision-only -- Ontime's separate control API
+  is not touched here, the same way DMX emission is kept apart from DMX
+  supervision elsewhere in this project.
+- **New: QLC+ Virtual Console bridge and panel.** WebSocket connection to
+  QLC+'s real API (`ws://<host>:9999/qlcplusWS`). Every command/response
+  format was verified against the QLC+ maintainer's own
+  `Test_Web_API.html` source file, not community forum posts -- two of
+  which were found to actively disagree with each other and with the
+  authoritative source on the write-command format. A real indexing bug
+  (`getWidgetStatus`'s value is at index 3, not 2) was caught by testing
+  against the exact documented response shape before shipping. Supports
+  passive widget/function discovery plus gated control (set widget value,
+  cue list PLAY/NEXT/PREV/STEP, frame paging, function start/stop).
+
+## 0.15.7 — Closing the remaining service/interface gaps
+
+Completed the audit started in 0.15.6: cross-referenced every backend
+service against the frontend again with a corrected extraction (catching
+direct `callService('dmx_monitor', 'x', ...)` calls the previous pass
+missed) and closed every genuine remaining gap.
+
+- **New: DMX → HA mapping create/remove**, plus a visible Light Sync gate
+  toggle (state was tracked but never shown or controllable).
+- **New: rule history clearing** button in the Rule Builder.
+- **New: archive destination**, editable from the Archive panel (was
+  read-only).
+- **New: device inventory reset-to-auto** button next to "Modifier".
+- **New: HA Builder per-item state control** (switch/sensor/number/binary
+  sensor entities Show Network created could not be driven from the UI).
+- **New: notification configuration** section (enabled/target/mode).
+- **New: RDM observation recording** per DMX→HA zone with RDM listening
+  enabled.
+- **New: OSC output master gate toggle** -- the send buttons existed but
+  the arm/disarm switch for OSC output itself was never added; send
+  buttons now also respect this gate, matching every other active-output
+  panel in the project.
+- Confirmed (not re-implemented) that `set_device_override` and
+  `set_dmx_ha_mapping_highlight` were already wired via direct
+  `callService()` calls that an earlier automated audit's regex had
+  missed -- rechecked against the real file before adding anything, to
+  avoid duplicating working code.
+
+## 0.15.6 — Interface functionality audit and repair
+
+Large pass making the panel's active-output modules actually functional,
+following a systematic audit that cross-referenced every frontend service
+call against every real backend service (found and fixed two extraction
+mistakes along the way; final result: all 33 then-existing frontend calls
+matched a real service, and ~40 real services had no UI at all).
+
+- **New: DMX Scene Bank UI.** This whole feature (save/recall/delete up to
+  19 full DMX scenes, configure output transport) had no interface at all.
+- **New: GDTF panel**, plus a genuine backend fix: `FixtureControlEngine.
+  set_control_enabled()` existed but no service ever called it, so GDTF
+  fixture output could never be armed at all, not even via Developer
+  Tools. Added `set_fixture_control_enabled`.
+- **New: Show Control cue editor.** Cues could be viewed and fired but not
+  created except by calling a service manually; added a form supporting
+  all four real action types (ha_service/osc/midi/dmx_scene).
+- **New: OSC command library, for real this time.** The panel was static
+  decorative HTML with no data binding; rewritten to read the real
+  profile catalog and configured targets, manage targets, and send real
+  commands via `send_osc_profile_action`. Fixed a companion bug in the
+  OSC output status panel, which looked for its data directly on
+  `hass.states` instead of on the sensor attributes where it actually
+  lives. Added a generic (non-profile) OSC send section, and a Medialon
+  Show Control catalog entry (no fixed addresses -- its OSC address space
+  is defined per-installation, so this points to Learn instead of
+  guessing addresses that would only be right for one specific show).
+- **New: MIDI target management and raw send** in the same panel
+  (`create_midi_target`, `remove_midi_target`, `send_midi` had no UI).
+- **New: projector control** (power/mute/input) added to the previously
+  read-only video/projector module, gated by the existing
+  `set_projector_control_enabled` service.
+- **New: RDM write controls** (identify, set start address, set
+  personality, link to a GDTF patch) added to the previously read-only
+  RDM module, respecting the existing two-gate design (config-level
+  `rdm_allow_writes` plus runtime security unlock).
+- Fixed: amplifiers/devices identified only by protocol evidence (e.g. a
+  Dante-connected amplifier whose brand isn't in the manufacturer list)
+  showed the bare protocol name where a brand would normally appear,
+  reading like a (wrong) manufacturer identification; now says so
+  explicitly.
+- Fixed: DMX receiver errors and restart counts were computed by the
+  backend but never shown anywhere -- a flapping Art-Net/sACN listener
+  gave no visible reason why. Added to the main DMX overview card.
+- Fixed: the adaptive performance manager (refresh interval, discovery
+  throttling under CPU/RAM load) was fully functional but completely
+  invisible in the interface; added a status card.
+- Reorganized the module grid into three labeled sections (Supervision /
+  Commande-Émission / Système) instead of one undifferentiated grid, so
+  passive monitoring and active-output controls are never presented
+  side-by-side without distinction.
+- Isolated all SNMP blocking socket I/O onto a dedicated thread pool
+  instead of Home Assistant's shared default executor -- a plausible
+  contributor to reports of WebSocket ping/pong timeouts and DMX
+  reception instability when several configured switches/amplifiers are
+  unreachable at once.
+
+## 0.15.5 — Configuration flow repair
+
+- Restored the missing `_choices_for_hass()` helper used when opening the
+  configuration and options forms. This fixes the HTTP 500 caused by its
+  `NameError`.
+- Kept interface, ENTTEC and MIDI discovery in executor jobs so opening the
+  form does not block Home Assistant's event loop.
+
+## 0.15.4 — Safe asynchronous catalogue loading
+
+- Fixed config-entry setup when a catalogue is already materialized as a
+  tuple by an older loaded module (`AttributeError: 'tuple' object has no
+  attribute 'warm'`).
+- Kept YAML catalogue reads deferred and warmed them from Home Assistant's
+  executor, avoiding blocking `open()` calls on the event loop.
+
 ## 0.15.3 — CEM3 real read-only, security hardening, multi-vendor node discovery
 
 - **Versioning fix**: previous packages shipped with `manifest.json` reporting `0.15.0` while other artifacts referenced `0.15.2`, with no changelog entry for the latter and no single source of truth. This release consolidates everything into one consistent version.

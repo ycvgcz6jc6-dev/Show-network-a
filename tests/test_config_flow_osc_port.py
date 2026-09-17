@@ -11,12 +11,41 @@ import socket
 import pytest
 
 from custom_components.dmx_monitor import const
-from custom_components.dmx_monitor.config_flow import _osc_port_conflict_error, _udp_port_available
+from custom_components.dmx_monitor.config_flow import (
+    _choices_for_hass,
+    _osc_port_conflict_error,
+    _udp_port_available,
+)
 
 
 class _FakeHass:
     async def async_add_executor_job(self, fn, *args):
         return fn(*args)
+
+
+@pytest.mark.asyncio
+async def test_choices_for_hass_discovers_choices_in_executor(monkeypatch):
+    class _Port:
+        device = "/dev/ttyUSB0"
+
+    monkeypatch.setattr(
+        "custom_components.dmx_monitor.config_flow.network_interface_snapshot",
+        lambda: [{"addresses": ["192.0.2.10", "fe80::1"]}],
+    )
+    monkeypatch.setattr(
+        "custom_components.dmx_monitor.config_flow.discover_ports",
+        lambda: [_Port()],
+    )
+    monkeypatch.setattr(
+        "custom_components.dmx_monitor.config_flow.MIDIInputRuntime.list_input_ports",
+        lambda: ["MIDI In"],
+    )
+
+    assert await _choices_for_hass(_FakeHass()) == (
+        ["0.0.0.0", "192.0.2.10"],
+        ["/dev/ttyUSB0"],
+        ["MIDI In"],
+    )
 
 
 def test_udp_port_available_detects_a_free_port():
