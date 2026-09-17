@@ -134,6 +134,10 @@
           "tally_ip_stale_timeout": "No-tally timeout before OFF (s)"
         }
       }
+    },
+    "error": {
+      "invalid_json": "The projectors field must be valid JSON (a list).",
+      "port_in_use": "The configured OSC input port is already in use by another process. Choose a different port or free the current one."
     }
   },
   "options": {
@@ -200,6 +204,10 @@
           "tally_ip_stale_timeout": "No-tally timeout before OFF (s)"
         }
       }
+    },
+    "error": {
+      "invalid_json": "The projectors field must be valid JSON (a list).",
+      "port_in_use": "The configured OSC input port is already in use by another process. Choose a different port or free the current one."
     }
   }
 }

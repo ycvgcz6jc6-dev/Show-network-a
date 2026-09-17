@@ -142,6 +142,10 @@
           "tally_ip_stale_timeout": "Délai sans Tally avant retour OFF (s)"
         }
       }
+    },
+    "error": {
+      "invalid_json": "Le champ « projecteurs » doit être du JSON valide (une liste).",
+      "port_in_use": "Le port d'entrée OSC configuré est déjà utilisé par un autre processus. Choisissez un autre port ou libérez celui-ci."
     }
   },
   "options": {
@@ -212,6 +216,10 @@
           "tally_ip_stale_timeout": "Délai sans Tally avant retour OFF (s)"
         }
       }
+    },
+    "error": {
+      "invalid_json": "Le champ « projecteurs » doit être du JSON valide (une liste).",
+      "port_in_use": "Le port d'entrée OSC configuré est déjà utilisé par un autre processus. Choisissez un autre port ou libérez celui-ci."
     }
   }
 }

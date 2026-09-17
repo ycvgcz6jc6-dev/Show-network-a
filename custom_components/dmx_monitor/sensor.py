@@ -1,6 +1,7 @@
 """Read-only Show Network diagnostic sensors."""
 from __future__ import annotations
 import json
+from .attribute_bounds import bound_attributes as _bounded_attributes
 
 import base64
 from datetime import datetime
@@ -17,51 +18,6 @@ from .ha_builder_entities import BuilderSensor, BuilderNumber
 from .projector_platform import sensor_entities as projector_sensor_entities
 
 
-def _bounded_attributes(value, max_bytes: int = 12_000):
-    """Return Recorder-safe attributes while preserving useful diagnostics.
-
-    HA Recorder rejects oversized state attributes. Keep live/raw diagnostics in
-    the coordinator/UI, but expose a bounded representation on the sensor.
-    """
-    def size(obj):
-        try:
-            return len(json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8"))
-        except Exception:
-            return max_bytes + 1
-
-    if size(value) <= max_bytes:
-        return value
-
-    def compact(obj, depth=0):
-        if depth >= 5:
-            return "<truncated>"
-        if isinstance(obj, dict):
-            items = list(obj.items())
-            out = {str(k): compact(v, depth + 1) for k, v in items[:40]}
-            if len(items) > 40:
-                out["_omitted_keys"] = len(items) - 40
-            return out
-        if isinstance(obj, (list, tuple)):
-            out = [compact(v, depth + 1) for v in obj[:20]]
-            if len(obj) > 20:
-                out.append({"_omitted_items": len(obj) - 20})
-            return out
-        if isinstance(obj, str) and len(obj) > 512:
-            return obj[:509] + "..."
-        return obj
-
-    compacted = compact(value)
-    if size(compacted) > max_bytes:
-        # Last-resort summary rather than letting Recorder reject the state.
-        return {
-            "truncated": True,
-            "original_bytes": size(value),
-            "message": "Diagnostics too large for Home Assistant Recorder; full live data remains in Show Network.",
-        }
-    if isinstance(compacted, dict):
-        compacted["_truncated_for_recorder"] = True
-        compacted["_original_bytes"] = size(value)
-    return compacted
 
 SENSORS = (
     ("devices_total", "Appareils découverts / Discovered devices", None),
@@ -84,6 +40,7 @@ SENSORS = (
     ("ma_live_stations", "Stations MA actives / Live MA stations", None),
     ("ma_sessions", "Sessions MA observées / Observed MA sessions", None),
     ("osc_messages", "Messages OSC / OSC messages", None),
+    ("osc_input_state", "État entrée OSC / OSC input state", None),
     ("control_mapping_events", "Événements mappings CONTROL / CONTROL mapping events", None),
     ("osc_sent", "OSC envoyés / OSC sent", None),
     ("osc_errors", "Erreurs OSC / OSC errors", None),
@@ -267,6 +224,17 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
                 return None
         if self._key == "backup_free_bytes":
             return self.coordinator.data.get("archive", {}).get("storage_free_bytes")
+        if self._key == "osc_input_state":
+            # NOTE (audit fix): the connection state (listening/port_in_use/
+            # error/disabled) was previously only present as a buried
+            # attribute on the osc_messages counter sensor -- a port
+            # conflict looked identical to "just no messages received yet"
+            # at a glance. This is now the sensor's own state, so a port
+            # conflict is immediately visible without opening attributes.
+            osc_input = self.coordinator.data.get("osc_input", {})
+            if not osc_input:
+                return "disabled"
+            return osc_input.get("state") or ("listening" if osc_input.get("enabled") else "disabled")
         value = self.coordinator.data.get(self._key, 0)
         if self._key in ("audio_protocols_active", "audio_protocols_stale"):
             return len(value or [])
@@ -282,6 +250,17 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
+        # NOTE (audit fix): previously only 3 of ~20 branches below used
+        # _bounded_attributes, so most attributes (device_inventory
+        # included) could exceed Home Assistant Recorder's 16384-byte limit
+        # on any install with more than a handful of devices/sessions/etc --
+        # confirmed in production via
+        # sensor.inventaire_equipements_device_inventory. Every branch is
+        # now bounded uniformly at this single wrap point.
+        raw = self._raw_extra_state_attributes()
+        return _bounded_attributes(raw) if raw is not None else None
+
+    def _raw_extra_state_attributes(self):
         if self._key == "show_network_config":
             return dict(self.coordinator.data.get("show_network_config", {}))
         if self._key == "ha_builder":
@@ -304,6 +283,14 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return {"rules": self.coordinator.data.get("watchdog_rules", [])}
         if self._key == "osc_messages":
             return {"osc_input": dict(self.coordinator.data.get("osc_input", {})), "osc_learn": dict(self.coordinator.data.get("osc_learn", {}))}
+        if self._key == "osc_input_state":
+            osc_input = dict(self.coordinator.data.get("osc_input", {}))
+            return {
+                "host": osc_input.get("host"),
+                "port": osc_input.get("port"),
+                "last_error": osc_input.get("last_error"),
+                "messages": osc_input.get("messages", 0),
+            }
         if self._key == "control_mapping_events":
             from dataclasses import asdict, is_dataclass
             mappings=[]
@@ -322,6 +309,12 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
         if self._key == "discovery_status":
             return dict(self.coordinator.data.get("discovery_status", {}))
         if self._key == "protocol_rx_diagnostics":
+            # Precomputed once per coordinator refresh cycle (see
+            # coordinator.py) instead of on every single attribute read --
+            # this is the fix for the confirmed 0.6s-per-update slowdown.
+            bounded = self.coordinator.data.get("protocol_rx_diagnostics_bounded")
+            if bounded is not None:
+                return bounded
             return _bounded_attributes(dict(self.coordinator.data.get("protocol_rx_diagnostics", {})))
         if self._key in {"projectors_total", "projectors_online", "projectors_errors"}:
             return dict(self.coordinator.data.get("projector_status", {}))
@@ -447,6 +440,9 @@ class ETCCEM3MetricSensor(ShowNetworkEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
+        return _bounded_attributes(self._raw_cem3_rack_attributes())
+
+    def _raw_cem3_rack_attributes(self):
         row = self._row()
         return {
             "host": self.host,
@@ -495,6 +491,9 @@ class DmxUniverseSensor(ShowNetworkEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
+        return _bounded_attributes(self._raw_dmx_universe_attributes())
+
+    def _raw_dmx_universe_attributes(self):
         # Keep HA state small: raw 512-byte frames are packed as base64 instead
         # of a 512-item JSON integer array. The live DMX panel decodes it.
         compact = []
@@ -555,4 +554,4 @@ class TimecodeSensor(ShowNetworkEntity, SensorEntity):
         return self.coordinator.data.get("timecode", {}).get("text", "--:--:--:--")
     @property
     def extra_state_attributes(self):
-        return self.coordinator.data.get("timecode", {})
+        return _bounded_attributes(self.coordinator.data.get("timecode", {}))

@@ -1,7 +1,7 @@
 """Generic switch catalogue loaded from validated YAML data."""
 from __future__ import annotations
 from dataclasses import dataclass, asdict
-from .core.profile_loader import load_yaml_catalog, require_list, require_mapping, require_keys
+from .core.profile_loader import load_yaml_catalog, require_list, require_mapping, require_keys, LazyCatalog
 
 @dataclass(frozen=True)
 class SwitchProfile:
@@ -24,14 +24,20 @@ def _validate(data):
             if field in item and not isinstance(item[field], list):
                 raise ValueError(f"switches[{i}].{field} must be a list")
 
-_RAW = load_yaml_catalog("switches.yaml", _validate)
-SWITCH_PROFILES = tuple(SwitchProfile(
-    key=x["key"], manufacturer=x["manufacturer"], display_name=x["display_name"],
-    enabled_by_default=bool(x.get("enabled_by_default", False)),
-    transport=tuple(x.get("transport", ("snmp_v2c",))),
-    standard_features=tuple(x.get("standard_features", ("sysName", "sysDescr", "sysUpTime", "ifTable", "ifXTable", "lldpRemTable"))),
-    vendor_features=tuple(x.get("vendor_features", ())),
-) for x in _RAW)
+def _load() -> tuple[SwitchProfile, ...]:
+    raw = load_yaml_catalog("switches.yaml", _validate)
+    return tuple(SwitchProfile(
+        key=x["key"], manufacturer=x["manufacturer"], display_name=x["display_name"],
+        enabled_by_default=bool(x.get("enabled_by_default", False)),
+        transport=tuple(x.get("transport", ("snmp_v2c",))),
+        standard_features=tuple(x.get("standard_features", ("sysName", "sysDescr", "sysUpTime", "ifTable", "ifXTable", "lldpRemTable"))),
+        vendor_features=tuple(x.get("vendor_features", ())),
+    ) for x in raw)
+
+# NOTE (audit fix): was eager at import time (blocking synchronous YAML
+# read on the event loop, confirmed at Home Assistant startup). See
+# osc_profiles.py's PROFILES for the full explanation of this pattern.
+SWITCH_PROFILES = LazyCatalog(_load)
 
 def profiles() -> list[dict]: return [asdict(item) for item in SWITCH_PROFILES]
 def enabled_profiles(selected: list[str] | tuple[str, ...] | None = None) -> list[SwitchProfile]:

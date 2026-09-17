@@ -5,37 +5,39 @@ import asyncio
 from homeassistant.core import HomeAssistant
 from ..const import DOMAIN
 from ..show_control import ShowControlCue
+from ..services.common import coordinator_for_call
 
 
 async def async_register(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, "fire_show_control_cue"):
         return
 
-    def _c():
-        return next(iter(hass.data[DOMAIN].values()))["coordinator"]
+    # NOTE (audit fix): this used to grab hass.data[DOMAIN]'s FIRST entry
+    # unconditionally, same issue and same fix as services/midi_output.py --
+    # see that file's comment for the full explanation.
 
     async def _set_enabled(call):
-        c = _c()
+        c = coordinator_for_call(hass, call)
         if bool(call.data["enabled"]):
             c.security.require_unlocked()
         c.show_control.enabled = bool(call.data["enabled"])
         c.publish(**c.show_control.snapshot())
 
     async def _upsert(call):
-        c = _c(); c.security.require_unlocked()
+        c = coordinator_for_call(hass, call); c.security.require_unlocked()
         cue = ShowControlCue(str(call.data["cue_id"]), str(call.data.get("name") or call.data["cue_id"]), list(call.data.get("actions") or []), bool(call.data.get("enabled", True)))
         c.show_control.upsert(cue)
         await asyncio.to_thread(c.show_control.save)
         c.publish(**c.show_control.snapshot())
 
     async def _remove(call):
-        c = _c(); c.security.require_unlocked()
+        c = coordinator_for_call(hass, call); c.security.require_unlocked()
         c.show_control.remove(str(call.data["cue_id"]))
         await asyncio.to_thread(c.show_control.save)
         c.publish(**c.show_control.snapshot())
 
     async def _fire(call):
-        c = _c(); c.security.require_unlocked()
+        c = coordinator_for_call(hass, call); c.security.require_unlocked()
         if not c.show_control.enabled:
             raise RuntimeError("Show Control safety gate is disabled")
         cue = c.show_control.cues.get(str(call.data["cue_id"]))
