@@ -83,6 +83,21 @@ class LazyCatalog:
         return f"LazyCatalog(loaded={self._loaded}, value={self._value!r})"
 
 
+def warm_catalogs(*catalogs: Any) -> None:
+    """Warm lazy catalogues while tolerating already-materialized values.
+
+    Older Show Network releases exported some catalogues directly as tuples
+    or dictionaries.  Accepting those values here makes upgrades safe when
+    Home Assistant still has an older module object in memory, while lazy
+    catalogues continue to perform their disk reads in the executor selected
+    by the caller.
+    """
+    for catalog in catalogs:
+        warm = getattr(catalog, "warm", None)
+        if callable(warm):
+            warm()
+
+
 def load_yaml_catalog(filename: str, validator: Callable[[Any], None]) -> Any:
     path = Path(__file__).resolve().parent.parent / "data" / filename
     try:

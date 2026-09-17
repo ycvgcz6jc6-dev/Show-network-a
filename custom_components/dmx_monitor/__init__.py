@@ -44,7 +44,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             hass,
             webcomponent_name="show-network-pro-dashboard",
             frontend_url_path="show-network",
-            module_url="/api/dmx_monitor/static/show-network.js?v=0.15.3",
+            module_url="/api/dmx_monitor/static/show-network.js?v=0.15.4",
             sidebar_title="Show Network",
             sidebar_icon="mdi:network-outline",
             require_admin=True,
