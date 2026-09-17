@@ -28,6 +28,7 @@ from .projector_monitor import PJLinkMonitor
 from .network_health import NetworkHealth
 from .ma_remote import MARemoteInventory
 from .audio_amplifiers import AudioAmplifierInventory
+from .audiofocus import AudioFocusInventory
 from .power_manager import PowerManager
 from .fixture_control import FixtureControlEngine
 from .dmx_scene_bank import DmxSceneBank
@@ -87,6 +88,8 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         # documented for ELC/Green-GO.
         self.generic_switch_monitor = None
         self.etc_cem3_monitor = None
+        self.ontime_monitor = None
+        self.qlcplus_bridge = None
         self.ma_listener = None
         self.ma_remote = MARemoteInventory()
         self.ptp_monitor = None
@@ -112,6 +115,7 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         self.topology = ShowTopology()
         self.network_health = NetworkHealth()
         self.audio_amplifiers = AudioAmplifierInventory()
+        self.audiofocus = AudioFocusInventory()
         self.power_manager = PowerManager(hass.config.path("show_network_power_manager.json"))
         self.fixture_control = FixtureControlEngine(hass.config.path())
         self.dmx_scene_bank = DmxSceneBank(hass.config.path("show_network_dmx_scenes.json"))
@@ -355,6 +359,10 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             await self.projector_monitor.async_update()
         if self.etc_cem3_monitor:
             await self.etc_cem3_monitor.async_update()
+        if getattr(self, "ontime_monitor", None):
+            await self.ontime_monitor.async_update()
+        if getattr(self, "qlcplus_bridge", None):
+            await self.qlcplus_bridge.async_update()
         snapshot = dict(self.data)
         # NOTE (audit fix): timecode/artnet_nodes must be re-read fresh every
         # cycle -- both objects keep updating live via lighting_receiver.py's
@@ -398,6 +406,8 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         snapshot["manufacturer_profiles"] = self._profile_catalog_cache["manufacturer_profiles"]
         snapshot["osc_source_profiles"] = self._profile_catalog_cache["osc_source_profiles"]
         etc_live = self.etc_cem3_monitor.snapshot(detail=False) if self.etc_cem3_monitor else {"enabled": False, "total": 0, "online": 0, "errors_total": 0, "temperature_max_c": None, "racks": []}
+        snapshot.update(self.ontime_monitor.snapshot() if self.ontime_monitor else {"ontime": None})
+        snapshot.update(self.qlcplus_bridge.snapshot() if self.qlcplus_bridge else {"qlcplus": None})
         snapshot["etc_cem3"] = etc_live
         snapshot["etc_cem3_racks_total"] = etc_live.get("total", 0)
         snapshot["etc_cem3_racks_online"] = etc_live.get("online", 0)
@@ -596,6 +606,7 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
                         observed_at = row.get("last_seen") or row.get("last_timestamp")
                         self.audio_amplifiers.observe(key=f"{manufacturer}:{row.get('source')}", manufacturer=manufacturer, host=row.get("source"), protocol="Dante/mDNS", evidence=marker, observed_at=observed_at)
         snapshot.update(self.audio_amplifiers.snapshot())
+        snapshot.update(self.audiofocus.snapshot())
         if getattr(self, "rdm_bridge", None):
             rows = list(self.rdm_bridge.devices)
             self.rdm_inventory.ingest(rows, transport="RDM/OLA")

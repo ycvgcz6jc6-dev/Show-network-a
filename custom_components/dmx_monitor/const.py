@@ -1,5 +1,5 @@
 DOMAIN = "dmx_monitor"
-VERSION = "0.15.5"
+VERSION = "0.15.10"
 
 CONF_INTERFACE = "interface"
 CONF_UNIVERSES = "universes"
@@ -90,6 +90,12 @@ CONF_CHAOS_ENABLED = "chaos_enabled"
 CONF_PROJECTOR_MONITOR_ENABLED = "projector_monitor_enabled"
 
 CONF_ETC_CEM3_ENABLED = "etc_cem3_enabled"
+CONF_ONTIME_ENABLED = "ontime_enabled"
+CONF_ONTIME_HOST = "ontime_host"
+CONF_ONTIME_PORT = "ontime_port"
+CONF_QLCPLUS_ENABLED = "qlcplus_enabled"
+CONF_QLCPLUS_HOST = "qlcplus_host"
+CONF_QLCPLUS_PORT = "qlcplus_port"
 CONF_ETC_CEM3_HOSTS = "etc_cem3_hosts"
 CONF_INTERFACE_ETC = "interface_etc"
 

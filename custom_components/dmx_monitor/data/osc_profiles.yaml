@@ -259,6 +259,31 @@
   - Enable the protocol documented by Soundcraft.
   - Use Learn for model-specific commands.
   actions: []
+- key: medialon
+  label_fr: Medialon Show Control
+  label_en: Medialon Show Control
+  description_fr: 'Medialon (7thSense) supporte OSC nativement, mais son espace
+    d''adresses OSC (OSC Methods / Address Space) est défini dans la programmation
+    de chaque show via son module OSC (MXM), pas par une norme fixe du constructeur.
+    Aucune adresse fixe ne peut donc être fournie ici sans se référer à un show
+    précis : utiliser Learn pour découvrir les adresses réellement envoyées/attendues
+    par cette installation.'
+  description_en: 'Medialon (7thSense) supports OSC natively, but its OSC address
+    space (OSC Methods / Address Space) is defined per-show in its own OSC module
+    (MXM), not by a fixed vendor standard. No fixed address can therefore be
+    provided here without referring to a specific show: use Learn to discover
+    the addresses this particular installation actually sends/expects.'
+  setup_steps_fr:
+  - Dans Medialon Manager, ouvrir le module OSC (MXM) du show concerné.
+  - Noter les alias/adresses OSC définis par le programmeur du show.
+  - Utiliser Learn côté Show Network pour confirmer les adresses réellement
+    échangées.
+  setup_steps_en:
+  - In Medialon Manager, open the show's OSC module (MXM).
+  - Note the OSC aliases/addresses the show's programmer defined.
+  - Use Learn on the Show Network side to confirm the addresses actually
+    exchanged.
+  actions: []
 - key: etc_eos
   label_fr: ETC Eos
   label_en: ETC Eos
