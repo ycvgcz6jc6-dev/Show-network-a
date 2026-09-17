@@ -1,7 +1,7 @@
 """Predefined OSC source catalogue loaded from YAML data."""
 from __future__ import annotations
 from dataclasses import dataclass, field
-from .core.profile_loader import load_yaml_catalog, require_list, require_mapping, require_keys
+from .core.profile_loader import load_yaml_catalog, require_list, require_mapping, require_keys, LazyCatalog
 
 @dataclass(frozen=True)
 class OSCActionTemplate:
@@ -21,5 +21,15 @@ def _validate(data):
         for j,a in enumerate(item["actions"]):
             a=require_mapping(a,name=f"osc_profiles[{i}].actions[{j}]")
             require_keys(a,{"key","label_fr","label_en","address","value_type","destination_domain","destination_attribute"},name=f"osc_profiles[{i}].actions[{j}]")
-_RAW=load_yaml_catalog("osc_profiles.yaml",_validate)
-PROFILES=tuple(OSCSourceProfile(x["key"],x["label_fr"],x["label_en"],x["description_fr"],x["description_en"],tuple(x["setup_steps_fr"]),tuple(x["setup_steps_en"]),tuple(OSCActionTemplate(**a) for a in x.get("actions",()))) for x in _RAW)
+
+def _load() -> tuple[OSCSourceProfile, ...]:
+    raw = load_yaml_catalog("osc_profiles.yaml", _validate)
+    return tuple(OSCSourceProfile(x["key"],x["label_fr"],x["label_en"],x["description_fr"],x["description_en"],tuple(x["setup_steps_fr"]),tuple(x["setup_steps_en"]),tuple(OSCActionTemplate(**a) for a in x.get("actions",()))) for x in raw)
+
+# NOTE (audit fix): was eager (`_RAW = load_yaml_catalog(...)` at import
+# time), causing a blocking synchronous file read on whichever thread first
+# imports this module -- confirmed hitting Home Assistant's event loop at
+# startup. Now deferred; call PROFILES.warm() from hass.async_add_executor_job
+# during setup (see runtime/setup.py) to move the I/O off the loop, or it
+# loads lazily+synchronously on first real access if nothing warms it.
+PROFILES = LazyCatalog(_load)

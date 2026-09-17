@@ -89,6 +89,26 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     # Static fixture YAML must not be read on Home Assistant's event loop.
     from ..fixture_profiles import load_profiles
     await hass.async_add_executor_job(load_profiles)
+    # NOTE (audit fix): osc_profiles.py, switch_profiles.py,
+    # spectacle_profiles.py, manufacturer_profiles.py and midi_profiles.py
+    # were all eager (blocking synchronous YAML read at module-import
+    # time, confirmed hitting Home Assistant's event loop 5x at startup).
+    # They are now lazy (LazyCatalog, see core/profile_loader.py) exactly
+    # like fixture_profiles.py already was; warm them here the same way.
+    from ..osc_profiles import PROFILES as _osc_profiles
+    from ..switch_profiles import SWITCH_PROFILES as _switch_profiles
+    from ..spectacle_profiles import PROFILES as _spectacle_profiles
+    from ..midi_profiles import PROFILES as _midi_profiles
+    from ..manufacturer_profiles import _ALIASES as _manufacturer_aliases
+
+    def _warm_remaining_catalogs():
+        _osc_profiles.warm()
+        _switch_profiles.warm()
+        _spectacle_profiles.warm()
+        _midi_profiles.warm()
+        _manufacturer_aliases.warm()
+
+    await hass.async_add_executor_job(_warm_remaining_catalogs)
     # DeviceInventory reads a JSON overrides file synchronously in __init__;
     # run the construction in the executor so that disk I/O never happens
     # directly on the event loop during config entry setup.
@@ -277,8 +297,9 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     if aes67_monitor: resources.add(RuntimeResource(ProtocolDriver("aes67", "AUDIO"), "aes67", aes67_monitor, "stop", {"interface": interface_audio, "role": "monitor"}))
     coordinator.avdecc_monitor = None
     avdecc_url = str(settings.get(CONF_AVDECC_BRIDGE_URL, "") or "").strip()
+    avdecc_token = str(settings.get(CONF_AVDECC_BRIDGE_TOKEN, "") or "").strip() or None
     if avdecc_url:
-        avdecc_monitor = AVDECCBridgeMonitor(avdecc_url)
+        avdecc_monitor = AVDECCBridgeMonitor(avdecc_url, token=avdecc_token)
         try:
             await avdecc_monitor.start()
             coordinator.avdecc_monitor = avdecc_monitor
@@ -290,15 +311,17 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     coordinator.rdm_bridge = None
     if bool(settings.get(CONF_RDM_ENABLED, False)):
         rdm_url = str(settings.get(CONF_RDM_BRIDGE_URL, "") or "").strip()
+        rdm_token = str(settings.get(CONF_RDM_BRIDGE_TOKEN, "") or "").strip() or None
         if rdm_url:
-            coordinator.rdm_bridge = RDMBridgeMonitor(rdm_url, transport="RDM/OLA")
+            coordinator.rdm_bridge = RDMBridgeMonitor(rdm_url, transport="RDM/OLA", token=rdm_token)
             await coordinator.rdm_bridge.start()
             resources.add(RuntimeResource(ProtocolDriver("rdm", "LIGHT"), "rdm", coordinator.rdm_bridge, "stop", {"endpoint": rdm_url, "role": "read-mostly-helper-bridge", "writes_armed": coordinator.rdm_allow_writes}))
     coordinator.rdmnet_bridge = None
     if bool(settings.get(CONF_RDMNET_ENABLED, False)):
         rdmnet_url = str(settings.get(CONF_RDMNET_BRIDGE_URL, "") or "").strip()
+        rdmnet_token = str(settings.get(CONF_RDMNET_BRIDGE_TOKEN, "") or "").strip() or None
         if rdmnet_url:
-            coordinator.rdmnet_bridge = RDMBridgeMonitor(rdmnet_url, transport="RDMnet")
+            coordinator.rdmnet_bridge = RDMBridgeMonitor(rdmnet_url, transport="RDMnet", token=rdmnet_token)
             await coordinator.rdmnet_bridge.start()
             resources.add(RuntimeResource(ProtocolDriver("rdmnet", "LIGHT"), "rdmnet", coordinator.rdmnet_bridge, "stop", {"endpoint": rdmnet_url, "role": "read-mostly-helper-bridge", "writes_armed": coordinator.rdm_allow_writes}))
 
@@ -556,7 +579,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                     async with http_sem:
                         source_ip = source_by_interface.get(row.get("interface"))
                         reader,writer=await asyncio.wait_for(asyncio.open_connection(ip,80,local_addr=((source_ip,0) if source_ip else None)),timeout=.8)
-                        writer.write(f"GET / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: Show-Network/0.15.0\r\nConnection: close\r\n\r\n".encode())
+                        writer.write(f"GET / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: Show-Network/0.15.3\r\nConnection: close\r\n\r\n".encode())
                         await writer.drain(); raw=await asyncio.wait_for(reader.read(16384),timeout=.8)
                         writer.close();
                         try: await writer.wait_closed()

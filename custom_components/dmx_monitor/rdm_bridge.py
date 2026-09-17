@@ -14,10 +14,11 @@ from urllib.request import Request, urlopen
 
 
 class RDMBridgeMonitor:
-    def __init__(self, url: str, *, transport: str, timeout: float = 3.0) -> None:
+    def __init__(self, url: str, *, transport: str, timeout: float = 3.0, token: str | None = None) -> None:
         self.url = str(url or "").rstrip("/")
         self.transport = transport
         self.timeout = float(timeout)
+        self.token = str(token).strip() if token else None
         self.devices: list[dict[str, Any]] = []
         self.error: str | None = None
         self.last_poll: float | None = None
@@ -31,7 +32,10 @@ class RDMBridgeMonitor:
 
     def _request_json(self, path: str, *, method: str = "GET", payload: dict | None = None) -> dict:
         body = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
-        req = Request(self.url + path, data=body, method=method, headers={"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "Show-Network/0.15.0"})
+        headers = {"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "Show-Network/0.15.3"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        req = Request(self.url + path, data=body, method=method, headers=headers)
         with urlopen(req, timeout=self.timeout) as response:
             raw = response.read(2 * 1024 * 1024 + 1)
         if len(raw) > 2 * 1024 * 1024:
