@@ -1,5 +1,158 @@
 # Changelog
 
+## 0.15.17 — Pro audio console/mixer brand recognition
+
+Found the manufacturer catalog had zero console/mixer brands at all --
+only amplifiers and loudspeakers. Added the major pro audio console
+manufacturers, following the exact same conservative pattern already
+used for QSC/Yamaha/etc: literal brand-name text matching against
+already-collected evidence (mDNS, hostnames, HTTP banners), never an
+invented protocol.
+
+- New manufacturer catalog entries: Midas, Soundcraft, DiGiCo, Allen &
+  Heath, Avid, Solid State Logic -- each with their real, current product
+  lines.
+- New mDNS brand-name markers for the same six brands in
+  `vendor_discovery.py`.
+- Tested: `match_manufacturer()` correctly identifies all three sample
+  brands from realistic evidence text.
+- These appear directly in the existing generic Auto Discovery table once
+  identified -- no new dedicated module needed, consistent with how
+  amplifiers/switches already work.
+
+## 0.15.16 — Full audit of every gated/active-output panel and service
+
+Requested comprehensive check of everything security-gated, following two
+real refresh bugs found in a row (DMX→HA mappings, then zones).
+
+- Found and fixed a third instance of the same bug class, missed by the
+  first sweep because it used `sync()` rather than `render()`: the Rule
+  Builder's `call()` waited only 50ms (shorter than the already-fragile
+  150ms pattern fixed in 0.15.13) before resyncing, with no retry. Now
+  matches the same 400ms+1500ms double-attempt pattern used everywhere
+  else.
+- Systematically re-checked every custom element with a service-call
+  method (16 across the whole panel) for a missing refresh -- all other
+  15 confirmed correct.
+- Separately and more importantly: checked the actual security gate
+  itself (not just the UI refresh) on every service that genuinely emits
+  real output -- DMX scene recall, OSC send (both generic and
+  profile-based), MIDI send, RDM writes, Power Manager run, QLC+ (widget
+  value/cue list/frame/function), Show Control fire, GDTF attribute set,
+  and projector power/input/mute. All 15 confirmed to call
+  `security.require_unlocked()` (projector control additionally checks
+  its own `control_enabled` flag first, in a shared helper all three of
+  its services delegate to). No security bypass found anywhere -- every
+  bug found in this project has been about the interface not reliably
+  showing success, never about an unlocked action slipping through.
+
+## 0.15.15 — DMX → HA Zones: real bug found (no refresh at all) + mobile multi-select fix
+
+- Fixed: "AJOUTER LA ZONE" appeared to do nothing. Root cause: unlike
+  every other panel, `DmxHaZonesPanel._call()` never re-rendered after
+  any action at all -- not even the fragile single 150ms timeout fixed
+  elsewhere, nothing. The backend service was already correct (verified);
+  the zone was very likely being created successfully but the screen
+  never reflected it. Same double-refresh pattern (400ms + 1500ms) now
+  applied here, plus an actual error/success message, which this panel
+  never had either.
+- Fixed: the "Lampes HA" field was a native HTML multi-select, which
+  cannot be used to select multiple items with touch alone (no
+  ctrl/cmd+click equivalent on a phone) -- replaced with checkboxes,
+  directly addressing the request to be able to add several lights per
+  zone.
+
+## 0.15.14 — Root cause found: non-GigaCore switches were never contacted at all
+
+Based on a real network inventory shared by the user (Cisco/Netgear/HPE
+switches alongside a Luminex GigaCore, all on 10.4.1.0/24).
+
+- Confirmed `arp_neighbors()` reads the OS's global ARP table
+  (`/proc/net/arp`), not scoped to any particular configured interface --
+  explaining why discovered devices span multiple subnets regardless of
+  the DMX/MA-Net3/etc interface selection.
+- Found the real reason a real Cisco switch never appeared anywhere,
+  including Auto Discovery: `GenericSwitchMonitor` was only ever fed
+  GigaCore's host list, so a switch that isn't a Luminex GigaCore was
+  never contacted by anything in Show Network at all -- and an ARP entry
+  only exists for a host the OS has actually exchanged packets with, so
+  "never contacted" also means "never appears in discovery," independent
+  of interface configuration.
+- New: `CONF_GENERIC_SWITCH_HOSTS` config field, letting an operator list
+  non-GigaCore switches (Cisco, Netgear, HPE, etc.) explicitly. These are
+  now actively SNMP-polled alongside GigaCore hosts, which should also
+  make them appear in Auto Discovery as a side effect of that traffic.
+  Tested the host-list merge against the user's real switch inventory.
+
+## 0.15.13 — Interface filter bug + manual amplifier registration
+
+Based on real screenshots and network inventory shared by the user.
+
+- Fixed: the topology page's "Vue interface" filter always showed only
+  "Toutes" -- confirmed root cause: it searched for an `evidence` entry
+  with `field==='interface'`, but the backend only ever populates
+  `add_evidence()` from one single generic call site that nothing in the
+  real ARP/mDNS/SNMP discovery pipeline actually feeds an "interface"
+  field into. The interface is really stored as a plain `device.interface`
+  attribute, already serialized to the frontend -- the filter was just
+  reading the wrong place. Confirmed the field genuinely exists and is
+  already sent before fixing.
+- New: manual amplifier registration by IP address
+  (`manual_register_amplifier`/`manual_remove_amplifier`), a direct
+  alternative to automatic Dante/mDNS-based brand detection -- which the
+  user found unreliable in practice for a real amplifier that only ever
+  showed as "seen via Dante, brand unidentified". Added a `remove()`
+  method to `AudioAmplifierInventory` (didn't exist) and a form in the
+  Amplifiers panel.
+- Noted (not a code fix): Cisco switch not appearing and Luminex having
+  no LLDP-derived topology links may be a network-topology issue rather
+  than a Show Network bug -- ARP is link-local, and the shared screenshots
+  show every currently-visible device coming from different subnets than
+  the switches' 10.4.1.0/24, suggesting Show Network's configured
+  interface may not have direct L2 visibility into that segment. The
+  interface-filter fix above should help confirm this once tested.
+
+## 0.15.12 — Defense in depth around the 0.15.11 deferred loads
+
+Following a report that DMX reception was still not working, re-examined
+the 5 deferred loads added in 0.15.11. Each store's own `load()` method
+already handles file-read/parse errors internally, but the awaits calling
+them in `runtime/setup.py` were unguarded and run in series, before DMX
+receiver startup later in the same function -- meaning an exception type
+any one loader's own except clause doesn't happen to catch (e.g. a stored
+item that isn't a dict, raising AttributeError instead of the caught
+ValueError/TypeError/KeyError) would silently abort the rest of setup,
+DMX included. Each of the 5 is now individually wrapped so a failure in
+any one is logged and setup continues regardless -- this was not
+confirmed as the actual cause of the reported DMX issue, but closes a
+real gap either way and is the honest, testable next step pending the
+specific error message the DMX card now shows.
+
+## 0.15.11 — Blocking I/O in the coordinator constructor (confirmed in production)
+
+A shared production log showed 4 distinct blocking-I/O warnings at every
+single startup, all originating from `ShowNetworkCoordinator.__init__`.
+Investigating found the true scope was larger than the log alone showed:
+5 separate blocking file reads ran synchronously during coordinator
+construction, all directly on Home Assistant's event loop.
+
+- `PowerManager.__init__` called `self.load()` directly.
+- `DmxCircuitMonitor.__init__` called `self.load()` directly.
+- The coordinator's own `_load_dmx_ha_zones()`, `control_mapping_store.
+  load()`, and `dmx_ha_mapping_store.load()` all ran inline in `__init__`.
+
+One of these (rules, via `RuleStore`) had already been correctly fixed at
+some point, with a comment explaining why -- that same fix was never
+applied to its four siblings. All five now defer to
+`hass.async_add_executor_job(...)` in `runtime/setup.py`, matching the
+pattern already correctly used for `fixture_control`/`dmx_scene_bank`.
+Tested directly: constructing `PowerManager`/`DmxCircuitMonitor` no
+longer touches disk, and an explicit `.load()` call afterwards still
+correctly recovers real persisted data.
+
+A full sweep for any other constructor still doing blocking I/O found
+none remaining.
+
 ## 0.15.10 — Fresh audit pass
 
 Requested full re-audit of everything built this session. Checked version
