@@ -206,7 +206,13 @@ class PowerManager:
         self._run_tasks: dict[str, asyncio.Task] = {}
         self._serials: dict[str, Any] = {}
         self.sent = 0; self.errors = 0; self.last_error: str | None = None
-        self.load()
+        # NOTE (audit fix): self.load() used to run here, meaning every
+        # coordinator construction did blocking synchronous file I/O
+        # directly on Home Assistant's event loop -- confirmed in
+        # production logs. Deferred to runtime/setup.py's
+        # hass.async_add_executor_job(coordinator.power_manager.load) call,
+        # matching the pattern already correctly used for
+        # fixture_control/dmx_scene_bank.
 
     @staticmethod
     def _output_key(cfg: PowerOutputConfig) -> str:

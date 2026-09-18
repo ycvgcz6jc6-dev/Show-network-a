@@ -97,6 +97,9 @@ class AudioAmplifierInventory:
         self.stale_s = float(stale_s)
         self.records: dict[str, AmplifierRecord] = {}
 
+    def remove(self, key: str) -> None:
+        self.records.pop(key, None)
+
     def observe(
         self,
         *,

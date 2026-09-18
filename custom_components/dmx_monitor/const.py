@@ -1,5 +1,5 @@
 DOMAIN = "dmx_monitor"
-VERSION = "0.15.10"
+VERSION = "0.15.17"
 
 CONF_INTERFACE = "interface"
 CONF_UNIVERSES = "universes"
@@ -23,6 +23,7 @@ EVENT_PROTOCOL_SEEN = f"{DOMAIN}_protocol_seen"
 EVENT_OSC_MESSAGE = f"{DOMAIN}_osc_message"
 
 CONF_GIGACORE_HOSTS = "gigacore_hosts"
+CONF_GENERIC_SWITCH_HOSTS = "generic_switch_hosts"
 CONF_GIGACORE_COMMUNITY = "gigacore_community"
 DEFAULT_GIGACORE_COMMUNITY = "public"
 GIGACORE_SNMP_PORT = 161

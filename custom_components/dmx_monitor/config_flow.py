@@ -113,6 +113,7 @@ def _schema_for_hass(hass, data: dict | None, interfaces: list[str], enttec_port
         vol.Required(const.CONF_LANGUAGE, default=data.get(const.CONF_LANGUAGE, "auto")): vol.In(["auto", "fr", "en", "es", "it", "nl", "de"]),
         vol.Optional(const.CONF_PERFORMANCE_PROFILE, default=data.get(const.CONF_PERFORMANCE_PROFILE, "auto")): vol.In(const.PERFORMANCE_PROFILES),
         vol.Optional(const.CONF_GIGACORE_HOSTS, default=data.get(const.CONF_GIGACORE_HOSTS, "")): str,
+        vol.Optional(const.CONF_GENERIC_SWITCH_HOSTS, default=data.get(const.CONF_GENERIC_SWITCH_HOSTS, "")): str,
         vol.Optional(const.CONF_GIGACORE_COMMUNITY, default=data.get(const.CONF_GIGACORE_COMMUNITY, const.DEFAULT_GIGACORE_COMMUNITY)): str,
         vol.Optional(const.CONF_AES70_HOSTS, default=data.get(const.CONF_AES70_HOSTS, "")): str,
         vol.Optional(const.CONF_AES70_PORT, default=data.get(const.CONF_AES70_PORT, 65000)): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),

@@ -30,7 +30,11 @@ class CircuitGroup:
 
 class DmxCircuitMonitor:
     def __init__(self, storage_path: str | Path, stale_s: float = 3.0) -> None:
-        self.path=Path(storage_path); self.stale_s=float(stale_s); self.groups:dict[str,CircuitGroup]={}; self._observed={}; self.load()
+        self.path=Path(storage_path); self.stale_s=float(stale_s); self.groups:dict[str,CircuitGroup]={}; self._observed={}
+        # NOTE (audit fix): self.load() used to run here (blocking file I/O
+        # directly on Home Assistant's event loop at every startup,
+        # confirmed in production logs). Deferred to runtime/setup.py's
+        # hass.async_add_executor_job(coordinator.dmx_circuit_monitor.load).
 
     def load(self):
         try: raw=json.loads(self.path.read_text(encoding='utf-8')) if self.path.exists() else []

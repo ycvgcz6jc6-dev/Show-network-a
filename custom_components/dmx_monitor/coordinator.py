@@ -140,23 +140,25 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         self.control_mapping_engine = MappingEngine()
         from .control_mapping import ControlMappingStore
         self.control_mapping_store = ControlMappingStore(hass.config.path("show_network_control_mappings.json"))
-        from dataclasses import fields
-        for _raw in self.control_mapping_store.load():
-            try:
-                allowed = {f.name for f in fields(Mapping)}
-                self.control_mapping_engine.add(Mapping(**{k: v for k, v in _raw.items() if k in allowed}))
-            except (TypeError, ValueError, KeyError):
-                _LOGGER.warning("Ignoring invalid persisted control mapping")
+        # NOTE (audit fix): control_mapping_store.load() used to run here
+        # directly (blocking file I/O on the event loop, confirmed in
+        # production logs). Deferred to runtime/setup.py via
+        # hass.async_add_executor_job(coordinator._load_control_mappings).
         self.dmx_ha_mapping_engine = DmxHAMappingEngine()
         self._dmx_ha_highlights: dict[str, dict[str, dict]] = {}
         self.dmx_ha_mapping_store = DmxHAMappingStore(hass.config.path())
         self.dmx_ha_zone_engine = DmxHAZoneEngine()
         self.dmx_ha_zone_store_path = hass.config.path("show_network_dmx_ha_zones.json")
-        self._load_dmx_ha_zones()
+        # NOTE (audit fix): self._load_dmx_ha_zones() used to run here
+        # (blocking file I/O on the event loop, confirmed in production
+        # logs). Deferred to runtime/setup.py via
+        # hass.async_add_executor_job(coordinator._load_dmx_ha_zones).
         self.config_backups = ConfigBackupManager(hass.config.path())
         self.diagnostics_exporter = DiagnosticsExporter(hass.config.path())
-        for _mapping in self.dmx_ha_mapping_store.load():
-            self.dmx_ha_mapping_engine.add(_mapping)
+        # NOTE (audit fix): dmx_ha_mapping_store.load() used to run here
+        # directly (blocking file I/O on the event loop, confirmed in
+        # production logs). Deferred to runtime/setup.py via
+        # hass.async_add_executor_job(coordinator._load_dmx_ha_mappings).
         self.control_mapping_events = []
         self.osc_output = OSCOutput()
         self.osc_learn = OSCLearnSession()
@@ -944,6 +946,24 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
     def save_dmx_ha_mappings(self) -> None:
         self.dmx_ha_mapping_store.save(self.dmx_ha_mapping_engine.mappings.values())
         self.config_backups.backup("mapping_save")
+
+    def _load_control_mappings(self) -> None:
+        """Deferred (see constructor NOTE): does blocking file I/O, call
+        via hass.async_add_executor_job, never directly on the event loop."""
+        from dataclasses import fields
+        from .osc_mapping import Mapping
+        for _raw in self.control_mapping_store.load():
+            try:
+                allowed = {f.name for f in fields(Mapping)}
+                self.control_mapping_engine.add(Mapping(**{k: v for k, v in _raw.items() if k in allowed}))
+            except (TypeError, ValueError, KeyError):
+                _LOGGER.warning("Ignoring invalid persisted control mapping")
+
+    def _load_dmx_ha_mappings(self) -> None:
+        """Deferred (see constructor NOTE): does blocking file I/O, call
+        via hass.async_add_executor_job, never directly on the event loop."""
+        for _mapping in self.dmx_ha_mapping_store.load():
+            self.dmx_ha_mapping_engine.add(_mapping)
 
     def _load_dmx_ha_zones(self) -> None:
         import json

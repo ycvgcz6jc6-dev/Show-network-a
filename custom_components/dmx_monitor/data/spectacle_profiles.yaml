@@ -624,3 +624,45 @@
   passive_protocols: [UDP multicast (undocumented format)]
   diagnostics: []
   control_paths: [SCiO WebUI (no published API)]
+- key: midas
+  manufacturer: Midas
+  domains: [AUDIO]
+  product_families: [HD96, PRO X, PRO2, PRO3, PRO6, XL8]
+  passive_protocols: [mDNS (brand-name text match only)]
+  diagnostics: []
+  control_paths: [OSC (model-dependent, no fixed address space)]
+- key: soundcraft
+  manufacturer: Soundcraft
+  domains: [AUDIO]
+  product_families: [Vi Series, Si Series]
+  passive_protocols: [mDNS (brand-name text match only)]
+  diagnostics: []
+  control_paths: [OSC (model-dependent, no fixed address space)]
+- key: digico
+  manufacturer: DiGiCo
+  domains: [AUDIO]
+  product_families: [SD5, SD7, SD9, SD10, SD11, SD12, Quantum Series]
+  passive_protocols: [mDNS (brand-name text match only)]
+  diagnostics: []
+  control_paths: [OSC (model-dependent, no fixed address space)]
+- key: allen_heath
+  manufacturer: Allen & Heath
+  domains: [AUDIO]
+  product_families: [dLive, SQ Series, Avantis]
+  passive_protocols: [mDNS (brand-name text match only)]
+  diagnostics: []
+  control_paths: [OSC (model-dependent, no fixed address space)]
+- key: avid
+  manufacturer: Avid
+  domains: [AUDIO]
+  product_families: [VENUE, S6L]
+  passive_protocols: [mDNS (brand-name text match only)]
+  diagnostics: []
+  control_paths: [Ethernet Sound Grid (proprietary, no published API)]
+- key: solid_state_logic
+  manufacturer: Solid State Logic
+  domains: [AUDIO]
+  product_families: [Live L200, Live L300, Live L500, Live L550]
+  passive_protocols: [mDNS (brand-name text match only)]
+  diagnostics: []
+  control_paths: [OSC (model-dependent, no fixed address space)]
