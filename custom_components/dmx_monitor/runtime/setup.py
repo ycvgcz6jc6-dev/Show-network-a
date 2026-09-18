@@ -122,14 +122,45 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     community = settings.get(CONF_GIGACORE_COMMUNITY, "public")
     gigacore = GigaCoreMonitor(hosts, community)
     coordinator = ShowNetworkCoordinator(hass, inventory, gigacore)
-    if hosts:
-        # Reuses the same host list/community already configured for
-        # GigaCore (no separate config field exists for other switch
-        # manufacturers yet). If a site has a mix of GigaCore and other
-        # switches at different addresses, this will simply get no
-        # response from the non-SNMP-compatible ones -- handled gracefully.
+    # NOTE (audit fix): confirmed in production logs -- these 5 loads used
+    # to run synchronously inside ShowNetworkCoordinator.__init__ (either
+    # directly or via PowerManager/DmxCircuitMonitor's own constructors),
+    # blocking Home Assistant's event loop with real file I/O on every
+    # single startup. Deferred here, off the event loop, before anything
+    # else in setup depends on this persisted state being loaded.
+    #
+    # Each is individually guarded: a bug in any one persisted-state
+    # loader (a malformed stored file, an item shape the loader's own
+    # except clause doesn't happen to catch) must never be able to abort
+    # the rest of setup -- DMX receiver startup happens later in this same
+    # function, and a single unguarded await here would silently prevent
+    # DMX (and everything else after it) from ever starting.
+    async def _safe_load(name, fn):
+        try:
+            await hass.async_add_executor_job(fn)
+        except Exception as exc:
+            _LOGGER.warning("Show Network: could not load persisted %s (continuing without it): %s", name, exc)
+
+    await _safe_load("power manager buttons", coordinator.power_manager.load)
+    await _safe_load("DMX circuit monitor groups", coordinator.dmx_circuit_monitor.load)
+    await _safe_load("DMX-to-HA zones", coordinator._load_dmx_ha_zones)
+    await _safe_load("control mappings", coordinator._load_control_mappings)
+    await _safe_load("DMX-to-HA mappings", coordinator._load_dmx_ha_mappings)
+    generic_switch_hosts = [h.strip() for h in str(settings.get(CONF_GENERIC_SWITCH_HOSTS, "") or "").replace(";", ",").split(",") if h.strip()]
+    all_switch_hosts = sorted(set(hosts) | set(generic_switch_hosts))
+    if all_switch_hosts:
+        # NOTE (audit fix): previously only reused GigaCore's host list, so
+        # a switch that isn't a Luminex GigaCore (e.g. a Cisco or Netgear
+        # on the same network) was never contacted by anything in Show
+        # Network at all -- confirmed as the real cause of it never
+        # appearing in Auto Discovery either, since an ARP entry only
+        # exists for hosts the OS has actually exchanged packets with.
+        # CONF_GENERIC_SWITCH_HOSTS lets an operator list those switches
+        # explicitly; GigaCore hosts are included too since a Luminex
+        # switch also answers standard SNMP (IF-MIB etc), not just its
+        # private OIDs.
         coordinator.generic_switch_monitor = GenericSwitchMonitor(
-            {h: None for h in hosts}, community
+            {h: None for h in all_switch_hosts}, community
         )
     coordinator.config_entry_id = entry.entry_id
     coordinator.video_ip_supervision.configure(
@@ -598,7 +629,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
                     async with http_sem:
                         source_ip = source_by_interface.get(row.get("interface"))
                         reader,writer=await asyncio.wait_for(asyncio.open_connection(ip,80,local_addr=((source_ip,0) if source_ip else None)),timeout=.8)
-                        writer.write(f"GET / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: Show-Network/0.15.10\r\nConnection: close\r\n\r\n".encode())
+                        writer.write(f"GET / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: Show-Network/0.15.17\r\nConnection: close\r\n\r\n".encode())
                         await writer.drain(); raw=await asyncio.wait_for(reader.read(16384),timeout=.8)
                         writer.close();
                         try: await writer.wait_closed()

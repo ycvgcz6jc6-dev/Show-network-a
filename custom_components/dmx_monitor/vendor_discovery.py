@@ -21,6 +21,12 @@ MARKERS = {
     "luminex": ("luminex", "gigacore"),
     "dante": ("_netaudio-", "dante", "audinate"),
     "rdmnet": ("_rdmnet._tcp", "rdmnet"),
+    "midas": ("midas",),
+    "soundcraft": ("soundcraft",),
+    "digico": ("digico",),
+    "allen_heath": ("allen-heath", "allen & heath", "a&h"),
+    "avid": ("avid", "venue"),
+    "solid_state_logic": ("solid state logic", " ssl "),
 }
 
 

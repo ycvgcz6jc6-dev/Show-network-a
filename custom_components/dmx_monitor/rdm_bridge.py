@@ -32,7 +32,7 @@ class RDMBridgeMonitor:
 
     def _request_json(self, path: str, *, method: str = "GET", payload: dict | None = None) -> dict:
         body = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
-        headers = {"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "Show-Network/0.15.10"}
+        headers = {"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "Show-Network/0.15.17"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         req = Request(self.url + path, data=body, method=method, headers=headers)

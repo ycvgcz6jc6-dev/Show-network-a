@@ -35,3 +35,27 @@ async def async_register(hass: HomeAssistant) -> None:
 
         hass.services.async_register(DOMAIN, "clear_device_override", _clear_device_override)
         hass.services.async_register(DOMAIN, "scan_network", _scan_network)
+
+        async def _manual_register_amplifier(call):
+            coordinator = coordinator_for_call(hass, call)
+            host = str(call.data["host"]).strip()
+            if not host:
+                raise ValueError("host is required")
+            coordinator.audio_amplifiers.observe(
+                key=f"manual:{host}",
+                manufacturer=str(call.data.get("manufacturer") or "").strip() or "Non précisé",
+                host=host,
+                model=str(call.data.get("model") or "").strip() or None,
+                protocol="manual",
+                evidence="Enregistré manuellement par l'opérateur (adresse IP connue)",
+                device_name=str(call.data.get("name") or "").strip() or None,
+            )
+            coordinator.publish(**coordinator.audio_amplifiers.snapshot())
+
+        async def _manual_remove_amplifier(call):
+            coordinator = coordinator_for_call(hass, call)
+            coordinator.audio_amplifiers.remove(f"manual:{str(call.data['host']).strip()}")
+            coordinator.publish(**coordinator.audio_amplifiers.snapshot())
+
+        hass.services.async_register(DOMAIN, "manual_register_amplifier", _manual_register_amplifier)
+        hass.services.async_register(DOMAIN, "manual_remove_amplifier", _manual_remove_amplifier)
