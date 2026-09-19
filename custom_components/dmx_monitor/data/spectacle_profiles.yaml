@@ -279,6 +279,57 @@
   - load
   - output_status
   control_paths: []
+- key: artistic_licence
+  manufacturer: Artistic Licence
+  domains:
+  - LIGHT
+  - NETWORK
+  product_families:
+  - ArtNet Nodes
+  - Net-Patch
+  - Rackfusion
+  - ArtBridge
+  - DALI Gateway
+  passive_protocols:
+  - ArtPoll/ArtPollReply
+  - mDNS
+  - HTTP
+  diagnostics: []
+  control_paths:
+  - Art-Net input
+- key: pathport
+  manufacturer: Pathway Connectivity (Pathport)
+  domains:
+  - LIGHT
+  - NETWORK
+  product_families:
+  - Pathport Duo
+  - Pathport Quattro
+  - Pathport VIA
+  - Pathport Prophet
+  passive_protocols:
+  - ArtPoll/ArtPollReply
+  - mDNS
+  - HTTP
+  - SNMP
+  diagnostics: []
+  control_paths:
+  - Art-Net/sACN input
+- key: dmxking
+  manufacturer: DMXking
+  domains:
+  - LIGHT
+  - NETWORK
+  product_families:
+  - ultraDMX
+  - eDMX
+  - ultraSPLIT
+  passive_protocols:
+  - ArtPoll/ArtPollReply
+  - mDNS
+  diagnostics: []
+  control_paths:
+  - Art-Net/sACN input
 - key: enttec
   manufacturer: ENTTEC
   domains:
@@ -463,6 +514,11 @@
   - NETWORK
   product_families:
   - Dante-enabled devices
+  - Dante AVIO (analog/USB/AES3 adapters)
+  - Dante-MY16
+  - Dante Domain Manager
+  - Dante Via
+  - Dante Controller
   passive_protocols:
   - mDNS
   - Dante monitoring
