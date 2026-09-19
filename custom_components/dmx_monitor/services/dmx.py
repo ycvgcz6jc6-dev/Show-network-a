@@ -25,13 +25,13 @@ async def async_register(hass: HomeAssistant) -> None:
                 enabled=bool(data.get("enabled", True)), data=dict(data.get("data") or {}),
             )
             coordinator.dmx_ha_mapping_engine.add(mapping)
-            coordinator.save_dmx_ha_mappings()
+            await coordinator.async_save_dmx_ha_mappings()
             coordinator.publish(dmx_ha_mappings=coordinator.dmx_ha_mapping_engine.snapshot())
 
         async def _remove_dmx_ha_mapping(call):
             coordinator = coordinator_for_call(hass, call)
             coordinator.dmx_ha_mapping_engine.remove(str(call.data["mapping_id"]))
-            coordinator.save_dmx_ha_mappings()
+            await coordinator.async_save_dmx_ha_mappings()
             coordinator.publish(dmx_ha_mappings=coordinator.dmx_ha_mapping_engine.snapshot())
 
         async def _create_dmx_ha_zone(call):
@@ -56,13 +56,13 @@ async def async_register(hass: HomeAssistant) -> None:
                 dimmer_curve=str(data.get("dimmer_curve", "linear")),
             )
             coordinator.dmx_ha_zone_engine.add(zone)
-            coordinator.save_dmx_ha_zones()
+            await coordinator.async_save_dmx_ha_zones()
             coordinator.publish(dmx_ha_zones=coordinator.dmx_ha_zone_engine.snapshot(), dmx_ha_rdm=coordinator.dmx_ha_zone_engine.rdm_snapshot())
 
         async def _remove_dmx_ha_zone(call):
             coordinator = coordinator_for_call(hass, call)
             coordinator.dmx_ha_zone_engine.remove(str(call.data["zone_id"]))
-            coordinator.save_dmx_ha_zones()
+            await coordinator.async_save_dmx_ha_zones()
             coordinator.publish(dmx_ha_zones=coordinator.dmx_ha_zone_engine.snapshot(), dmx_ha_rdm=coordinator.dmx_ha_zone_engine.rdm_snapshot())
 
         async def _set_dmx_ha_zone_enabled(call):
@@ -71,7 +71,7 @@ async def async_register(hass: HomeAssistant) -> None:
             if not zone:
                 raise ValueError("Zone inconnue")
             zone.enabled = bool(call.data["enabled"])
-            coordinator.save_dmx_ha_zones()
+            await coordinator.async_save_dmx_ha_zones()
             coordinator.publish(dmx_ha_zones=coordinator.dmx_ha_zone_engine.snapshot())
 
         async def _set_dmx_ha_zone_rdm_enabled(call):
@@ -80,7 +80,7 @@ async def async_register(hass: HomeAssistant) -> None:
             if not zone:
                 raise ValueError("Zone inconnue")
             zone.rdm_enabled = bool(call.data["enabled"])
-            coordinator.save_dmx_ha_zones()
+            await coordinator.async_save_dmx_ha_zones()
             coordinator.publish(dmx_ha_zones=coordinator.dmx_ha_zone_engine.snapshot())
 
         async def _observe_dmx_ha_rdm(call):

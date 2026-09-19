@@ -15,6 +15,10 @@ async def async_register(hass: HomeAssistant) -> None:
         for bridge in (getattr(c, "rdm_bridge", None), getattr(c, "rdmnet_bridge", None)):
             if bridge:
                 await bridge.async_update()
+                if bridge.last_success is not None:
+                    c.rdm_inventory.ingest(
+                        list(bridge.devices), transport=bridge.transport, observed_at=bridge.last_success
+                    )
         c.publish(**c.rdm_inventory.snapshot())
 
     async def _set(call, pid: str):
