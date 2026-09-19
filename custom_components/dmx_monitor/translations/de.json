@@ -61,7 +61,20 @@
           "tally_ip_port": "Tally IP UDP port",
           "tally_ip_screen": "TSL screen (-1 = any)",
           "tally_ip_index": "TSL index (-1 = any)",
-          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)"
+          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)",
+          "chaos_enabled": "Diagnosetests aktivieren",
+          "dante_managed_api_key": "Dante Managed API-Schlüssel",
+          "dante_managed_domain_id": "Dante-Domänen-ID (optional)",
+          "dante_managed_url": "Dante Managed API-URL (Director/DDM)",
+          "projector_monitor_enabled": "PJLink-Überwachung aktivieren",
+          "generic_switch_hosts": "Weitere Switches (IPs durch Kommas getrennt)",
+          "ontime_enabled": "Ontime-Überwachung aktivieren",
+          "ontime_host": "Ontime-IP-Adresse",
+          "ontime_port": "Ontime-Port",
+          "qlcplus_enabled": "QLC+-Brücke aktivieren",
+          "qlcplus_host": "QLC+-IP-Adresse",
+          "qlcplus_port": "QLC+ WebSocket-Port",
+          "ups_hosts": "USV-Geräte (IPs durch Kommas getrennt)"
         },
         "data_description": {
           "aes70_hosts": "Comma-separated AES70 hostnames or IP addresses to query."
@@ -127,7 +140,20 @@
           "tally_ip_port": "Tally IP UDP port",
           "tally_ip_screen": "TSL screen (-1 = any)",
           "tally_ip_index": "TSL index (-1 = any)",
-          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)"
+          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)",
+          "chaos_enabled": "Diagnosetests aktivieren",
+          "dante_managed_api_key": "Dante Managed API-Schlüssel",
+          "dante_managed_domain_id": "Dante-Domänen-ID (optional)",
+          "dante_managed_url": "Dante Managed API-URL (Director/DDM)",
+          "projector_monitor_enabled": "PJLink-Überwachung aktivieren",
+          "generic_switch_hosts": "Weitere Switches (IPs durch Kommas getrennt)",
+          "ontime_enabled": "Ontime-Überwachung aktivieren",
+          "ontime_host": "Ontime-IP-Adresse",
+          "ontime_port": "Ontime-Port",
+          "qlcplus_enabled": "QLC+-Brücke aktivieren",
+          "qlcplus_host": "QLC+-IP-Adresse",
+          "qlcplus_port": "QLC+ WebSocket-Port",
+          "ups_hosts": "USV-Geräte (IPs durch Kommas getrennt)"
         }
       }
     }
@@ -191,7 +217,20 @@
           "tally_ip_port": "Tally IP UDP port",
           "tally_ip_screen": "TSL screen (-1 = any)",
           "tally_ip_index": "TSL index (-1 = any)",
-          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)"
+          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)",
+          "chaos_enabled": "Diagnosetests aktivieren",
+          "dante_managed_api_key": "Dante Managed API-Schlüssel",
+          "dante_managed_domain_id": "Dante-Domänen-ID (optional)",
+          "dante_managed_url": "Dante Managed API-URL (Director/DDM)",
+          "projector_monitor_enabled": "PJLink-Überwachung aktivieren",
+          "generic_switch_hosts": "Weitere Switches (IPs durch Kommas getrennt)",
+          "ontime_enabled": "Ontime-Überwachung aktivieren",
+          "ontime_host": "Ontime-IP-Adresse",
+          "ontime_port": "Ontime-Port",
+          "qlcplus_enabled": "QLC+-Brücke aktivieren",
+          "qlcplus_host": "QLC+-IP-Adresse",
+          "qlcplus_port": "QLC+ WebSocket-Port",
+          "ups_hosts": "USV-Geräte (IPs durch Kommas getrennt)"
         }
       }
     }

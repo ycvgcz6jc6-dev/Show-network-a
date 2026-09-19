@@ -61,7 +61,20 @@
           "tally_ip_port": "Tally IP UDP port",
           "tally_ip_screen": "TSL screen (-1 = any)",
           "tally_ip_index": "TSL index (-1 = any)",
-          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)"
+          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)",
+          "chaos_enabled": "Diagnostische tests inschakelen",
+          "dante_managed_api_key": "Dante Managed API-sleutel",
+          "dante_managed_domain_id": "Dante-domein-ID (optioneel)",
+          "dante_managed_url": "Dante Managed API-URL (Director/DDM)",
+          "projector_monitor_enabled": "PJLink-bewaking inschakelen",
+          "generic_switch_hosts": "Overige switches (IP's gescheiden door komma's)",
+          "ontime_enabled": "Ontime-bewaking inschakelen",
+          "ontime_host": "Ontime IP-adres",
+          "ontime_port": "Ontime-poort",
+          "qlcplus_enabled": "QLC+-brug inschakelen",
+          "qlcplus_host": "QLC+ IP-adres",
+          "qlcplus_port": "QLC+ WebSocket-poort",
+          "ups_hosts": "UPS-eenheden (IP's gescheiden door komma's)"
         },
         "data_description": {
           "aes70_hosts": "Comma-separated AES70 hostnames or IP addresses to query."
@@ -127,7 +140,20 @@
           "tally_ip_port": "Tally IP UDP port",
           "tally_ip_screen": "TSL screen (-1 = any)",
           "tally_ip_index": "TSL index (-1 = any)",
-          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)"
+          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)",
+          "chaos_enabled": "Diagnostische tests inschakelen",
+          "dante_managed_api_key": "Dante Managed API-sleutel",
+          "dante_managed_domain_id": "Dante-domein-ID (optioneel)",
+          "dante_managed_url": "Dante Managed API-URL (Director/DDM)",
+          "projector_monitor_enabled": "PJLink-bewaking inschakelen",
+          "generic_switch_hosts": "Overige switches (IP's gescheiden door komma's)",
+          "ontime_enabled": "Ontime-bewaking inschakelen",
+          "ontime_host": "Ontime IP-adres",
+          "ontime_port": "Ontime-poort",
+          "qlcplus_enabled": "QLC+-brug inschakelen",
+          "qlcplus_host": "QLC+ IP-adres",
+          "qlcplus_port": "QLC+ WebSocket-poort",
+          "ups_hosts": "UPS-eenheden (IP's gescheiden door komma's)"
         }
       }
     }
@@ -191,7 +217,20 @@
           "tally_ip_port": "Tally IP UDP port",
           "tally_ip_screen": "TSL screen (-1 = any)",
           "tally_ip_index": "TSL index (-1 = any)",
-          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)"
+          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)",
+          "chaos_enabled": "Diagnostische tests inschakelen",
+          "dante_managed_api_key": "Dante Managed API-sleutel",
+          "dante_managed_domain_id": "Dante-domein-ID (optioneel)",
+          "dante_managed_url": "Dante Managed API-URL (Director/DDM)",
+          "projector_monitor_enabled": "PJLink-bewaking inschakelen",
+          "generic_switch_hosts": "Overige switches (IP's gescheiden door komma's)",
+          "ontime_enabled": "Ontime-bewaking inschakelen",
+          "ontime_host": "Ontime IP-adres",
+          "ontime_port": "Ontime-poort",
+          "qlcplus_enabled": "QLC+-brug inschakelen",
+          "qlcplus_host": "QLC+ IP-adres",
+          "qlcplus_port": "QLC+ WebSocket-poort",
+          "ups_hosts": "UPS-eenheden (IP's gescheiden door komma's)"
         }
       }
     }
