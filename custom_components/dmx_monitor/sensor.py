@@ -92,6 +92,12 @@ SENSORS = (
     ("network_packets_observed", "Paquets réseau observés / Network packets observed", None),
     ("topology_nodes", "Nœuds topologie / Topology nodes", None),
     ("topology_links", "Liens topologie / Topology links", None),
+    ("show_network_health", "Santé Show Network / Show Network health", None),
+    ("show_network_devices", "Équipements consolidés / Consolidated devices", None),
+    ("show_network_doctor", "Diagnostic Show Network / Show Network Doctor", None),
+    ("show_snapshot", "Référence spectacle / Show reference", None),
+    ("incident_center", "Centre incidents / Incident center", None),
+    ("pre_show", "Pre-Show Check / Pre-Show Check", None),
     ("enttec_connected", "ENTTEC DMX USB connecté / ENTTEC DMX USB connected", None),
     ("enttec_frames", "Trames DMX ENTTEC / ENTTEC DMX frames", None),
     ("enttec_valid", "DMX ENTTEC valide / Valid ENTTEC DMX", None),
@@ -129,6 +135,7 @@ SENSORS = (
     ("dmx_scene_bank_count", "Scènes DMX / DMX scenes", None),
     ("ontime_status", "Ontime / Ontime run-of-show", None),
     ("qlcplus_status", "QLC+ / QLC+ Virtual Console", None),
+    ("ups_total", "Onduleurs / UPS units", None),
     ("power_manager_active", "Power Manager actifs / Active Power Manager buttons", None),
     ("power_manager_sent", "Trames Power Manager envoyées / Power Manager frames sent", None),
     ("power_manager_errors", "Erreurs Power Manager / Power Manager errors", None),
@@ -201,6 +208,18 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return self.coordinator.data.get("ma_remote", {}).get("live_stations", 0)
         if self._key == "ma_sessions":
             return self.coordinator.data.get("ma_remote", {}).get("session_count", 0)
+        if self._key == "show_network_health":
+            return self.coordinator.data.get("show_network_health", {}).get("overall", "unknown")
+        if self._key == "show_network_devices":
+            return self.coordinator.data.get("device_model", {}).get("count", 0)
+        if self._key == "show_network_doctor":
+            return self.coordinator.data.get("show_network_doctor", {}).get("overall", "unknown")
+        if self._key == "show_snapshot":
+            return self.coordinator.data.get("show_snapshot", {}).get("state", "no_reference")
+        if self._key == "incident_center":
+            return self.coordinator.data.get("incident_center", {}).get("state", "ok")
+        if self._key == "pre_show":
+            return self.coordinator.data.get("pre_show", {}).get("state", "CHECK")
         if self._key == "topology_nodes":
             return len(self.coordinator.data.get("topology", {}).get("nodes", []))
         if self._key == "topology_links":
@@ -258,6 +277,8 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             if not qlc:
                 return "disabled"
             return "online" if qlc.get("online") else "offline"
+        if self._key == "ups_total":
+            return self.coordinator.data.get("ups_total", 0)
         value = self.coordinator.data.get(self._key, 0)
         if self._key in ("audio_protocols_active", "audio_protocols_stale"):
             return len(value or [])
@@ -336,6 +357,13 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return dict(self.coordinator.data.get("ontime") or {})
         if self._key == "qlcplus_status":
             return dict(self.coordinator.data.get("qlcplus") or {})
+        if self._key == "ups_total":
+            return {
+                "units": self.coordinator.data.get("ups_units", []),
+                "online": self.coordinator.data.get("ups_online", 0),
+                "on_battery": self.coordinator.data.get("ups_on_battery", 0),
+                "battery_low": self.coordinator.data.get("ups_battery_low", 0),
+            }
         if self._key == "osc_sent":
             return {
                 "osc_output_enabled": self.coordinator.data.get("osc_output_enabled", False),
@@ -361,6 +389,20 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return {"zones": self.coordinator.data.get("dmx_ha_zones", []), "rdm": self.coordinator.data.get("dmx_ha_rdm", {}), "hue_catalog": hue_catalog_snapshot()}
         if self._key == "dmx_ha_mappings_total":
             return {"mappings": self.coordinator.data.get("dmx_ha_mappings", []), "light_sync_enabled": self.coordinator.data.get("light_sync_enabled", False)}
+        if self._key in {"network_interfaces_up", "network_interfaces_stale", "network_packets_observed"}:
+            return {"interfaces": self.coordinator.data.get("network_interfaces", []), "network_health": self.coordinator.data.get("network_health", {})}
+        if self._key == "show_network_health":
+            return _bounded_attributes(dict(self.coordinator.data.get("show_network_health", {})))
+        if self._key == "show_network_devices":
+            return _bounded_attributes(dict(self.coordinator.data.get("device_model", {})))
+        if self._key == "show_network_doctor":
+            return _bounded_attributes(dict(self.coordinator.data.get("show_network_doctor", {})))
+        if self._key == "show_snapshot":
+            return _bounded_attributes(dict(self.coordinator.data.get("show_snapshot", {})))
+        if self._key == "incident_center":
+            return _bounded_attributes(dict(self.coordinator.data.get("incident_center", {})))
+        if self._key == "pre_show":
+            return _bounded_attributes(dict(self.coordinator.data.get("pre_show", {})))
         if self._key in {"topology_nodes", "topology_links"}:
             return {"topology": self.coordinator.data.get("topology", {"nodes": [], "links": []})}
         if self._key == "journal_archive":
@@ -403,8 +445,16 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
             return {
                 "amplifiers": self.coordinator.data.get("audio_amplifiers", []),
                 "stale_timeout_s": self.coordinator.data.get("audio_amplifier_stale_timeout_s"),
-                "audiofocus_note": self.coordinator.data.get("audiofocus_note"),
             }
+        if self._key in {"audio_protocols_active", "audio_protocols_stale", "audio_sources"}:
+            return _bounded_attributes({
+                "audio_network_health": self.coordinator.data.get("audio_network_health", {}),
+                "active": self.coordinator.data.get("audio_protocols_active", []),
+                "stale": self.coordinator.data.get("audio_protocols_stale", []),
+                "sources": self.coordinator.data.get("audio_sources", {}),
+                "last_seen_age_s": self.coordinator.data.get("audio_last_seen_age_s", {}),
+                "dante_managed": self.coordinator.data.get("dante_managed", {}),
+            })
         if self._key in {"aes67_sap_packets", "aes67_sap_sources", "aes67_session_count", "aes67_fresh_sessions"}:
             return {"sessions": self.coordinator.data.get("aes67_sessions", []), "last_seen": self.coordinator.data.get("aes67_last_seen"), "sap_group": self.coordinator.data.get("aes67_sap_group"), "sap_port": self.coordinator.data.get("aes67_sap_port")}
         if self._key in {"ptp_clock_present", "ptp_clock_age_s", "ptp_last_version", "ptp_dante_v1_observed", "ptp_v2_observed"}:
@@ -564,7 +614,7 @@ class DmxUniverseSensor(ShowNetworkEntity, SensorEntity):
             row = {k: item.get(k) for k in (
                 "protocol", "universe", "source", "priority", "sequence",
                 "packet_rate", "active_channels", "last_change", "interface",
-                "inter_arrival_ms", "jitter_ms", "sequence_loss_pct"
+                "inter_arrival_ms", "jitter_ms", "sequence_loss_pct", "cid", "source_name", "last_seen_age_s"
             )}
             # Coordinator already publishes the live 512-byte frame as base64.
             # Do not re-encode from the removed ``values`` list: doing so turned
@@ -582,6 +632,7 @@ class DmxUniverseSensor(ShowNetworkEntity, SensorEntity):
         return {
             "universes": compact,
             "network_health": self.coordinator.data.get("dmx_network_health", {}),
+            "matrix": self.coordinator.data.get("dmx_universe_matrix", []),
             "configured_universes": self.coordinator.data.get("show_network_config", {}).get("universes", ""),
             "configured_interface": self.coordinator.data.get("show_network_config", {}).get("interface_dmx"),
             "artnet_enabled": self.coordinator.data.get("show_network_config", {}).get("dmx_artnet_enabled"),

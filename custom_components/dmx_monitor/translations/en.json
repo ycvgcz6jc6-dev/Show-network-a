@@ -63,7 +63,18 @@
           "tally_ip_port": "Tally IP UDP port",
           "tally_ip_screen": "TSL screen (-1 = any)",
           "tally_ip_index": "TSL index (-1 = any)",
-          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)"
+          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)",
+          "dante_managed_url": "Dante Managed API URL (Director/DDM)",
+          "dante_managed_api_key": "Dante Managed API key",
+          "dante_managed_domain_id": "Dante domain ID (optional)",
+          "ontime_enabled": "Enable Ontime supervision",
+          "ontime_host": "Ontime IP address",
+          "ontime_port": "Ontime port",
+          "qlcplus_enabled": "Enable QLC+ bridge",
+          "qlcplus_host": "QLC+ IP address",
+          "qlcplus_port": "QLC+ WebSocket port",
+          "generic_switch_hosts": "Other switches (comma-separated IPs)",
+          "ups_hosts": "UPS units (comma-separated IPs)"
         },
         "data_description": {
           "aes70_hosts": "Comma-separated AES70 hostnames or IP addresses to query."
@@ -131,7 +142,18 @@
           "tally_ip_port": "Tally IP UDP port",
           "tally_ip_screen": "TSL screen (-1 = any)",
           "tally_ip_index": "TSL index (-1 = any)",
-          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)"
+          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)",
+          "dante_managed_url": "Dante Managed API URL (Director/DDM)",
+          "dante_managed_api_key": "Dante Managed API key",
+          "dante_managed_domain_id": "Dante domain ID (optional)",
+          "ontime_enabled": "Enable Ontime supervision",
+          "ontime_host": "Ontime IP address",
+          "ontime_port": "Ontime port",
+          "qlcplus_enabled": "Enable QLC+ bridge",
+          "qlcplus_host": "QLC+ IP address",
+          "qlcplus_port": "QLC+ WebSocket port",
+          "generic_switch_hosts": "Other switches (comma-separated IPs)",
+          "ups_hosts": "UPS units (comma-separated IPs)"
         }
       }
     },
@@ -201,7 +223,18 @@
           "tally_ip_port": "Tally IP UDP port",
           "tally_ip_screen": "TSL screen (-1 = any)",
           "tally_ip_index": "TSL index (-1 = any)",
-          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)"
+          "tally_ip_stale_timeout": "No-tally timeout before OFF (s)",
+          "dante_managed_url": "Dante Managed API URL (Director/DDM)",
+          "dante_managed_api_key": "Dante Managed API key",
+          "dante_managed_domain_id": "Dante domain ID (optional)",
+          "ontime_enabled": "Enable Ontime supervision",
+          "ontime_host": "Ontime IP address",
+          "ontime_port": "Ontime port",
+          "qlcplus_enabled": "Enable QLC+ bridge",
+          "qlcplus_host": "QLC+ IP address",
+          "qlcplus_port": "QLC+ WebSocket port",
+          "generic_switch_hosts": "Other switches (comma-separated IPs)",
+          "ups_hosts": "UPS units (comma-separated IPs)"
         }
       }
     },

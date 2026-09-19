@@ -1,9 +1,10 @@
 """ETC equipment catalogue and sensor/diagnostic model.
 
-This module is deliberately a capability catalogue.  It does not pretend to
-have a proprietary CEM3/Net3 transport when no public read-only transport has
-been established.  Capabilities are exposed with an evidence level so the UI
-can distinguish documented capabilities from live telemetry.
+This module is deliberately a capability catalogue.  Live CEM3 values are
+provided separately by the conservative web monitor; this catalogue does not
+claim a generic proprietary Net3 telemetry transport. Capabilities carry an
+evidence level so the UI can distinguish documented capabilities from live
+telemetry and hardware-observed web queries.
 """
 from __future__ import annotations
 
@@ -69,5 +70,5 @@ def profile(model: str | None = None) -> dict:
         "power_families": ETC_POWER,
         "protocols": ["sACN", "ETC Net3", "DMX", "RDM", "CEM3 HTTP web interface"],
         "sensors": sensor_catalog(),
-        "evidence_policy": "official_documentation_only",
+        "evidence_policy": "official_documentation_plus_explicit_hardware_observation_for_cem3_web_queries",
     }

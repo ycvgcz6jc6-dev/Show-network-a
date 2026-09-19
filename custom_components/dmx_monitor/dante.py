@@ -102,8 +102,19 @@ class DanteMonitor:
             now = time.time()
             self.packets += 1
             self.sources.add(addr[0])
-            stat=self.source_stats.setdefault(addr[0],{"packets":0,"ports":set(),"kinds":set(),"first_seen":now,"last_seen":now})
-            stat["packets"]+=1;stat["ports"].add(port);stat["kinds"].add(kind);stat["last_seen"]=now
+            stat=self.source_stats.setdefault(addr[0],{"packets":0,"bytes":0,"monitor_packets":0,"monitor_bytes":0,"mdns_packets":0,"mdns_bytes":0,"ports":set(),"kinds":set(),"first_seen":now,"last_seen":now,"rate_sample_at":None,"rate_sample_bytes":0,"observed_bps":None})
+            stat["packets"]+=1; stat["bytes"]+=len(data); stat["ports"].add(port); stat["kinds"].add(kind); stat["last_seen"]=now
+            if kind == "monitor":
+                stat["monitor_packets"] += 1; stat["monitor_bytes"] += len(data)
+            elif kind == "mdns":
+                stat["mdns_packets"] += 1; stat["mdns_bytes"] += len(data)
+            sample_at=stat.get("rate_sample_at")
+            if sample_at is None:
+                stat["rate_sample_at"]=now; stat["rate_sample_bytes"]=stat["bytes"]
+            elif now-sample_at >= 1.0:
+                delta_b=max(0,stat["bytes"]-stat.get("rate_sample_bytes",0)); delta_t=max(0.001,now-sample_at)
+                stat["observed_bps"]=round(delta_b*8.0/delta_t,1)
+                stat["rate_sample_at"]=now; stat["rate_sample_bytes"]=stat["bytes"]
             if kind == "mdns":
                 self.inventory.observe(addr[0], data)
             self.ports.add(port)
@@ -123,7 +134,7 @@ class DanteMonitor:
     def snapshot(self) -> dict:
         last = self.last
         now=time.time()
-        source_rows=[{"source":ip,"packets":x["packets"],"ports":sorted(x["ports"]),"kinds":sorted(x["kinds"]),"first_seen":x["first_seen"],"last_seen":x["last_seen"],"age_s":round(max(0,now-x["last_seen"]),3),"fresh":(now-x["last_seen"])<20} for ip,x in sorted(self.source_stats.items())]
+        source_rows=[{"source":ip,"packets":x["packets"],"bytes":x.get("bytes",0),"monitor_packets":x.get("monitor_packets",0),"monitor_bytes":x.get("monitor_bytes",0),"mdns_packets":x.get("mdns_packets",0),"mdns_bytes":x.get("mdns_bytes",0),"observed_bps":x.get("observed_bps"),"ports":sorted(x["ports"]),"kinds":sorted(x["kinds"]),"first_seen":x["first_seen"],"last_seen":x["last_seen"],"age_s":round(max(0,now-x["last_seen"]),3),"fresh":(now-x["last_seen"])<20} for ip,x in sorted(self.source_stats.items())]
         return {
             "dante_packets": self.packets,
             "dante_sources": len(self.sources),

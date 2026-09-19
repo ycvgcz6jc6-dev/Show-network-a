@@ -705,10 +705,28 @@ set_device_override:
       selector: {boolean: {}}
     monitor_mode:
       name: Mode de surveillance
-      description: Auto = Show Network décide selon les capacités; Surveiller = conserver l'équipement; Ignorer = pas de sondes actives/enrichissement pour cet appareil.
+      description: Auto = Show Network décide selon les capacités; Surveiller = conserver l'équipement; Ignorer = filtrer hors du périmètre opérateur; la découverte réseau globale continue afin de ne pas masquer un équipement.
       selector:
         select:
           options: [auto, monitor, ignore]
+register_manual_device:
+  name: Ajouter une IP au périmètre régie
+  description: Enregistre explicitement une adresse IP choisie par l’opérateur dans l’inventaire sans prétendre qu’elle a été découverte. Elle reste ensuite identifiable comme cible manuelle et peut être mise en favori.
+  fields:
+    ip:
+      required: true
+      selector: {text: {}}
+    name:
+      selector: {text: {}}
+    role:
+      selector: {text: {}}
+    interface:
+      selector: {text: {}}
+    monitor_mode:
+      selector:
+        select:
+          options: [auto, monitor, ignore]
+
 clear_device_override:
   name: Clear device override
   description: Restore detected device metadata.
@@ -1376,3 +1394,102 @@ fire_show_control_cue:
   description: Exécute séquentiellement les actions d'un cue enregistré. Exige le déverrouillage central et le gate Show Control armé; chaque sortie active conserve aussi son propre gate.
   fields:
     cue_id: {required: true, selector: {text: {}}}
+
+show_snapshot_create:
+  name: Enregistrer référence spectacle
+  description: Enregistre les équipements et sources DMX actuellement observés comme référence passive.
+  fields:
+    name:
+      required: true
+      selector:
+        text:
+show_snapshot_activate:
+  name: Activer référence spectacle
+  fields:
+    name:
+      required: true
+      selector:
+        text:
+show_snapshot_delete:
+  name: Supprimer référence spectacle
+  fields:
+    name:
+      required: true
+      selector:
+        text:
+
+manual_register_amplifier:
+  name: Enregistrer un amplificateur manuellement
+  description: Ajoute un amplificateur connu à la supervision à partir de son adresse réseau.
+  fields:
+    host: {required: true, selector: {text: {}}}
+    manufacturer: {selector: {text: {}}}
+    model: {selector: {text: {}}}
+    name: {selector: {text: {}}}
+manual_remove_amplifier:
+  name: Retirer un amplificateur manuel
+  fields:
+    host: {required: true, selector: {text: {}}}
+qlcplus_set_widget_value:
+  name: QLC+ - régler un widget
+  fields:
+    widget_id: {required: true, selector: {text: {}}}
+    value: {required: true, selector: {number: {min: 0, max: 255}}}
+qlcplus_cue_list_control:
+  name: QLC+ - contrôler une cue list
+  fields:
+    widget_id: {required: true, selector: {text: {}}}
+    operation: {required: true, selector: {text: {}}}
+    step: {selector: {number: {min: 0}}}
+qlcplus_frame_control:
+  name: QLC+ - contrôler une frame
+  fields:
+    widget_id: {required: true, selector: {text: {}}}
+    operation: {required: true, selector: {text: {}}}
+qlcplus_set_function_status:
+  name: QLC+ - état d'une fonction
+  fields:
+    function_id: {required: true, selector: {text: {}}}
+    running: {required: true, selector: {boolean: {}}}
+qlcplus_refresh:
+  name: QLC+ - actualiser
+  description: Actualise l'état observé du bridge QLC+ sans commande de show.
+set_fixture_control_enabled:
+  name: Activer le contrôle fixture GDTF
+  fields:
+    enabled: {required: true, selector: {boolean: {}}}
+
+pre_show_profile_set:
+  name: Configurer le profil Pre-Show optionnel
+  description: Définit des attentes de diagnostic pour un spectacle. Ne bloque jamais Show Network ni aucune commande.
+  fields:
+    enabled: {selector: {boolean: {}}}
+    name: {selector: {text: {}}}
+    expected_dmx_universes: {description: "Univers séparés par des virgules, ex. 1,2,10", selector: {text: {}}}
+    expected_devices: {description: "Noms/IP/MAC/séries attendus, séparés par des virgules", selector: {text: {}}}
+    require_timecode: {selector: {boolean: {}}}
+    require_dante: {selector: {boolean: {}}}
+    require_ptp: {selector: {boolean: {}}}
+    require_switches: {selector: {boolean: {}}}
+    require_amplifiers: {selector: {boolean: {}}}
+    require_projectors: {selector: {boolean: {}}}
+pre_show_profile_disable:
+  name: Désactiver le profil Pre-Show
+  description: Revient immédiatement au diagnostic général. Aucune fonction Show Network n'est désactivée.
+
+incident_acknowledge:
+  name: Acknowledge Show Network incident
+  description: Persistently acknowledge an observed Incident Center correlation. This never suppresses monitoring or changes equipment state.
+  fields:
+    entry_id:
+      required: false
+      selector:
+        text:
+    incident_id:
+      required: true
+      selector:
+        text:
+    operator:
+      required: false
+      selector:
+        text:

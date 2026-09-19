@@ -27,6 +27,9 @@ class UniverseObservation:
     values: bytes
     last_change: float | None
     interface: str | None = None
+    cid: str | None = None
+    source_name: str | None = None
+    last_seen_monotonic: float = 0.0
     inter_arrival_ms: float = 0.0
     jitter_ms: float = 0.0
     sequence_loss_pct: float = 0.0
@@ -44,7 +47,7 @@ class UniverseTracker:
         self._seq_received={}
         self._order=deque()
 
-    def observe(self, protocol, universe, source, values, priority=None, sequence=None, interface=None):
+    def observe(self, protocol, universe, source, values, priority=None, sequence=None, interface=None, cid=None, source_name=None):
         key=(protocol,universe,source)
         now=monotonic()
         times=self._times.setdefault(key, deque())
@@ -76,7 +79,7 @@ class UniverseTracker:
             sum(1 for x in current if x),current,
             now if changed else self._items.get(key,UniverseObservation(
                 protocol,universe,source,priority,sequence,rate,0,bytes(values),None,interface
-            )).last_change,interface,round(inter,2),round(jitter,2),round(loss,2)
+            )).last_change,interface,cid,source_name,now,round(inter,2),round(jitter,2),round(loss,2)
         )
         self._items[key]=item
         if key not in self._order:
@@ -119,7 +122,9 @@ def parse_sacn_dmp(data: bytes):
     sequence=data[111]
     property_count=struct.unpack(">H",data[123:125])[0]
     start=126
-    return universe,priority,sequence,data[start:start+property_count-1]
+    cid = data[22:38].hex() if len(data) >= 38 else None
+    source_name = data[44:108].split(b"\x00", 1)[0].decode("utf-8", "replace").strip() or None
+    return universe,priority,sequence,data[start:start+property_count-1],cid,source_name
 
 class DmxNetworkReceiver:
     """Passive Art-Net/sACN receiver with bounded queues and restart supervision.
@@ -340,8 +345,8 @@ class DmxNetworkReceiver:
                     parsed = parse_sacn_dmp(data)
                     if not parsed:
                         continue
-                    universe, priority, sequence, values = parsed
-                    self.on_frame("sACN", universe, addr[0], values, priority, sequence, self.interface)
+                    universe, priority, sequence, values, cid, source_name = parsed
+                    self.on_frame("sACN", universe, addr[0], values, priority, sequence, self.interface, cid, source_name)
                 self._packets_parsed[protocol] += 1
             except Exception as err:
                 self._errors[protocol] += 1

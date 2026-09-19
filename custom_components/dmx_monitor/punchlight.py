@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from contextlib import suppress
 from typing import Awaitable, Callable
 
@@ -35,6 +36,7 @@ class PunchLightState:
         self.last_message = None
         self.last_error: str | None = None
         self.messages = 0
+        self.last_message_at: float | None = None
         self._callback_tasks: set[asyncio.Task] = set()
 
     @staticmethod
@@ -54,6 +56,9 @@ class PunchLightState:
             "ready": self.ready,
             "messages": self.messages,
             "last_message": self.last_message,
+            "last_message_at": self.last_message_at,
+            "last_message_age_s": round(max(0.0, time.time() - self.last_message_at), 3) if self.last_message_at else None,
+            "healthy": self._port is not None and self.last_error is None,
             "last_error": self.last_error,
         }
 
@@ -78,6 +83,7 @@ class PunchLightState:
             try:
                 for msg in list(self._port.iter_pending()):
                     self._handle_message(msg)
+                self.last_error = None
                 await asyncio.sleep(0.01)
             except asyncio.CancelledError:
                 raise
@@ -104,6 +110,7 @@ class PunchLightState:
         else:
             return
         self.messages += 1
+        self.last_message_at = time.time()
         self.last_message = {"type": typ, "channel": channel + 1, "note": note, "velocity": velocity}
         if changed:
             result = self.on_change(self.snapshot())

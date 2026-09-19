@@ -19,12 +19,37 @@ async def async_register(hass: HomeAssistant) -> None:
             )
             coordinator.publish(device_inventory=coordinator.inventory.public())
 
+        async def _register_manual_device(call):
+            coordinator = coordinator_for_call(hass, call)
+            import ipaddress
+            host = str(call.data["ip"]).strip()
+            try:
+                ip = str(ipaddress.ip_address(host))
+            except ValueError as err:
+                raise ValueError(f"Invalid IP address: {host}") from err
+            interface = str(call.data.get("interface") or "").strip() or None
+            uid = f"manual-ip:{ip}:{interface or 'any'}"
+            device = coordinator.inventory.upsert(
+                unique_id=uid, ip=ip, interface=interface,
+                category="manual_target", protocols={"IP"}, sources={"operator"},
+                confidence="operator", confidence_score=1.0,
+                evidence=[{"field":"ip","value":ip,"source":"operator_manual_target","confidence":1.0}],
+            )
+            coordinator.inventory.set_override(
+                device.unique_id,
+                name=str(call.data.get("name") or "").strip() or None,
+                role=str(call.data.get("role") or "").strip() or None,
+                monitor_mode=str(call.data.get("monitor_mode") or "monitor"),
+            )
+            coordinator.publish(device_inventory=coordinator.inventory.public())
+
         async def _clear_device_override(call):
             coordinator = coordinator_for_call(hass, call)
             coordinator.inventory.clear_override(str(call.data["unique_id"]))
             coordinator.publish(device_inventory=coordinator.inventory.public())
 
         hass.services.async_register(DOMAIN, "set_device_override", _set_device_override)
+        hass.services.async_register(DOMAIN, "register_manual_device", _register_manual_device)
         async def _scan_network(call):
             coordinator = coordinator_for_call(hass, call)
             scan = getattr(coordinator, "async_scan_network", None)

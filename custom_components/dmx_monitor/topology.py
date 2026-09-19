@@ -18,6 +18,7 @@ class TopologyNode:
     ip: str | None = None
     mac: str | None = None
     vlan: int | None = None
+    interface: str | None = None
     confidence: float = 0.0
     source: str = "inventory"
     protocols: list[str] = field(default_factory=list)
@@ -50,7 +51,7 @@ class ShowTopology:
         if node is None:
             node = TopologyNode(id=node_id, label=kwargs.get("label") or node_id, last_seen=now)
             self.nodes[node_id] = node
-        for key in ("label", "manufacturer", "model", "category", "ip", "mac", "vlan", "confidence", "source", "health"):
+        for key in ("label", "manufacturer", "model", "category", "ip", "mac", "vlan", "interface", "confidence", "source", "health"):
             if kwargs.get(key) is not None:
                 setattr(node, key, kwargs[key])
         protocols = kwargs.get("protocols")
@@ -99,7 +100,7 @@ class ShowTopology:
                 label=record.get("hostname") or record.get("model") or uid,
                 manufacturer=record.get("manufacturer"), model=record.get("model"),
                 category=record.get("category"), ip=record.get("ip"), mac=record.get("mac"),
-                vlan=record.get("vlan"), confidence=float(record.get("confidence_score") or 0),
+                vlan=record.get("vlan"), interface=record.get("interface"), confidence=float(record.get("confidence_score") or 0),
                 source="device_inventory", protocols=record.get("protocols") or [])
             sw = record.get("switch_name")
             port = record.get("switch_port")

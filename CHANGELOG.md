@@ -1,6 +1,36 @@
 # Changelog
 
+## 0.15.26 — First real fix from live production data
+
+The user connected a real MCP bridge to their live Home Assistant instance
+(Maison de la Culture de Tournai), giving direct read access to real
+entity states for the first time in this project's development. Used it
+for genuine diagnosis rather than more simulated testing.
+
+- Confirmed live and healthy: sACN reception (9308 packets, universe 10
+  active from a real console at 10.2.1.1), MA-Net3 (4259 packets, 3 live
+  stations across 258 joined multicast groups), Luminex GigaCore
+  correctly identified via MAC/OUI, two real network printers correctly
+  identified via genuine SNMP sysDescr text.
+- Confirmed and explained (not a bug): both configured ETC CEM3 racks
+  show `TimeoutError` -- Show Network's interface (10.4.1.8) and the
+  racks (10.2.2.x) are on different subnets, the same class of issue
+  already identified for the Cisco switch. Network topology, not code.
+- **Real fix, finally unblocked**: retrieved the actual `identity_hints`
+  text this project has been asking for since early in this project --
+  a real grandMA3 Node reported `"Node-ma-salle-b"`, a site-specific
+  custom label, not MA Lighting's own product-name text. None of the
+  strict product-name markers matched it, so it stayed permanently
+  "non classifiée" no matter how long it ran. Added a fallback:
+  a word-boundary match on a generic category word (node/console/npu)
+  in the identity text, honestly labeled as inferred from a custom
+  label rather than a confirmed product name, so it is never confused
+  with an exact product-name match. Tested directly against the real
+  captured value, plus regression tests confirming exact-product
+  matching and empty-hint (correctly unclassified) cases are unaffected.
+
 ## 0.15.25
+
 - Hardened the generic device Web proxy against SSRF: operator-only/manual IP entries no longer authorize a fetch by themselves.
 - HTTP redirects are now followed manually (maximum 5) and every redirect must remain HTTP(S) on the exact authorized IP literal; hostname/DNS redirects and cross-IP redirects are rejected.
 - Proxy port validation now enforces 1..65535 and forwarded query parameters use proper URL encoding.

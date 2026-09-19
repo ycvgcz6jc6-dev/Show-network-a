@@ -70,7 +70,12 @@ class MIDIInputRuntime:
             return normalize_note(channel, msg.note, msg.velocity, self.source_name, on=False)
         if typ == "pitchwheel":
             return normalize_pitchwheel(channel, msg.pitch, self.source_name)
-        return MIDIMessage(typ, channel, tuple(), self.source_name, 0.0)
+        # Mido exposes MTC quarter-frame as frame_type/frame_value. Preserve
+        # these two nibbles so the passive TimecodeMonitor can reconstruct a
+        # complete MIDI Time Code value without opening another MIDI port.
+        if typ == "quarter_frame":
+            return MIDIMessage(typ, None, (int(msg.frame_type), int(msg.frame_value)), self.source_name, __import__("time").monotonic())
+        return MIDIMessage(typ, channel, tuple(), self.source_name, __import__("time").monotonic())
 
     async def async_stop(self):
         if self._task:

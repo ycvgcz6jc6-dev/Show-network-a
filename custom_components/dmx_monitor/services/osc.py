@@ -16,12 +16,12 @@ async def async_register(hass: HomeAssistant) -> None:
             c = coordinator_for_call(hass, call)
             target = OSCTarget(str(call.data["target_id"]), str(call.data.get("name") or call.data["target_id"]), str(call.data["host"]), int(call.data.get("port", 8000)), bool(call.data.get("enabled", True)))
             c.osc_targets[target.target_id] = target
-            c.save_osc_targets()
+            await c.async_save_osc_targets()
             c.publish(osc_targets=[t.__dict__ for t in c.osc_targets.values()])
         async def _remove_osc_target(call):
             c = coordinator_for_call(hass, call)
             c.osc_targets.pop(str(call.data["target_id"]), None)
-            c.save_osc_targets()
+            await c.async_save_osc_targets()
             c.publish(osc_targets=[t.__dict__ for t in c.osc_targets.values()])
         async def _send_osc(call):
             c = coordinator_for_call(hass, call)
