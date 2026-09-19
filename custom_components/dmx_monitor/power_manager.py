@@ -108,6 +108,7 @@ class PowerButton:
             "channels": [asdict(c) for c in self.channels], "enabled": self.enabled,
             "confirm": self.confirm, "state": self.state, "last_error": self.last_error,
             "last_run": self.last_run,
+            "state_evidence": "commanded_dmx_output_not_physical_feedback",
         }
 
 

@@ -91,6 +91,18 @@ class MARemoteInventory:
             marker = next((m for m in markers if m in text), None)
             if marker:
                 return category, kind, marker
+        # Fallback confirmed necessary by a real capture: a grandMA3 Node
+        # whose operator gave it a site-specific custom label ("Node-ma-
+        # salle-b" -- "Node" + a room name) matched none of the strict
+        # product-name markers above, since it is not MA Lighting's own
+        # product-name text at all. A standalone, word-boundary match on
+        # a generic category word is weaker evidence than a confirmed
+        # product name, so it is returned with distinct, honestly-labeled
+        # evidence rather than silently treated the same way.
+        import re as _re
+        for word, category in (("node", "node"), ("console", "console"), ("npu", "processing_unit")):
+            if _re.search(r"\b" + word + r"\b", text):
+                return category, None, f"generic word match: {word!r} in custom device label (not a confirmed product name)"
         return None, None, None
 
     def observe(self, source_ip: str, group: str, packet_count: int = 1,
@@ -119,6 +131,13 @@ class MARemoteInventory:
             station.model = kind
             station.classification_evidence = f"payload marker: {evidence}"
             station.name = f"{kind} {source_ip}"
+        elif category:
+            # Fallback case: category inferred from a generic word in a
+            # custom device label, no confirmed product name available.
+            station.device_type = f"{category} (nom personnalisé, produit non confirmé)"
+            station.category = category
+            station.classification_evidence = evidence
+            station.name = f"{category} {source_ip}"
         if session_index is not None:
             station.session_index = int(session_index)
             station.session_evidence = "multicast_group"
@@ -133,10 +152,14 @@ class MARemoteInventory:
         sessions = []
         for idx in sorted({s.session_index for s in self.stations.values() if s.session_index is not None}):
             members = [s.snapshot() for s in self.stations.values() if s.session_index == idx]
+            live_members = [m for m in members if m.get("state") == "LIVE"]
             sessions.append({
                 "session_index": idx,
                 "member_count": len(members),
+                "live_member_count": len(live_members),
                 "members": [m["ip"] for m in members],
+                "live_members": [m["ip"] for m in live_members],
+                "state": "LIVE" if live_members else "STALE",
                 "name": None,
                 "location": None,
                 "master": None,
@@ -151,6 +174,7 @@ class MARemoteInventory:
             "unclassified_stations": unknown,
             "sessions": sessions,
             "session_count": len(sessions),
+            "active_session_count": sum(1 for x in sessions if x.get("state") == "LIVE"),
             "sessions_note": "Session index inferred only from observed MA-Net3 session multicast groups; name/location/master remain unknown without payload evidence.",
             "web_remote_port": MA_WEB_REMOTE_PORT,
             "web_remote_candidates": [],

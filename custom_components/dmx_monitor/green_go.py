@@ -12,7 +12,7 @@ KNOWN_MODELS = {
     # discovery layer supplies an explicit model string; an IP/mDNS vendor
     # marker alone never guesses a model.
     "GGO-BPX": {"category": "wired_beltpack", "channels": 32},
-    "GGO-WPBX": {"category": "wireless_beltpack", "channels": 32},
+    "GGO-WBPX": {"category": "wireless_beltpack", "channels": 32},
     "MCXD": {"category": "multichannel_station"},
     "MCXD-EXT": {"category": "multichannel_extension"},
 }

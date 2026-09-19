@@ -5,6 +5,7 @@ No device is identified from an IP address alone.
 """
 from __future__ import annotations
 from dataclasses import dataclass
+import re
 
 @dataclass(frozen=True)
 class FingerprintResult:
@@ -50,7 +51,23 @@ MDNS_MARKERS=(
     ("Lab Gruppen/Lake", ("lab gruppen", "lake"), "Audio network"),
     ("QSC", ("qsc", "q-sys"), "Audio network"),
     ("Yamaha", ("yamaha",), "Audio network"),
+    ("Apple", ("apple inc", "apple, inc", "macmini", "mac mini", "mac-mini", "macbook", "imac", "macstudio", "mac studio", "mac pro"), "Bonjour/macOS"),
 )
+
+_APPLE_HW_RE = re.compile(r"^(?:macmini|macbook(?:air|pro)?|imac(?:pro)?|macstudio|macpro)[a-z0-9,._-]*$", re.I)
+
+def _explicit_apple_model(properties):
+    """Return only an explicit Apple hardware/model identifier from TXT data.
+
+    Manufacturer/OUI, AirPlay presence and a user-chosen service/host name are
+    never enough to infer a Mac model.
+    """
+    props={str(k).lower():str(v).strip() for k,v in (properties or {}).items()}
+    for key in ("model", "am", "hw", "hardware", "device-model"):
+        value=props.get(key)
+        if value and _APPLE_HW_RE.match(value.replace(" ", "")):
+            return value
+    return None
 
 def fingerprint_mdns(service_type="",name="",properties=None):
     props={str(k).lower():str(v).lower() for k,v in (properties or {}).items()}
@@ -58,7 +75,11 @@ def fingerprint_mdns(service_type="",name="",properties=None):
     for vendor,markers,protocol in MDNS_MARKERS:
         marker=next((m for m in markers if m in hay),None)
         if marker:
-            return FingerprintResult(vendor,None,protocol,"confirmed",(f"{vendor} marker observed in Zeroconf data: {marker}",))
+            model=_explicit_apple_model(properties) if vendor == "Apple" else None
+            evidence=[f"{vendor} marker observed in Zeroconf data: {marker}"]
+            if model:
+                evidence.append(f"explicit Apple model identifier observed in Zeroconf TXT: {model}")
+            return FingerprintResult(vendor,model,protocol,"confirmed",tuple(evidence))
     return FingerprintResult(None,None,None,"unknown",())
 
 def fingerprint_protocol_observation(protocol, evidence):

@@ -183,13 +183,56 @@ class DeviceInventory:
         self._apply_override(uid)
         return device
 
+    def observe_physical_path(self, unique_id: str, *, switch_name: str, switch_port: str | None, link_speed_mbps=None, source: str = "LLDP-MIB", confidence: float = .98):
+        """Attach a physical path only to an already identified device.
+
+        This does not create or merge identities. It is intended for explicit
+        evidence such as an exact unique LLDP hostname match. VLAN is not
+        accepted here because LLDP remote-system/port evidence alone does not
+        prove an endpoint VLAN/PVID.
+        """
+        device = self.devices.get(unique_id)
+        if device is None:
+            return None
+        device.switch_name = switch_name
+        device.switch_port = switch_port
+        device.link_speed_mbps = link_speed_mbps
+        device.add_evidence("switch_port", switch_port, source, confidence)
+        return device
+
     def find_by_ip(self, ip, interface: str | None = None):
+        """Find an address without crossing explicit interface boundaries.
+
+        Show networks frequently reuse RFC1918 ranges on isolated NICs/VLANs.
+        When the caller knows the receiving interface, an address observed on a
+        different explicit interface is *not* the same identity.  An unscoped
+        record (typically mDNS before ARP enrichment) may still be promoted when
+        it is the only unscoped candidate.
+        """
         matches = [d for d in self.devices.values() if d.ip == ip or d.ipv6 == ip]
         if interface is not None:
-            exact = next((d for d in matches if d.interface == interface), None)
-            if exact is not None:
-                return exact
-        return matches[0] if matches else None
+            exact = [d for d in matches if d.interface == interface]
+            if len(exact) == 1:
+                return exact[0]
+            if len(exact) > 1:
+                return None
+            unscoped = [d for d in matches if d.interface is None]
+            return unscoped[0] if len(unscoped) == 1 else None
+        return matches[0] if len(matches) == 1 else None
+
+    def find_by_hostname_exact(self, hostname: str | None):
+        """Return a unique device only for an explicit hostname equality.
+
+        Custom/display/model/manufacturer labels are deliberately excluded: they
+        are operator/UI metadata and are not sufficient evidence to merge LLDP
+        identity.
+        """
+        key = str(hostname or "").strip().rstrip(".").casefold()
+        if not key:
+            return None
+        matches = [d for d in self.devices.values()
+                   if str(d.hostname or "").strip().rstrip(".").casefold() == key]
+        return matches[0] if len(matches) == 1 else None
 
     def public(self, include_hidden=True):
         rows = [d.as_public_dict() for d in self.devices.values() if include_hidden or not d.hidden]

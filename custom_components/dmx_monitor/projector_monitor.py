@@ -5,6 +5,7 @@ import ipaddress
 import re
 import socket
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, asdict, field
 from typing import Any
 
@@ -20,6 +21,14 @@ from .projector_protocols import (
 
 _ERROR_NAMES = ("fan", "lamp", "temperature", "cover", "filter", "other")
 _ERROR_LEVEL = {"0": "ok", "1": "warning", "2": "error"}
+
+# NOTE: isolated from Home Assistant's shared default executor for the same
+# reason as snmp.py's _SNMP_EXECUTOR -- projector discovery/polling is real
+# network I/O with unpredictable latency (a slow or unreachable projector
+# ties up a worker for its full timeout), and with several such projectors
+# this could otherwise starve the shared pool of workers for unrelated core
+# Home Assistant operations.
+_PROJECTOR_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="show_network_projector")
 
 
 @dataclass
@@ -314,7 +323,7 @@ class PJLinkMonitor:
 
     async def async_discover(self, timeout: float = 10.5) -> int:
         try:
-            rows = await asyncio.get_running_loop().run_in_executor(None, self._discover_sync, timeout)
+            rows = await asyncio.get_running_loop().run_in_executor(_PROJECTOR_EXECUTOR, self._discover_sync, timeout)
             self.last_discovery_monotonic = time.monotonic()
             self.discovery_errors.clear()
             for row in rows:
@@ -330,7 +339,7 @@ class PJLinkMonitor:
             await self.async_discover(timeout=10.5)
         if self.records:
             results = await asyncio.gather(
-                *(asyncio.get_running_loop().run_in_executor(None, self._poll_one, r) for r in self.records),
+                *(asyncio.get_running_loop().run_in_executor(_PROJECTOR_EXECUTOR, self._poll_one, r) for r in self.records),
                 return_exceptions=True,
             )
             now = time.monotonic()

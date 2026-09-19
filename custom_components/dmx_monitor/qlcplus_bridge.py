@@ -62,6 +62,7 @@ class QlcState:
     last_success: float | None = None
     widgets: dict[str, QlcWidget] = field(default_factory=dict)
     functions: dict[str, QlcFunction] = field(default_factory=dict)
+    last_command: dict[str, Any] | None = None
 
 
 class QlcPlusBridge:
@@ -164,6 +165,7 @@ class QlcPlusBridge:
         async with self._lock:
             ws = await self._ensure_connected()
             await ws.send_str(f"{widget_id}|{value}")
+        self.state.last_command = {"kind": "widget_value", "target": str(widget_id), "value": value, "status": "sent_unconfirmed", "at": time.time(), "evidence": "QLC+ high-rate write has no request/response acknowledgement"}
 
     async def cue_list_control(self, widget_id: str, operation: str, step: int | None = None) -> None:
         """operation: 'PLAY', 'NEXT', 'PREV', or 'STEP' (requires step)."""
@@ -178,6 +180,7 @@ class QlcPlusBridge:
                 await ws.send_str(f"{widget_id}|STEP|{int(step)}")
             else:
                 await ws.send_str(f"{widget_id}|{operation}")
+        self.state.last_command = {"kind": "cue_list", "target": str(widget_id), "operation": operation, "step": step, "status": "sent_unconfirmed", "at": time.time(), "evidence": "QLC+ high-rate write has no request/response acknowledgement"}
 
     async def frame_control(self, widget_id: str, operation: str) -> None:
         """operation: 'NEXT_PG' or 'PREV_PG' (multipage Frame widgets)."""
@@ -187,9 +190,14 @@ class QlcPlusBridge:
         async with self._lock:
             ws = await self._ensure_connected()
             await ws.send_str(f"{widget_id}|{operation}")
+        self.state.last_command = {"kind": "frame", "target": str(widget_id), "operation": operation, "status": "sent_unconfirmed", "at": time.time(), "evidence": "QLC+ high-rate write has no request/response acknowledgement"}
 
     async def set_function_status(self, function_id: str, running: bool) -> None:
-        await self._query("setFunctionStatus", str(function_id), "1" if running else "0")
+        reply = await self._query("setFunctionStatus", str(function_id), "1" if running else "0")
+        if reply is None:
+            self.state.last_command = {"kind": "function_status", "target": str(function_id), "running": bool(running), "status": "timeout_unconfirmed", "at": time.time(), "evidence": "No matching QLC+ API response received"}
+            raise TimeoutError("QLC+ did not confirm setFunctionStatus")
+        self.state.last_command = {"kind": "function_status", "target": str(function_id), "running": bool(running), "status": "confirmed_response", "at": time.time(), "evidence": "Matching QLC+ API response received"}
 
     async def stop(self) -> None:
         if self._ws and not self._ws.closed:
@@ -205,6 +213,7 @@ class QlcPlusBridge:
                 "online": self.state.online,
                 "last_error": self.state.last_error,
                 "last_success": self.state.last_success,
+                "last_command": dict(self.state.last_command) if self.state.last_command else None,
                 "widget_count": len(self.state.widgets),
                 "function_count": len(self.state.functions),
                 "widgets": [

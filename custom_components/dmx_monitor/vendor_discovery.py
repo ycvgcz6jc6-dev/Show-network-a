@@ -27,6 +27,12 @@ MARKERS = {
     "allen_heath": ("allen-heath", "allen & heath", "a&h"),
     "avid": ("avid", "venue"),
     "solid_state_logic": ("solid state logic", " ssl "),
+    "artistic_licence": ("artistic licence", "artistic license"),
+    "pathport": ("pathport", "pathway connectivity"),
+    "dmxking": ("dmxking",),
+    # Apple is confirmed only from explicit Apple/Mac model/vendor evidence.
+    # Generic SSH/RFB/AirPlay services alone are not manufacturer proof.
+    "apple": ("apple inc", "apple, inc", "macmini", "mac mini", "mac-mini", "macbook", "imac", "macstudio", "mac studio", "mac pro"),
 }
 
 
@@ -82,7 +88,7 @@ def _scan_sync(zc, timeout: float = 2.0) -> list[dict[str, Any]]:
         # Also browse the known Dante DNS-SD service types directly.  Some
         # networks/devices do not repeat the DNS-SD meta-service often enough
         # for a short passive scan, while the actual service records are cached.
-        for known_type in ("_netaudio-arc._udp.local.", "_netaudio-dante._udp.local.", "_rdmnet._tcp.local.", "_rtsp._tcp.local.", "_http._tcp.local.", "_https._tcp.local."):
+        for known_type in ("_netaudio-arc._udp.local.", "_netaudio-dante._udp.local.", "_rdmnet._tcp.local.", "_rtsp._tcp.local.", "_http._tcp.local.", "_https._tcp.local.", "_ssh._tcp.local.", "_rfb._tcp.local.", "_airplay._tcp.local.", "_raop._tcp.local.", "_companion-link._tcp.local.", "_device-info._tcp.local."):
             try:
                 browsers.append(ServiceBrowser(zc, known_type, listener))
             except Exception:
