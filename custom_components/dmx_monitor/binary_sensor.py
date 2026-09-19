@@ -16,6 +16,10 @@ class PunchLightRecording(CoordinatorEntity, BinarySensorEntity):
     def is_on(self):
         return bool(self.coordinator.data.get("punchlight", {}).get("recording"))
     @property
+    def available(self):
+        state = self.coordinator.data.get("punchlight", {})
+        return bool(state.get("configured") and state.get("connected") and state.get("healthy", True))
+    @property
     def extra_state_attributes(self):
         return dict(self.coordinator.data.get("punchlight", {}))
 
@@ -52,6 +56,10 @@ class PunchLightReady(CoordinatorEntity, BinarySensorEntity):
     @property
     def is_on(self):
         return bool(self.coordinator.data.get("punchlight", {}).get("ready"))
+    @property
+    def available(self):
+        state = self.coordinator.data.get("punchlight", {})
+        return bool(state.get("configured") and state.get("connected") and state.get("healthy", True))
     @property
     def extra_state_attributes(self):
         return dict(self.coordinator.data.get("punchlight", {}))

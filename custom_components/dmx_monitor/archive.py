@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 from .security import redact, validate_archive_limits
+from .flight_recorder import analyze as analyze_flight_recorder
 
 _LOGGER = logging.getLogger(__name__)
 # Minimum seconds between repeated log lines for the same error category --
@@ -325,6 +326,31 @@ class EventArchive:
         self._last_backup_path = str(destination)
         return destination
 
+    def _timeline_tail(self, limit: int = 300, max_bytes: int = 512 * 1024) -> list[dict[str, Any]]:
+        """Read a bounded persisted tail of the timeline for device histories."""
+        path = self.root / "show_timeline.jsonl"
+        if not path.exists():
+            return list(self._recent)[-limit:]
+        try:
+            with path.open("rb") as fh:
+                fh.seek(0, os.SEEK_END); size=fh.tell()
+                fh.seek(max(0, size-max_bytes))
+                raw=fh.read().decode("utf-8", errors="ignore")
+            lines=raw.splitlines()
+            if size > max_bytes and lines:
+                lines=lines[1:]
+            out=[]
+            for line in lines[-limit:]:
+                try:
+                    item=json.loads(line)
+                    if isinstance(item,dict): out.append(item)
+                except (ValueError, TypeError):
+                    continue
+            return out
+        except OSError as exc:
+            self._record_error("timeline_tail", f"could not read persisted timeline tail: {exc}")
+            return list(self._recent)[-limit:]
+
     def status(self) -> dict[str, Any]:
         storage = self._storage_check()
         jsonl_files = list(self.root.glob("*.jsonl")) if storage["ready"] else []
@@ -361,7 +387,9 @@ class EventArchive:
                 "rotate_errors": self._rotate_errors,
                 "last_error": self._last_error,
                 "last_error_at": self._last_error_at,
-                "recent_events": list(self._recent)}
+                "recent_events": list(self._recent),
+                "persisted_timeline_tail": self._timeline_tail(),
+                "flight_recorder": analyze_flight_recorder(list(self._recent))}
 
     @staticmethod
     def _json_safe(value: Any) -> Any:

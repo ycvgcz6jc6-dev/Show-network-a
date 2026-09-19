@@ -190,6 +190,7 @@ class PTPMonitor:
                 "fresh": src_age < 5.0,
             })
         gm_age = max(0.0, now - self.grandmaster_last_seen) if self.grandmaster_last_seen else None
+        gm_fresh = gm_age is not None and gm_age < 5.0
         return {
             "ptp_packets": self.packets,
             "ptp_sources": len(self.sources),
@@ -216,7 +217,11 @@ class PTPMonitor:
             "ptp_follow_up_packets": self.follow_up_packets,
             "ptp_delay_packets": self.delay_packets,
             "ptp_last_source_identity": self.last_source_identity,
+            # Keep the last decoded identity for history/evidence, but expose a
+            # separate active identity so UI/Doctor never present a stale GM as current.
             "ptp_grandmaster_identity": self.last_grandmaster_identity,
+            "ptp_active_grandmaster_identity": self.last_grandmaster_identity if gm_fresh else None,
+            "ptp_grandmaster_fresh": gm_fresh,
             "ptp_grandmaster_priority1": self.grandmaster_priority1,
             "ptp_grandmaster_clock_class": self.grandmaster_clock_class,
             "ptp_grandmaster_accuracy": self.grandmaster_accuracy,

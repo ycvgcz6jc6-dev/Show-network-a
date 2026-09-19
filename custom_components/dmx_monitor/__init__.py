@@ -37,6 +37,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     if not hass.data.get(f"{DOMAIN}_ma3_proxy_registered"):
         from .ma3_web_remote_view import async_register as register_ma3_proxy
         register_ma3_proxy(hass)
+    if not hass.data.get(f"{DOMAIN}_device_proxy_registered"):
+        from .device_web_proxy_view import async_register as register_device_proxy
+        register_device_proxy(hass)
 
     if not hass.data.get(f"{DOMAIN}_panel_registered"):
         from homeassistant.components import panel_custom
@@ -44,7 +47,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             hass,
             webcomponent_name="show-network-pro-dashboard",
             frontend_url_path="show-network",
-            module_url="/api/dmx_monitor/static/show-network.js?v=0.15.17",
+            module_url="/api/dmx_monitor/static/show-network.js?v=0.15.25",
             sidebar_title="Show Network",
             sidebar_icon="mdi:network-outline",
             require_admin=True,
