@@ -31,3 +31,12 @@ The final tree retains the previously implemented DMX/sACN/Art-Net receive path,
 ## Packaging
 
 `Show_Network_0.15.0_EXPERIMENTAL.zip` is the release package. It contains the integration plus project helper/configuration material needed by this source tree, but excludes historical phase archives, pytest caches and Python bytecode.
+
+## dev36 physical-topology regression
+- Python compile: PASS
+- Frontend JavaScript syntax: PASS
+- YAML parse: PASS
+- Static frontend audit: PASS (27 modules, 20 literal services, 18 cards, 53 custom elements)
+- Executable tests in this environment: 67 passed
+- Known HA-runtime-dependent tests excluded from this container recipe: test_config_flow_osc_port.py, test_ma3_web_remote_view_ssrf.py, test_services_common.py, test_video_ip_preview.py
+- No project function/module removed in dev36.

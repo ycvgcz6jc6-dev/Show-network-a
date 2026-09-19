@@ -37,6 +37,8 @@ views:
           - type: custom:signal-watchdog-panel
       - type: grid
         cards:
+          - type: custom:show-network-incident-card
+          - type: custom:show-network-pre-show-card
           - type: custom:show-network-topology-panel
           - type: custom:show-network-rule-builder
           - type: custom:show-network-reliability-panel
