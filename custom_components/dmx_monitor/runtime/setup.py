@@ -146,6 +146,8 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     await _safe_load("DMX-to-HA zones", coordinator._load_dmx_ha_zones)
     await _safe_load("control mappings", coordinator._load_control_mappings)
     await _safe_load("DMX-to-HA mappings", coordinator._load_dmx_ha_mappings)
+    await _safe_load("pre-show profile", coordinator.pre_show._load)
+    await _safe_load("incident center state", coordinator.incident_center._load)
     generic_switch_hosts = [h.strip() for h in str(settings.get(CONF_GENERIC_SWITCH_HOSTS, "") or "").replace(";", ",").split(",") if h.strip()]
     all_switch_hosts = sorted(set(hosts) | set(generic_switch_hosts))
     if all_switch_hosts:
@@ -160,6 +162,24 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
         # switch also answers standard SNMP (IF-MIB etc), not just its
         # private OIDs.
         coordinator.generic_switch_monitor = GenericSwitchMonitor(
+            {h: None for h in all_switch_hosts}, community
+        )
+    if all_switch_hosts:
+        # Phase C11 (rapport maître S101): "Développer réellement: LLDP,
+        # port, VLAN prouvé, speed, errors, temperature, traffic, PoE,
+        # last seen." switch_telemetry was read defensively everywhere
+        # (coordinator's own port-change journal, doctor.py's port-error/
+        # bandwidth checks, show_snapshot.py's comparison) but nothing
+        # ever actually populated it -- this is that population, via
+        # IF-MIB (standard on Luminex/Aruba/Cisco/ELC alike, no private
+        # OID needed) for port/speed/errors/traffic. LLDP and per-port
+        # PoE/VLAN are not covered yet.
+        from ..switch_port_telemetry import SwitchPortMonitor
+        coordinator.switch_port_monitor = SwitchPortMonitor(
+            {h: None for h in all_switch_hosts}, community
+        )
+        from ..lldp_discovery import LldpNeighborMonitor
+        coordinator.lldp_monitor = LldpNeighborMonitor(
             {h: None for h in all_switch_hosts}, community
         )
 
@@ -236,6 +256,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
         except Exception: raw_projectors = []
     coordinator.projector_monitor_enabled = bool(settings.get(CONF_PROJECTOR_MONITOR_ENABLED, True))
     coordinator.projector_monitor = PJLinkMonitor((raw_projectors if isinstance(raw_projectors, list) else []) if coordinator.projector_monitor_enabled else [])
+    resources.add(RuntimeResource(ProtocolDriver("projector-monitor", "CONTROL"), "projector-monitor", coordinator.projector_monitor, "async_stop", {"role": "pjlink-discovery-and-poll"}))
     coordinator.chaos_enabled = bool(settings.get(CONF_CHAOS_ENABLED, False))
 
     interface = settings.get(CONF_INTERFACE_DMX, settings.get(CONF_INTERFACE, "0.0.0.0"))
@@ -360,6 +381,145 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
             _LOGGER.warning("AES70 monitor unavailable; continuing without it: %s", err)
             aes70_monitor = None
     if aes67_monitor: resources.add(RuntimeResource(ProtocolDriver("aes67", "AUDIO"), "aes67", aes67_monitor, "stop", {"interface": interface_audio, "role": "monitor"}))
+    coordinator.yamaha_osc_monitor = None
+    yamaha_osc_hosts = [h.strip() for h in str(settings.get(CONF_YAMAHA_OSC_HOSTS, "")).replace(";", ",").split(",") if h.strip()]
+    if yamaha_osc_hosts:
+        # No start()/stop() lifecycle needed: each poll opens and closes
+        # its own short-lived UDP socket (see yamaha_osc_monitor.py),
+        # same simple periodic-poll shape as GigaCoreMonitor/
+        # GenericSwitchMonitor -- nothing persistent to register as a
+        # stoppable resource.
+        from ..yamaha_osc_monitor import YamahaOSCMonitor
+        coordinator.yamaha_osc_monitor = YamahaOSCMonitor({h: None for h in yamaha_osc_hosts})
+    coordinator.qlab_monitor = None
+    qlab_hosts = [h.strip() for h in str(settings.get(CONF_QLAB_HOSTS, "") or "").replace(";", ",").split(",") if h.strip()]
+    if qlab_hosts:
+        # Phase C22 (rapport maître S112): "Adapters: QLab... Monitoring/
+        # read-only d'abord... GO/Panic/etc. protégés." Verified against
+        # Figure 53's own officially published OSC Dictionary
+        # (qlab.app/docs/v5/scripting/osc-dictionary-v5/) -- unlike
+        # Resolume/Millumin, not yet implemented pending the same
+        # verification pass. Same no-persistent-connection shape as
+        # yamaha_osc_monitor.py: each poll opens and closes its own UDP
+        # socket, nothing to register as a stoppable resource.
+        from ..qlab_monitor import QLabMonitor
+        coordinator.qlab_monitor = QLabMonitor(qlab_hosts)
+    coordinator.resolume_monitor = None
+    resolume_hosts = [h.strip() for h in str(settings.get(CONF_RESOLUME_HOSTS, "") or "").replace(";", ",").split(",") if h.strip()]
+    if resolume_hosts:
+        # Phase C22: Resolume, verified against its own officially
+        # published OpenAPI 3.0 REST API spec (resolume.com/docs/restapi/)
+        # -- HTTP, not OSC, hence its own module rather than reusing
+        # qlab_monitor.py/yamaha_osc_monitor.py's UDP shape.
+        from ..resolume_monitor import ResolumeMonitor
+        coordinator.resolume_monitor = ResolumeMonitor(resolume_hosts)
+    coordinator.nexus_audio_monitor = None
+    nexus_audio_hosts = [h.strip() for h in str(settings.get(CONF_NEXUS_AUDIO_HOSTS, "") or "").replace(";", ",").split(",") if h.strip()]
+    if nexus_audio_hosts:
+        # Nexus Audio (github.com/ycvgcz6jc6-dev/Nexus-audio): an
+        # AirPlay/Spotify Connect/Dante RX/AES67-to-Music-Assistant input
+        # gateway add-on -- the input-side counterpart to spin2dante's
+        # output-side bridge. Routes verified directly against the
+        # add-on's own source (app/main.py's do_GET/do_POST), not
+        # guessed from its README alone. Monitoring-only: only GET
+        # /health and GET /api/sources are ever called, matching this
+        # project's "read first, control behind Active Control" rule
+        # already applied to QLab/Resolume/Millumin.
+        from ..nexus_audio_monitor import NexusAudioMonitor
+        coordinator.nexus_audio_monitor = NexusAudioMonitor(nexus_audio_hosts)
+    coordinator.pdu_monitor = None
+    pdu_hosts_raw = str(settings.get(CONF_PDU_HOSTS, "") or "").strip()
+    if pdu_hosts_raw:
+        # PDU (rapport maître, bloc Éclairage & scène) -- APC and Raritan,
+        # OIDs verified against Network UPS Tools' own open-source driver
+        # source, not a single universal MIB (there isn't one -- see
+        # pdu_monitor.py's own docstring). Vendor is explicit per host,
+        # never auto-detected. Monitoring-only: only ever sends SNMP GET,
+        # never SET (both vendors' outlet-status OIDs are read-write).
+        pdu_host_map = {}
+        for part in pdu_hosts_raw.replace(";", ",").split(","):
+            part = part.strip()
+            if ":" in part:
+                _h, _, _v = part.rpartition(":")
+                pdu_host_map[_h] = _v
+        from ..pdu_monitor import PDUMonitor
+        coordinator.pdu_monitor = PDUMonitor(pdu_host_map)
+    coordinator.reolink_ha_monitor = None
+    if bool(settings.get(CONF_REOLINK_HA_ENABLED, False)):
+        # Reads Home Assistant's own official `reolink` integration
+        # entities -- no Reolink API client of its own, see
+        # reolink_ha_monitor.py's own docstring. Same "read another
+        # integration's own entities" pattern as sendspin_dante_zones.py
+        # for spin2dante/Music Assistant.
+        from ..reolink_ha_monitor import ReolinkHAMonitor
+        coordinator.reolink_ha_monitor = ReolinkHAMonitor(hass)
+    coordinator.nexus_audio_zone_monitor = None
+    nexus_audio_players = [h.strip() for h in str(settings.get(CONF_NEXUS_AUDIO_PLAYERS, "") or "").replace(";", ",").split(",") if h.strip()]
+    if nexus_audio_players:
+        # Lightweight alternative to nexus_audio_monitor.py's direct HTTP
+        # client, on request: reads the Music Assistant media_player
+        # entities Nexus Audio itself creates for its sources, exactly
+        # the same "no network call of its own" mechanism already used
+        # for spin2dante (sendspin_dante_zones.py).
+        from ..nexus_audio_zones import NexusAudioZoneMonitor
+        coordinator.nexus_audio_zone_monitor = NexusAudioZoneMonitor(hass, nexus_audio_players)
+    coordinator.millumin_monitor = None
+    millumin_port = int(settings.get(CONF_MILLUMIN_LISTEN_PORT, 0) or 0)
+    if millumin_port:
+        # Phase C22: passive listener, not a request/reply client -- see
+        # millumin_monitor.py's module docstring for why. Has a real
+        # start()/stop() lifecycle (an OSCReceiver socket, like
+        # osc_receiver.py's main OSC input), so it's registered as a
+        # stoppable resource, unlike the poll-based monitors above.
+        from ..millumin_monitor import MilluminMonitor
+        millumin_ping_target_raw = str(settings.get(CONF_MILLUMIN_PING_TARGET, "") or "").strip()
+        millumin_ping_target = None
+        if ":" in millumin_ping_target_raw:
+            _mp_host, _, _mp_port = millumin_ping_target_raw.rpartition(":")
+            try:
+                millumin_ping_target = (_mp_host, int(_mp_port))
+            except ValueError:
+                millumin_ping_target = None
+        millumin_monitor = MilluminMonitor(
+            host=interface if interface != "0.0.0.0" else "0.0.0.0",
+            port=millumin_port, ping_target=millumin_ping_target,
+        )
+        try:
+            await millumin_monitor.start()
+            coordinator.millumin_monitor = millumin_monitor
+            resources.add(RuntimeResource(ProtocolDriver("millumin", "CONTROL"), "millumin", millumin_monitor, "stop", {"listen_port": millumin_port, "role": "passive-feedback-listener"}))
+        except Exception as err:
+            _LOGGER.warning("Millumin monitor unavailable; continuing without it: %s", err)
+            millumin_monitor = None
+    coordinator.sendspin_dante_zone_monitor = None
+    sendspin_dante_players = [h.strip() for h in str(settings.get(CONF_SENDSPIN_DANTE_PLAYERS, "")).replace(";", ",").split(",") if h.strip()]
+    if sendspin_dante_players:
+        # Reads spin2dante's own Music Assistant media_player entities via
+        # hass.states -- no polling loop, no sockets, no start()/stop()
+        # (Home Assistant's own event bus already keeps these current).
+        # See sendspin_dante_zones.py's module docstring for why this,
+        # and not a direct spin2dante API or Supervisor log access, is
+        # what a regular custom_component can safely and portably do.
+        from ..sendspin_dante_zones import SendspinDanteZoneMonitor
+        coordinator.sendspin_dante_zone_monitor = SendspinDanteZoneMonitor(hass, sendspin_dante_players)
+    coordinator.greengo_monitor = None
+    greengo_group = str(settings.get(CONF_GREENGO_MULTICAST_GROUP, "") or "").strip()
+    if greengo_group:
+        # Phase C15 (rapport maître S105): "Niveau 1 -- Passive Discovery"
+        # for Green-GO. Unlike Dante/PTP's fixed multicast groups, Green-
+        # GO's own documentation confirms the multicast address is
+        # generated per installation from the configuration file -- so
+        # this can only join the group the user's own Green-GO config
+        # already uses, never guess or auto-discover it.
+        from ..greengo_monitor import GreenGOMonitor
+        greengo_monitor = GreenGOMonitor(greengo_group, interface=interface)
+        try:
+            await greengo_monitor.start()
+            coordinator.greengo_monitor = greengo_monitor
+            resources.add(RuntimeResource(ProtocolDriver("greengo", "CONTROL"), "greengo", greengo_monitor, "stop", {"multicast_group": greengo_group, "role": "passive-presence-monitor"}))
+        except Exception as err:
+            _LOGGER.warning("Green-GO monitor unavailable; continuing without it: %s", err)
+            greengo_monitor = None
     coordinator.avdecc_monitor = None
     avdecc_url = str(settings.get(CONF_AVDECC_BRIDGE_URL, "") or "").strip()
     avdecc_token = str(settings.get(CONF_AVDECC_BRIDGE_TOKEN, "") or "").strip() or None

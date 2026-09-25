@@ -67,8 +67,13 @@ class HABuilder:
         item = HABuilderItem(item_id=item_id, name=str(name)[:120], entity_type=entity_type,
                              device_class=kwargs.get("device_class"), unit=kwargs.get("unit"),
                              icon=kwargs.get("icon"), area=kwargs.get("area"),
-                             enabled=bool(kwargs.get("enabled", True)), state=kwargs.get("state"),
+                             enabled=bool(kwargs.get("enabled", True)), state=None,
                              min_value=kwargs.get("min_value"), max_value=kwargs.get("max_value"), step=kwargs.get("step"))
+        initial_state = kwargs.get("state")
+        # Only coerce/validate a state the caller actually supplied; leave
+        # the default None alone so creating an item with no initial value
+        # keeps working (a number item has no min/max-checkable value yet).
+        item.state = self._coerce_state(item, initial_state) if initial_state is not None else None
         self.items[item_id] = item
         self.save()
         return item
@@ -80,8 +85,53 @@ class HABuilder:
     def set_state(self, item_id: str, state: Any) -> None:
         if item_id not in self.items:
             raise ValueError(f"Unknown HA Builder item: {item_id}")
-        self.items[item_id].state = state
+        item = self.items[item_id]
+        self.items[item_id].state = self._coerce_state(item, state)
         self.save()
+
+    @staticmethod
+    def _coerce_state(item: "HABuilderItem", state: Any) -> Any:
+        """Normalize an incoming state to match the item's declared entity_type.
+
+        HA Builder items are written from several places (the
+        ha_builder_set_state service, and the native switch/binary_sensor
+        async_turn_on/off and number async_set_native_value entity methods),
+        and all of them must agree on what a value means.
+
+        Two audit-confirmed bugs came from skipping this step:
+        - switch/binary_sensor: Python's bare bool("false") is True (any
+          non-empty string is truthy), so writing the text "false" silently
+          turned the entity on. Recognized textual tokens are mapped
+          explicitly instead of relying on Python truthiness.
+        - number: writes made through the ha_builder_set_state service go
+          straight to storage and bypass the bounds check Home Assistant's
+          own number.set_value service performs before calling
+          async_set_native_value, so an out-of-range value (e.g. 11 with a
+          declared max of 10) was accepted and published unchanged.
+        """
+        if item.entity_type in ("switch", "binary_sensor"):
+            if isinstance(state, str):
+                normalized = state.strip().lower()
+                if normalized in ("false", "0", "off", "no", "non", ""):
+                    return False
+                if normalized in ("true", "1", "on", "yes", "oui"):
+                    return True
+            return bool(state)
+        if item.entity_type == "number":
+            try:
+                value = float(state)
+            except (TypeError, ValueError) as err:
+                raise ValueError(f"Invalid numeric state for {item.item_id!r}: {state!r}") from err
+            if item.min_value is not None and value < item.min_value:
+                raise ValueError(
+                    f"{value} is below the minimum ({item.min_value}) for {item.item_id!r}"
+                )
+            if item.max_value is not None and value > item.max_value:
+                raise ValueError(
+                    f"{value} is above the maximum ({item.max_value}) for {item.item_id!r}"
+                )
+            return value
+        return state
 
     def snapshot(self) -> list[dict[str, Any]]:
         return [asdict(x) for x in self.items.values()]

@@ -1,12 +1,98 @@
 """Passive grandMA3 remote/session inventory helpers."""
 from __future__ import annotations
 
+import asyncio
+import base64
+import hashlib
+import json
+import os
 from dataclasses import dataclass, asdict
 from time import monotonic, time
 from urllib.parse import urlunparse
 
 MA_WEB_REMOTE_PORT = 8080
 MA_OSC_DEFAULT_PORT = 8000
+_WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"  # RFC 6455 magic string
+
+
+async def _probe_web_remote_handshake(host: str, port: int, timeout: float) -> bool:
+    """RFC 6455 WebSocket handshake to the grandMA3 Web Remote's own
+    endpoint (ws://host:port/?ma=1), stopping the instant the server's
+    unconditional post-connect reply is read.
+
+    Verified directly against a real Web Remote page's own client code
+    (interface.js: `serverURI = "ws://" + window.location.host + "/?ma=1"`,
+    and `SocketOnMessage` checking `(...).status != "server ready"`
+    *before* handling anything session-related). That "server ready"
+    JSON reply is sent by the console the instant the socket opens --
+    before any login, before any `remoteState` request, before any
+    `requestVideo` -- so reading it is a status check, not a session
+    interaction. This function stops there: it never sends a
+    `requestType` message of any kind (no "remoteState", no
+    "requestVideo"), matching "Aucun join implicite" for MA-Net3/Web
+    Remote alike.
+
+    Stronger evidence than a bare TCP connect (the previous
+    implementation): confirms an actual grandMA3 Web Remote answered,
+    not merely that *some* process is listening on the port.
+    """
+    reader = writer = None
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
+        key = base64.b64encode(os.urandom(16)).decode("ascii")
+        request = (
+            f"GET /?ma=1 HTTP/1.1\r\n"
+            f"Host: {host}:{port}\r\n"
+            f"Upgrade: websocket\r\n"
+            f"Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
+            f"Sec-WebSocket-Version: 13\r\n"
+            f"\r\n"
+        ).encode("ascii")
+        writer.write(request)
+        await asyncio.wait_for(writer.drain(), timeout=timeout)
+
+        header_bytes = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=timeout)
+        header_text = header_bytes.decode("iso-8859-1", errors="replace")
+        status_line = header_text.split("\r\n", 1)[0]
+        if " 101 " not in f" {status_line} ":
+            return False
+        accept_value = None
+        for line in header_text.split("\r\n"):
+            if line.lower().startswith("sec-websocket-accept:"):
+                accept_value = line.split(":", 1)[1].strip()
+                break
+        if accept_value is None:
+            return False
+        expected = base64.b64encode(hashlib.sha1((key + _WEBSOCKET_GUID).encode("ascii")).digest()).decode("ascii")
+        if accept_value != expected:
+            return False  # answered HTTP, but not a genuine WebSocket peer
+
+        frame_head = await asyncio.wait_for(reader.readexactly(2), timeout=timeout)
+        opcode = frame_head[0] & 0x0F
+        masked = bool(frame_head[1] & 0x80)
+        length = frame_head[1] & 0x7F
+        if length == 126:
+            length = int.from_bytes(await asyncio.wait_for(reader.readexactly(2), timeout=timeout), "big")
+        elif length == 127:
+            length = int.from_bytes(await asyncio.wait_for(reader.readexactly(8), timeout=timeout), "big")
+        length = min(length, 65536)  # a status reply is small; never read an unbounded amount
+        mask_key = await asyncio.wait_for(reader.readexactly(4), timeout=timeout) if masked else None
+        payload = await asyncio.wait_for(reader.readexactly(length), timeout=timeout)
+        if mask_key:  # servers must not mask per RFC 6455, but decode defensively if one does
+            payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+        if opcode != 0x1:  # not a text frame
+            return False
+
+        message = json.loads(payload.decode("utf-8"))
+        return isinstance(message, dict) and message.get("status") == "server ready"
+    except (OSError, asyncio.TimeoutError, asyncio.IncompleteReadError, UnicodeDecodeError, ValueError):
+        return False
+    finally:
+        if writer is not None:
+            writer.close()  # fire-and-forget close, same reasoning as the
+            # earlier TCP-only probe: this is a status check, not a real
+            # session, so no close handshake is awaited.
 
 
 @dataclass
@@ -53,6 +139,28 @@ class MARemoteInventory:
     """Correlates passive MA-Net3 source addresses and multicast session indexes."""
     def __init__(self):
         self.stations: dict[str, MAStation] = {}
+        self._web_remote_probed_once = False
+
+    async def async_probe_web_remote(self, timeout: float = 1.5) -> None:
+        """Real RFC 6455 WebSocket handshake to each station's Web Remote
+        (see _probe_web_remote_handshake's own docstring for the exact
+        wire evidence this is grounded in) -- confirms an actual grandMA3
+        Web Remote answered, not just that some process is listening on
+        the port. Updates each station's `web_remote` field to
+        "available"/"unavailable" (rapport maître S113: "Web Remote:
+        UNKNOWN / AVAILABLE / UNAVAILABLE"). Before this ever runs, the
+        field stays "unknown" -- audit-confirmed gap: "Web Remote
+        affichés mais disponibilité non prouvée" -- rather than the URL
+        being presented as if verified.
+        """
+        async def _probe_one(station: MAStation) -> None:
+            ok = await _probe_web_remote_handshake(station.ip, MA_WEB_REMOTE_PORT, timeout)
+            station.web_remote = "available" if ok else "unavailable"
+
+        if not self.stations:
+            return
+        self._web_remote_probed_once = True
+        await asyncio.gather(*(_probe_one(s) for s in self.stations.values()), return_exceptions=True)
 
     @staticmethod
     def _classify(hints):
@@ -122,7 +230,12 @@ class MARemoteInventory:
             station.last_packet_epoch = packet_epoch if packet_epoch is not None else time()
             station.packets += packet_count
         station.ma_net3_active = station.last_seen is not None and monotonic() - station.last_seen <= 15.0
-        station.web_remote = "not_probed"
+        # web_remote is intentionally NOT touched here: it starts at the
+        # dataclass default "unknown" for a newly created station and is
+        # only ever updated by async_probe_web_remote()'s real TCP-connect
+        # check. Resetting it on every packet (this method fires on every
+        # observed MA-Net3 packet, i.e. constantly for an active station)
+        # would erase that probe result almost immediately.
 
         category, kind, evidence = self._classify(identity_hints)
         if kind:
@@ -185,7 +298,7 @@ class MARemoteInventory:
                 "receive_only": True,
                 "session_join": False,
                 "ma_commands_sent": False,
-                "web_remote_probe": False,
+                "web_remote_probe": "websocket_handshake" if self._web_remote_probed_once else False,
                 "classification_policy": "payload_marker_only_unknown_until_evidence",
                 "freshness_policy": "packet_receive_time_not_coordinator_replay",
                 "osc_commands_sent": False,

@@ -96,6 +96,7 @@ class PJLinkMonitor:
         self._configs: dict[str, dict[str, Any]] = {}
         self.last_discovery_monotonic: float | None = None
         self.discovery_errors: list[str] = []
+        self._discovery_task: asyncio.Task | None = None
         for p in projectors or []:
             if p.get("host"):
                 host = str(p["host"])
@@ -335,7 +336,31 @@ class PJLinkMonitor:
 
     async def async_update(self):
         now = time.monotonic()
-        if self.last_discovery_monotonic is None or now - self.last_discovery_monotonic > 300:
+        if self.last_discovery_monotonic is None:
+            # Audit-confirmed: this first-ever discovery used to run
+            # inline here, a mandatory 10.5s PJLink broadcast sweep on
+            # the coordinator's very first refresh -- which
+            # async_config_entry_first_refresh() awaits fully, so it
+            # blocked the whole config entry setup and contributed to a
+            # CancelledError observed during a reload. Same class of bug
+            # already fixed for vendor discovery (see runtime/setup.py:
+            # "previously blocking async_setup_entry directly,
+            # contributing to slow/timed-out config entry bootstraps");
+            # apply the same fix here: run it in the background instead,
+            # guarded so a second call before it finishes doesn't start a
+            # duplicate sweep. Already-configured projectors still get
+            # polled normally below in the meantime.
+            #
+            # NOTE: creating this background task is exactly why
+            # async_stop() below exists now -- before this fix,
+            # PJLinkMonitor never owned anything that outlived a single
+            # async_update() call, so nothing needed to cancel it on
+            # unload. It must now be registered as a stoppable resource
+            # (see runtime/setup.py) or this task leaks past
+            # async_unload_entry / a reload.
+            if self._discovery_task is None or self._discovery_task.done():
+                self._discovery_task = asyncio.get_running_loop().create_task(self.async_discover(timeout=10.5))
+        elif now - self.last_discovery_monotonic > 300:
             await self.async_discover(timeout=10.5)
         if self.records:
             results = await asyncio.gather(
@@ -358,6 +383,22 @@ class PJLinkMonitor:
     def snapshot(self):
         # Credentials remain only in _configs and are never serialized.
         return [asdict(r) for r in self.records]
+
+    async def async_stop(self) -> None:
+        """Cancel the background discovery task, if one is still running.
+
+        Registered as a stoppable resource (runtime/setup.py) so a reload
+        or unload doesn't leave the first-discovery background task
+        (async_update(), above) dangling -- before that fix, this class
+        never owned anything that outlived a single call, so there was
+        nothing to stop.
+        """
+        if self._discovery_task is not None and not self._discovery_task.done():
+            self._discovery_task.cancel()
+            try:
+                await self._discovery_task
+            except (asyncio.CancelledError, Exception):
+                pass
 
     def status(self) -> dict[str, Any]:
         rows = self.snapshot()

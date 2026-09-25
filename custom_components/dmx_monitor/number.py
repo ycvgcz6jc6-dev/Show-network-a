@@ -4,7 +4,7 @@ from __future__ import annotations
 from homeassistant.components.number import NumberEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
-from .ha_builder_entities import BuilderNumber
+from .ha_builder_entities import BuilderNumber, async_remove_builder_entity
 
 
 class FixtureAttributeNumber(CoordinatorEntity, NumberEntity):
@@ -70,7 +70,19 @@ async def async_setup_entry(hass, entry, async_add_entities):
             async_add_entities(entities)
 
     build_fixture_entities()
-    async_add_entities([BuilderNumber(c, item) for item in c.ha_builder.items.values() if item.entity_type == "number" and item.enabled])
+    builder_entities = [BuilderNumber(c, item) for item in c.ha_builder.items.values() if item.entity_type == "number" and item.enabled]
+    async_add_entities(builder_entities)
+    live_builder_numbers = {e.item_id: e for e in builder_entities}
     c.fixture_number_refresh_callback = build_fixture_entities
     c.ha_builder_callbacks = getattr(c, "ha_builder_callbacks", {})
-    c.ha_builder_callbacks["number"] = lambda item: async_add_entities([BuilderNumber(c, item)])
+    def _add_number(item):
+        e = BuilderNumber(c, item)
+        live_builder_numbers[item.item_id] = e
+        async_add_entities([e])
+    c.ha_builder_callbacks["number"] = _add_number
+    c.ha_builder_remove_callbacks = getattr(c, "ha_builder_remove_callbacks", {})
+    async def _remove_number(item_id):
+        entity = live_builder_numbers.pop(item_id, None)
+        if entity is not None:
+            await async_remove_builder_entity(hass, "number", entity)
+    c.ha_builder_remove_callbacks["number"] = _remove_number

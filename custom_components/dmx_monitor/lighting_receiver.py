@@ -45,6 +45,7 @@ class UniverseTracker:
         self._last_sequence={}
         self._seq_expected={}
         self._seq_received={}
+        self._interval_valid={}
         self._order=deque()
 
     def observe(self, protocol, universe, source, values, priority=None, sequence=None, interface=None, cid=None, source_name=None):
@@ -61,9 +62,16 @@ class UniverseTracker:
         self._previous[key]=current
         last_time = self._last_time.get(key)
         inter = (now-last_time)*1000.0 if last_time is not None else 0.0
-        self._last_time[key]=now
+        # jitter is only meaningful once there is a *real* previous interval to
+        # compare against -- a brand new source's 2nd-ever packet would otherwise
+        # diff against a placeholder 0.0 "previous interval" and report a false
+        # jitter spike equal to the entire inter-arrival time (e.g. a perfectly
+        # regular 25ms source would show 25ms of "jitter" on its 2nd packet).
+        prev_interval_was_real = self._interval_valid.get(key, False)
         prev_inter = getattr(self._items.get(key), "inter_arrival_ms", 0.0)
-        jitter = abs(inter-prev_inter) if last_time is not None else 0.0
+        jitter = abs(inter-prev_inter) if prev_interval_was_real else 0.0
+        self._interval_valid[key] = last_time is not None
+        self._last_time[key]=now
         if sequence is not None and protocol.upper() == "SACN":
             prev = self._last_sequence.get(key)
             if prev is not None:
@@ -96,6 +104,7 @@ class UniverseTracker:
             self._last_sequence.pop(stale_key, None)
             self._seq_expected.pop(stale_key, None)
             self._seq_received.pop(stale_key, None)
+            self._interval_valid.pop(stale_key, None)
         return item
 
     def all(self):

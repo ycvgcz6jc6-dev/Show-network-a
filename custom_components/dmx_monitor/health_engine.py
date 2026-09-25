@@ -9,6 +9,66 @@ from dataclasses import dataclass, asdict
 from time import time
 from typing import Any
 
+# Shared switch-port-utilization thresholds and calculation.
+#
+# Phase C24 (rapport maître, bloc Observabilité: "santé commune Pre-Show/
+# Doctor/Incident"). Audit-confirmed drift: doctor.py and pre_show.py each
+# computed this independently and had quietly diverged -- Doctor flagged a
+# port as "warning" from 70% utilization (escalating to "error" at 85%),
+# while Pre-Show only ever checked the single 85% threshold, with no
+# warning tier at all. A port sitting at 75% utilization would show up in
+# Doctor but be invisible in Pre-Show's readiness check -- the same
+# underlying fact, two different answers depending on which panel you
+# looked at. This engine's own switch-utilization check (added below) had
+# no equivalent at all before this fix, despite the module's own stated
+# purpose being the canonical cross-protocol health correlation.
+#
+# Fixed by extracting the one calculation every caller now shares, rather
+# than by picking a "winning" threshold and copying it into the other two
+# files -- copying would only recreate the same drift risk the next time
+# someone tunes a number in one place and forgets the other two.
+SWITCH_UTIL_WARNING_PCT = 70.0
+SWITCH_UTIL_ERROR_PCT = 85.0
+
+
+def find_high_utilization_switch_ports(switches: list[dict] | None,
+                                        warning_pct: float = SWITCH_UTIL_WARNING_PCT,
+                                        error_pct: float = SWITCH_UTIL_ERROR_PCT) -> list[dict]:
+    """Ports whose measured rx/tx utilization (against the port's own
+    negotiated speed) meets or exceeds warning_pct, with severity escalated
+    to "error" at error_pct. Returns the higher of rx/tx per port -- a port
+    saturated in either direction is the fact that matters, not the
+    average of the two.
+    """
+    results: list[dict] = []
+    for sw in switches or []:
+        if not isinstance(sw, dict):
+            continue
+        for port in sw.get("ports") or []:
+            if not isinstance(port, dict):
+                continue
+            speed = port.get("speed_mbps")
+            if not isinstance(speed, (int, float)) or speed <= 0:
+                continue
+            candidates = []
+            for direction in ("rx_mbps", "tx_mbps"):
+                mbps = port.get(direction)
+                if isinstance(mbps, (int, float)):
+                    candidates.append((direction, mbps / speed * 100.0))
+            if not candidates:
+                continue
+            direction, pct = max(candidates, key=lambda x: x[1])
+            if pct < warning_pct:
+                continue
+            results.append({
+                "switch": sw.get("name") or sw.get("ip"), "ip": sw.get("ip"),
+                "port_index": port.get("index"), "port_name": port.get("name"),
+                "direction": direction, "utilization_pct": round(pct, 2),
+                "speed_mbps": speed, "severity": "error" if pct >= error_pct else "warning",
+            })
+    return results
+
+
 @dataclass(frozen=True)
 class HealthCheck:
     key: str
@@ -26,6 +86,7 @@ class ShowNetworkHealthEngine:
         self._dmx(snapshot, checks)
         self._topology(snapshot, checks)
         self._ptp(snapshot, checks)
+        self._switch_utilization(snapshot, checks)
         self._archive(snapshot, checks)
         self._host(snapshot, checks)
         counts = {name: sum(c.status == name for c in checks) for name in ("ok", "warning", "error", "info")}
@@ -41,6 +102,16 @@ class ShowNetworkHealthEngine:
     @staticmethod
     def _add(out, key, status, title, detail, **evidence):
         out.append(HealthCheck(key, status, title, detail, evidence))
+
+    def _switch_utilization(self, s, out):
+        switches = s.get("switch_telemetry") or []
+        high = find_high_utilization_switch_ports(switches)
+        if not high:
+            return
+        worst = "error" if any(p["severity"] == "error" for p in high) else "warning"
+        self._add(out, "network.port_utilization", worst, "Bande passante switches",
+                  f"{len(high)} port(s) à {SWITCH_UTIL_WARNING_PCT:.0f} % d'utilisation ou plus",
+                  ports=high[:20], warning_pct=SWITCH_UTIL_WARNING_PCT, error_pct=SWITCH_UTIL_ERROR_PCT)
 
     def _interfaces(self, s, out):
         interfaces = s.get("network_interfaces") or []

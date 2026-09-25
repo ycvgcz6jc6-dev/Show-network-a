@@ -6,12 +6,19 @@ Show Network feature: it only changes the diagnostic verdict shown by Pre-Show.
 from __future__ import annotations
 import json, os
 from time import time
+from .health_engine import find_high_utilization_switch_ports, SWITCH_UTIL_ERROR_PCT
 
 class PreShowCheck:
     def __init__(self, config_dir: str | None = None):
         self.path=os.path.join(config_dir,"show_network_pre_show.json") if config_dir else None
         self.profile={"enabled":False,"name":"","expected_dmx_universes":[],"require_timecode":False,"require_dante":False,"require_ptp":False,"require_switches":False,"require_amplifiers":False,"require_projectors":False,"expected_devices":[]}
-        self._load()
+        # NOTE (audit fix, pre_show.py:18): this used to call self._load()
+        # right here, a synchronous open() on the event loop every time
+        # Show Network starts up (confirmed in production logs as a
+        # blocking-call warning at this exact line). Loading now happens
+        # explicitly, off the event loop, from runtime/setup.py alongside
+        # the coordinator's other persisted-state loaders -- profile stays
+        # at these defaults until then.
     def _load(self):
         if not self.path: return
         try:
@@ -47,12 +54,9 @@ class PreShowCheck:
         if dante and not ptp: add("clock","Dante / PTP","fail","Dante est observé mais aucune horloge PTP fraîche n'est présente.")
         elif dante and ptp: add("clock","Dante / PTP","pass",f"{dante} source(s) Dante · horloge PTP observée.")
         else: add("clock","Dante / PTP","unknown","Aucune source Dante observée; ce contrôle ne peut pas conclure.")
-        switches=data.get("switch_telemetry",[]) or []; bad=[]
-        for sw in switches:
-            for p in sw.get("ports",[]) or []:
-                speed=p.get("speed_mbps"); vals=[(v/speed*100.0) for v in (p.get("rx_mbps"),p.get("tx_mbps")) if isinstance(speed,(int,float)) and speed>0 and isinstance(v,(int,float))]
-                if vals and max(vals)>=85: bad.append({"switch":sw.get("name") or sw.get("ip"),"port":p.get("name") or p.get("index"),"utilization_pct":max(vals)})
-        add("network","Réseau / switches","fail" if bad else "pass" if switches else "unknown",f"{len(bad)} port(s) >=85 %." if bad else f"{len(switches)} switch(es) supervisé(s), aucun port critique." if switches else "Aucune télémétrie switch disponible.")
+        switches=data.get("switch_telemetry",[]) or []
+        bad=[p for p in find_high_utilization_switch_ports(switches) if p["severity"]=="error"]
+        add("network","Réseau / switches","fail" if bad else "pass" if switches else "unknown",f"{len(bad)} port(s) >={SWITCH_UTIL_ERROR_PCT:.0f} %." if bad else f"{len(switches)} switch(es) supervisé(s), aucun port critique." if switches else "Aucune télémétrie switch disponible.")
         amps=data.get("audio_amplifiers",[]) or []
         def amp_fault(a):
             # AudioAmplifierInventory exposes explicit online/error fields. Do not

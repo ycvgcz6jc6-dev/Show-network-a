@@ -5,7 +5,25 @@ from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.components.button import ButtonEntity
 from homeassistant.components.number import NumberEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers import entity_registry as er
 from .const import DOMAIN
+
+
+async def async_remove_builder_entity(hass, platform_domain, entity):
+    """Fully remove a dynamically-created HA Builder entity.
+
+    ha_builder_remove used to only delete the item from storage: nothing
+    ever unregistered the live HA entity itself (ha_builder_remove_callbacks
+    was initialized in every platform module but never populated), so a
+    removed item kept showing up as an orphaned/unavailable entity. This
+    removes it from the live entity platform and, so it doesn't linger as a
+    restored registry entry across restarts, from the entity registry too.
+    """
+    await entity.async_remove(force_remove=True)
+    registry = er.async_get(hass)
+    entity_id = registry.async_get_entity_id(platform_domain, DOMAIN, entity.unique_id)
+    if entity_id:
+        registry.async_remove(entity_id)
 
 class BuilderBase(CoordinatorEntity):
     def __init__(self, coordinator, item):
