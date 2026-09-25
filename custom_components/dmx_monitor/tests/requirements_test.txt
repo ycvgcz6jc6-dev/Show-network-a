@@ -1,0 +1,6 @@
+pytest>=7.0
+pytest-asyncio>=0.21
+# Only needed for test_config_flow_osc_port.py's config_flow import chain,
+# and for any future test that touches HA's ConfigFlow/OptionsFlow,
+# entity setup, or service registration against a real (test) hass.
+pytest-homeassistant-custom-component
