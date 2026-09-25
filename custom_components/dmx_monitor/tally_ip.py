@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import time
-from typing import Callable, Iterable
+from typing import Callable
 
 
 TALLY_NAMES = ("right", "text", "left")

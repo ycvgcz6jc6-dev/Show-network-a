@@ -1,6 +1,6 @@
 /* Show Network frontend bundle - generated from the modular panels. */
-const SHOW_NETWORK_FRONTEND_VERSION = "0.15.19-dev29";
-const SHOW_NETWORK_FRONTEND_BUILD = "functional-chain-audit-20260918-dev31";
+const SHOW_NETWORK_FRONTEND_VERSION = "0.15.27";
+const SHOW_NETWORK_FRONTEND_BUILD = "audit-fixes-20260922";
 window.__SHOW_NETWORK_FRONTEND__ = Object.freeze({version: SHOW_NETWORK_FRONTEND_VERSION, build: SHOW_NETWORK_FRONTEND_BUILD});
 console.info(`[Show Network] frontend ${SHOW_NETWORK_FRONTEND_VERSION} (${SHOW_NETWORK_FRONTEND_BUILD})`);
 function snDefine(name, ctor){
@@ -110,6 +110,20 @@ class ShowNetworkInventory extends HTMLElement {
   constructor(){super();this._editing=false;this._filter='all';this._query='';}
   setConfig(c){this._config=c||{}}
   set hass(h){this._hass=h;if(!this._editing)this.render()}
+  _loadEditDraft(){
+    // Like the DMX zone/HA Builder drafts: the dashboard recreates this
+    // whole element (document.createElement) on every hass push, so
+    // "_editing" alone (audit: form vanishes mid-edit, "Annuler" gone)
+    // does not survive -- it lives on the destroyed instance. Persist the
+    // in-progress edit in sessionStorage instead.
+    try{
+      const raw=sessionStorage.getItem('show-network-inventory-edit-draft');
+      if(raw)return JSON.parse(raw);
+    }catch(e){}
+    return null;
+  }
+  _saveEditDraft(uniqueId,values){try{sessionStorage.setItem('show-network-inventory-edit-draft',JSON.stringify({uniqueId,values}))}catch(e){}}
+  _clearEditDraft(){try{sessionStorage.removeItem('show-network-inventory-edit-draft')}catch(e){}}
   async render(){
     if(!this._hass)return;
     const st=this._hass.states;
@@ -141,11 +155,24 @@ class ShowNetworkInventory extends HTMLElement {
     this.querySelectorAll('[data-star]').forEach(b=>b.onclick=async()=>{const r=allRows.find(x=>x.unique_id===b.dataset.star);if(!r)return;const mode=r.monitor_mode==='monitor'?'auto':'monitor';b.disabled=true;try{await this._hass.callService('dmx_monitor','set_device_override',{unique_id:r.unique_id,monitor_mode:mode});}finally{setTimeout(()=>this.render(),250);}});
     this.querySelectorAll('button[data-i]').forEach(b=>b.onclick=()=>this.editor(rows[+b.dataset.i]));
     this.querySelectorAll('[data-reset]').forEach(b=>b.onclick=async()=>{await this._hass.callService('dmx_monitor','clear_device_override',{unique_id:b.dataset.reset});setTimeout(()=>this.render(),400);setTimeout(()=>this.render(),1500)});
+    if(!this._editing){
+      const draft=this._loadEditDraft();
+      if(draft){
+        const r=allRows.find(x=>x.unique_id===draft.uniqueId);
+        if(r)this.editor(r,draft.values);else this._clearEditDraft();
+      }
+    }
   }
-  editor(r){
+  editor(r,restoredValues){
     this._editing=true;
-    const wrap=document.createElement('div'); wrap.className='edit'; wrap.innerHTML=`<input data-k="name" placeholder="Nom" value="${esc(r.custom_name||'')}"><input data-k="manufacturer" list="brand-list" placeholder="Fabricant" value="${esc(r.custom_manufacturer||'')}"><datalist id="brand-list">${(this._brands||[]).map(b=>`<option value="${esc(b.name)}">`).join('')}</datalist><input data-k="model" placeholder="Modèle" value="${esc(r.custom_model||'')}"><input data-k="role" placeholder="Rôle spectacle" value="${esc(r.custom_role||'')}"><input data-k="location" placeholder="Emplacement" value="${esc(r.custom_location||'')}"><select data-k="monitor_mode" style="background:#0b0d10;color:#eee;border:1px solid #343b43;border-radius:6px;padding:7px"><option value="auto" ${(r.monitor_mode||'auto')==='auto'?'selected':''}>Auto</option><option value="monitor" ${r.monitor_mode==='monitor'?'selected':''}>Surveiller</option><option value="ignore" ${r.monitor_mode==='ignore'?'selected':''}>Ignorer</option></select><label style="font-size:10px;display:flex;gap:5px;align-items:center"><input type="checkbox" data-k="hidden" ${r.hidden?'checked':''}> Masquer</label><button data-save>Enregistrer</button><button data-cancel>Annuler</button>`;
-    this.prepend(wrap); wrap.querySelector('[data-cancel]').onclick=()=>{this._editing=false;wrap.remove();this.render()}; wrap.querySelector('[data-save]').onclick=async()=>{const data={unique_id:r.unique_id};wrap.querySelectorAll('[data-k]').forEach(x=>data[x.dataset.k]=x.type==='checkbox'?x.checked:x.value);await this._hass.callService('dmx_monitor','set_device_override',data);this._editing=false;wrap.remove();setTimeout(()=>this.render(),400);setTimeout(()=>this.render(),1500)};
+    const v=restoredValues||{name:r.custom_name||'',manufacturer:r.custom_manufacturer||'',model:r.custom_model||'',role:r.custom_role||'',location:r.custom_location||'',monitor_mode:r.monitor_mode||'auto',hidden:!!r.hidden};
+    const wrap=document.createElement('div'); wrap.className='edit'; wrap.innerHTML=`<input data-k="name" placeholder="Nom" value="${esc(v.name)}"><input data-k="manufacturer" list="brand-list" placeholder="Fabricant" value="${esc(v.manufacturer)}"><datalist id="brand-list">${(this._brands||[]).map(b=>`<option value="${esc(b.name)}">`).join('')}</datalist><input data-k="model" placeholder="Modèle" value="${esc(v.model)}"><input data-k="role" placeholder="Rôle spectacle" value="${esc(v.role)}"><input data-k="location" placeholder="Emplacement" value="${esc(v.location)}"><select data-k="monitor_mode" style="background:#0b0d10;color:#eee;border:1px solid #343b43;border-radius:6px;padding:7px"><option value="auto" ${v.monitor_mode==='auto'?'selected':''}>Auto</option><option value="monitor" ${v.monitor_mode==='monitor'?'selected':''}>Surveiller</option><option value="ignore" ${v.monitor_mode==='ignore'?'selected':''}>Ignorer</option></select><label style="font-size:10px;display:flex;gap:5px;align-items:center"><input type="checkbox" data-k="hidden" ${v.hidden?'checked':''}> Masquer</label><button data-save>Enregistrer</button><button data-cancel>Annuler</button>`;
+    this.prepend(wrap);
+    const currentValues=()=>{const data={};wrap.querySelectorAll('[data-k]').forEach(x=>data[x.dataset.k]=x.type==='checkbox'?x.checked:x.value);return data;};
+    this._saveEditDraft(r.unique_id,currentValues());
+    wrap.querySelectorAll('[data-k]').forEach(x=>x.addEventListener(x.type==='checkbox'?'change':'input',()=>this._saveEditDraft(r.unique_id,currentValues())));
+    wrap.querySelector('[data-cancel]').onclick=()=>{this._editing=false;this._clearEditDraft();wrap.remove();this.render()};
+    wrap.querySelector('[data-save]').onclick=async()=>{const data={unique_id:r.unique_id,...currentValues()};await this._hass.callService('dmx_monitor','set_device_override',data);this._editing=false;this._clearEditDraft();wrap.remove();setTimeout(()=>this.render(),400);setTimeout(()=>this.render(),1500)};
   }
 }
 function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
@@ -162,9 +189,31 @@ class ShowNetworkDiscovery extends HTMLElement {
   connectedCallback(){this.render();}
   _inventory(){const e=Object.values(this._hass?.states||{}).find(x=>x.entity_id.endsWith('_device_inventory'));return e?.attributes?.devices||[];}
   _status(){const e=Object.values(this._hass?.states||{}).find(x=>x.entity_id.endsWith('_discovery_status'));return e?.attributes||{};}
+  _loadScanState(){
+    // Audit-confirmed: clicking SCAN NETWORK produced no visible feedback.
+    // set hass() re-renders on every single hass push with no guard, so a
+    // "Scan en cours..." string written directly into #status.textContent
+    // by the click handler was overwritten by the very next push --
+    // usually well under a second later, while the scan itself (walking
+    // every IPv4 interface) runs for several seconds. sessionStorage
+    // survives both that and this element being recreated by the
+    // dashboard's module switcher.
+    try{
+      const raw=sessionStorage.getItem('show-network-discovery-scan-state');
+      return raw?JSON.parse(raw):null;
+    }catch(e){return null;}
+  }
+  _saveScanState(state){try{sessionStorage.setItem('show-network-discovery-scan-state',JSON.stringify(state))}catch(e){}}
+  _networkDetail(){
+    const s=Object.values(this._hass?.states||{}).find(x=>x.entity_id.endsWith('network_interfaces_up'));
+    return {interfaces: s?.attributes?.interfaces||[], routes: s?.attributes?.routes||[]};
+  }
   render(){
     const open=snCaptureDetails(this);
     const rows=this._inventory(), ds=this._status();
+    const {interfaces: ifaceRows, routes: routeRows}=this._networkDetail();
+    const scanState=this._loadScanState();
+    const scanActive=scanState && (scanState.status==='scanning' || (Date.now()-scanState.ts)<4000);
     const interfaceOf=(r)=>r.interface||'';
     const unlocked=(()=>{const c=Object.values(this._hass?.states||{}).find(x=>x.entity_id.includes('security_unlocked'));return c?.state==='true'||c?.state==='on';})();
     const interfaces=[...new Set(rows.map(interfaceOf).filter(Boolean))].sort();
@@ -174,14 +223,14 @@ class ShowNetworkDiscovery extends HTMLElement {
     visibleRows=visibleRows.filter(r=>(this._modeFilter==='all'||(this._modeFilter==='favorites'&&r.monitor_mode==='monitor')||(this._modeFilter==='ignored'&&r.monitor_mode==='ignore')||(this._modeFilter==='others'&&(r.monitor_mode||'auto')==='auto'))&&(!q||[r.ip,r.hostname,r.mac,r.display_name,r.display_manufacturer,r.display_model,r.category,r.interface].some(v=>String(v||'').toLowerCase().includes(q)))).sort((a,b)=>(b.monitor_mode==='monitor')-(a.monitor_mode==='monitor')||String(a.ip||a.hostname||'').localeCompare(String(b.ip||b.hostname||'')));
     this.innerHTML=`<style>
     :host{display:block;background:#0b0d10;color:#eee;font-family:Inter,system-ui,sans-serif;padding:18px}h2{margin:0 0 5px}.sub{color:#8d969f;font-size:11px;margin-bottom:15px}.bar{display:flex;gap:8px;align-items:center;background:#15181c;border:1px solid #2c3239;border-radius:10px;padding:12px}button{background:#23282e;color:#eee;border:1px solid #3a4148;border-radius:7px;padding:8px 12px;cursor:pointer}.table{margin-top:12px;border:1px solid #2c3239;border-radius:10px;overflow:hidden}.row{display:grid;grid-template-columns:150px 1fr 130px 130px;gap:10px;padding:10px 12px;border-bottom:1px solid #282d33;font-size:12px}.head{color:#8d969f;background:#15181c;font-size:10px;text-transform:uppercase}.muted{color:#8d969f}</style>
-    <h2>AUTO DISCOVERY</h2><div class="sub">Inventaire réseau séparé des protocoles spectacle. Le scan manuel inspecte toutes les interfaces IPv4 disponibles; DMX, Dante, MA-Net3, AES67 et OSC conservent leurs interfaces configurées.</div><div class="bar"><label>Vue interface <select id="if-filter"><option value="">Toutes</option>${interfaces.map(x=>`<option value="${esc(x)}" ${x===this._ifFilter?'selected':''}>${esc(x)}</option>`).join('')}</select></label><input id="disc-search" placeholder="Nom / IP / MAC / type" value="${esc(this._query||'')}" style="background:#0b0d10;color:#eee;border:1px solid #3a4148;border-radius:7px;padding:8px"><button data-mode="all">Tous</button><button data-mode="favorites">★ Favoris</button><button data-mode="others">Non favoris</button><button data-mode="ignored">Ignorés</button><span class="muted">Les couleurs/sections servent uniquement à rendre l’inventaire lisible; elles ne changent aucun routage protocolaire.</span></div><div class="bar"><span class="muted" id="status">${rows.length} équipement(s) · état ${esc(ds.state||'idle')} · mDNS ${ds.mdns_services??0} (${esc(ds.mdns_state||'idle')}) · ARP ${ds.arp_neighbors??0} · HTTP ${ds.http_responders??0}/${ds.http_attempted??0} (${ds.http_identified??0} ident.) · SNMP ${ds.snmp_responders??0}/${ds.snmp_attempted??ds.arp_neighbors??0} · switches ${ds.identified_switches??0}${(ds.errors||[]).length?' · erreurs '+esc((ds.errors||[]).join(' | ')):''}<br><span class="muted">mDNS: ${esc(ds.mdns_detail||'aucun diagnostic')} · SNMP: ${esc(ds.snmp_probe_mode||'—')}</span></span><button id="scan">SCAN NETWORK</button></div><div class="table"><div class="row head"><span>IP / HÔTE</span><span>PROTOCOLES / FABRICANT</span><span>RÔLE / SOURCE</span><span>CONFIANCE</span><span>PAGE WEB</span></div>${visibleRows.length?visibleRows.map(r=>`<div class="row"><span><button data-disc-star="${esc(r.unique_id)}" title="Favori de régie">${r.monitor_mode==='monitor'?'★':'☆'}</button> ${esc(r.ip||r.hostname||'—')}</span><span>${esc((r.protocols||[]).join(', ')||'—')} ${r.display_manufacturer?'· '+esc(r.display_manufacturer):'· marque non identifiée'}</span><span>${esc(r.custom_role||r.category||(r.sources||[]).join(', ')||'—')}</span><span>${esc(r.confidence??'—')}</span><span>${r.ip?`<button data-open-device="${esc(r.ip)}" ${unlocked?'':'disabled title="Déverrouille Show Network pour ouvrir une page web d\u2019appareil"'}>Ouvrir ↗</button>`:'—'}</span></div>`).join(''):'<div class="row"><span class="muted">Aucun équipement observé</span><span>—</span><span>—</span><span>—</span><span>—</span></div>'}</div><details class="table"><summary style="padding:10px;cursor:pointer">Diagnostic SNMP par hôte</summary>${(ds.snmp_hosts||[]).length?(ds.snmp_hosts||[]).map(x=>`<div class="row"><span>${esc(x.ip||'—')}</span><span>${esc(x.manufacturer||x.state||'—')}</span><span>${esc(x.sys_name||'—')}</span><span>${esc(x.sys_object_id||'—')}</span></div>`).join(''):'<div class="row"><span class="muted">Aucun essai SNMP enregistré</span><span>—</span><span>—</span><span>—</span></div>'}</details>`;
+    <h2>AUTO DISCOVERY</h2><div class="sub">Inventaire réseau séparé des protocoles spectacle. Le scan manuel inspecte toutes les interfaces IPv4 disponibles; DMX, Dante, MA-Net3, AES67 et OSC conservent leurs interfaces configurées.</div><div class="bar"><label>Vue interface <select id="if-filter"><option value="">Toutes</option>${interfaces.map(x=>`<option value="${esc(x)}" ${x===this._ifFilter?'selected':''}>${esc(x)}</option>`).join('')}</select></label><input id="disc-search" placeholder="Nom / IP / MAC / type" value="${esc(this._query||'')}" style="background:#0b0d10;color:#eee;border:1px solid #3a4148;border-radius:7px;padding:8px"><button data-mode="all">Tous</button><button data-mode="favorites">★ Favoris</button><button data-mode="others">Non favoris</button><button data-mode="ignored">Ignorés</button><span class="muted">Les couleurs/sections servent uniquement à rendre l’inventaire lisible; elles ne changent aucun routage protocolaire.</span></div><div class="bar"><span class="muted" id="status">${scanActive?esc(scanState.message):`${rows.length} équipement(s) · état ${esc(ds.state||'idle')} · mDNS ${ds.mdns_services??0} (${esc(ds.mdns_state||'idle')}) · ARP ${ds.arp_neighbors??0} · HTTP ${ds.http_responders??0}/${ds.http_attempted??0} (${ds.http_identified??0} ident.) · SNMP ${ds.snmp_responders??0}/${ds.snmp_attempted??ds.arp_neighbors??0} · switches ${ds.identified_switches??0}${(ds.errors||[]).length?' · erreurs '+esc((ds.errors||[]).join(' | ')):''}<br><span class="muted">mDNS: ${esc(ds.mdns_detail||'aucun diagnostic')} · SNMP: ${esc(ds.snmp_probe_mode||'—')}</span></span>`}</span><button id="scan" ${scanState?.status==='scanning'?'disabled':''}>SCAN NETWORK</button></div><div class="table"><div class="row head"><span>IP / HÔTE</span><span>PROTOCOLES / FABRICANT</span><span>RÔLE / SOURCE</span><span>CONFIANCE</span><span>PAGE WEB</span></div>${visibleRows.length?visibleRows.map(r=>`<div class="row"><span><button data-disc-star="${esc(r.unique_id)}" title="Favori de régie">${r.monitor_mode==='monitor'?'★':'☆'}</button> ${esc(r.ip||r.hostname||'—')}</span><span>${esc((r.protocols||[]).join(', ')||'—')} ${r.display_manufacturer?'· '+esc(r.display_manufacturer):'· marque non identifiée'}</span><span>${esc(r.custom_role||r.category||(r.sources||[]).join(', ')||'—')}</span><span>${esc(r.confidence??'—')}</span><span>${r.ip?`<button data-open-device="${esc(r.ip)}" ${unlocked?'':'disabled title="Déverrouille Show Network pour ouvrir une page web d\u2019appareil"'}>Ouvrir ↗</button>`:'—'}</span></div>`).join(''):'<div class="row"><span class="muted">Aucun équipement observé</span><span>—</span><span>—</span><span>—</span><span>—</span></div>'}</div><details class="table"><summary style="padding:10px;cursor:pointer">Interfaces réseau — détail (adresses, masques, multicast)</summary><div class="row head" style="grid-template-columns:110px 1fr 90px 90px 1fr"><span>INTERFACE</span><span>ADRESSES IPV4 (CIDR)</span><span>ÉTAT</span><span>DÉBIT</span><span>GROUPES MULTICAST REJOINTS</span></div>${ifaceRows.length?ifaceRows.map(x=>`<div class="row" style="grid-template-columns:110px 1fr 90px 90px 1fr"><span>${esc(x.name)}${x.is_default_route?' <span title="Route par défaut">🌐</span>':''}</span><span>${esc((x.ipv4_networks||[]).join(', ')||(x.addresses||[]).join(', ')||'—')}</span><span class="${x.is_up?'':'muted'}">${x.is_up===true?'UP':x.is_up===false?'DOWN':'—'}</span><span>${x.speed_mbps?x.speed_mbps+' Mb/s':'—'}</span><span class="muted">${esc((x.multicast_groups||[]).join(', ')||'aucun')}</span></div>`).join(''):'<div class="row"><span class="muted">Aucune interface détectée</span><span>—</span><span>—</span><span>—</span><span>—</span></div>'}</details><details class="table"><summary style="padding:10px;cursor:pointer">Route vers les équipements connus (CEM3, GigaCore, appareils découverts)</summary><div class="sub" style="padding:0 12px 8px">Calcul passif uniquement — même sous-réseau ou route par défaut locale. Aucun paquet n'est émis pour vérifier l'atteignabilité réelle.</div><div class="row head"><span>CIBLE</span><span>IP</span><span>ATTEIGNABLE VIA</span><span>INTERFACE</span></div>${routeRows.length?routeRows.map(x=>`<div class="row"><span>${esc(x.label||'—')}</span><span>${esc(x.target)}</span><span class="${x.reachable?'':'muted'}">${x.reachable?(x.via==='same_subnet'?'sous-réseau direct':'passerelle par défaut ('+esc(x.gateway||'')+')'):'aucune route trouvée'}</span><span>${esc(x.interface||'—')}</span></div>`).join(''):'<div class="row"><span class="muted">Aucune cible connue pour le moment</span><span>—</span><span>—</span><span>—</span></div>'}</details><details class="table"><summary style="padding:10px;cursor:pointer">Diagnostic SNMP par hôte</summary>${(ds.snmp_hosts||[]).length?(ds.snmp_hosts||[]).map(x=>`<div class="row"><span>${esc(x.ip||'—')}</span><span>${esc(x.manufacturer||x.state||'—')}</span><span>${esc(x.sys_name||'—')}</span><span>${esc(x.sys_object_id||'—')}</span></div>`).join(''):'<div class="row"><span class="muted">Aucun essai SNMP enregistré</span><span>—</span><span>—</span><span>—</span></div>'}</details>`;
     snRestoreDetails(this,open);
     this.querySelector('#if-filter')?.addEventListener('change',e=>{this._ifFilter=e.target.value||'';this.render()});
     this.querySelector('#disc-search')?.addEventListener('input',e=>{this._query=e.target.value;this.render()});
     this.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{this._modeFilter=b.dataset.mode;this.render()});
     this.querySelectorAll('[data-disc-star]').forEach(b=>b.onclick=async()=>{const r=rows.find(x=>x.unique_id===b.dataset.discStar);if(!r)return;const mode=r.monitor_mode==='monitor'?'auto':'monitor';b.disabled=true;try{await this._hass.callService('dmx_monitor','set_device_override',{unique_id:r.unique_id,monitor_mode:mode});}finally{setTimeout(()=>this.render(),250);}});
     this.querySelectorAll('[data-open-device]').forEach(b=>b.onclick=()=>{const ip=b.dataset.openDevice;window.open(`/api/dmx_monitor/device_proxy/${encodeURIComponent(ip)}/`,'_blank');});
-    this.querySelector('#scan')?.addEventListener('click',async()=>{const b=this.querySelector('#scan'),st=this.querySelector('#status');b.disabled=true;st.textContent='Scan en cours…';try{await this._hass.callService('dmx_monitor','scan_network',{});st.textContent='Scan terminé. Les résultats vont se rafraîchir.';}catch(e){st.textContent='Erreur: '+(e?.message||e);}finally{b.disabled=false;}});
+    this.querySelector('#scan')?.addEventListener('click',async()=>{const b=this.querySelector('#scan'),st=this.querySelector('#status');b.disabled=true;this._saveScanState({status:'scanning',message:'Scan en cours…',ts:Date.now()});st.textContent='Scan en cours…';try{await this._hass.callService('dmx_monitor','scan_network',{});this._saveScanState({status:'done',message:'Scan terminé. Les résultats vont se rafraîchir.',ts:Date.now()});st.textContent='Scan terminé. Les résultats vont se rafraîchir.';}catch(e){this._saveScanState({status:'error',message:'Erreur: '+(e?.message||e),ts:Date.now()});st.textContent='Erreur: '+(e?.message||e);}finally{b.disabled=false;}});
   }
 }
 snDefine("show-network-discovery",ShowNetworkDiscovery);
@@ -247,7 +296,22 @@ snDefine('dmx-ha-mapping-panel',DmxHaMappingPanel)
 
 /* ===== dmx-monitor-panel.js ===== */
 class DmxMonitorPanel extends HTMLElement {
-  constructor(){super();this.attachShadow({mode:"open"});this.selectionKey="";this.values=Array(512).fill(0);this.source="—";this.protocol="—";this.rate=0;this.active=0;this.priority=null;this.sequence=null;this.selected=new Set();this._framePending=false;this._lastSig="";}
+  constructor(){super();this.attachShadow({mode:"open"});this.selectionKey="";this.values=Array(512).fill(0);this.source="—";this.protocol="—";this.rate=0;this.active=0;this.priority=null;this.sequence=null;this.selected=DmxMonitorPanel._loadSelectedChannels();this._framePending=false;this._lastSig="";}
+  static _loadSelectedChannels(){
+    // The module-switching dashboard tears down and recreates this element
+    // (document.createElement) on every hass update while the DMX tab is
+    // open, so a fresh constructor runs constantly -- a plain instance
+    // field is wiped every time. selectionKey (the chosen universe) already
+    // survives that via sessionStorage; channel selection needs the same
+    // treatment, or a click on CH142 shows "Sélection : 142" for one frame
+    // and reverts to "—" on the very next background refresh.
+    try{
+      const raw=sessionStorage.getItem('show-network-dmx-channel-selection');
+      const arr=raw?JSON.parse(raw):[];
+      return new Set(Array.isArray(arr)?arr.map(Number).filter(n=>Number.isFinite(n)):[]);
+    }catch(e){return new Set();}
+  }
+  _saveSelectedChannels(){try{sessionStorage.setItem('show-network-dmx-channel-selection',JSON.stringify([...this.selected]))}catch(e){}}
   connectedCallback(){this.render();}
   set hass(hass){this._hass=hass;const a=this.shadowRoot?.activeElement;if(a&&['SELECT','INPUT'].includes(a.tagName)){this._pendingHass=true;return;}this.syncLive();}
   _parseUniverses(raw){
@@ -286,7 +350,20 @@ class DmxMonitorPanel extends HTMLElement {
     if(choice.observed&&Array.isArray(u.values))this.values=u.values.slice(0,512).concat(Array(512)).slice(0,512);
     else if(choice.observed&&u.values_b64){try{const bin=atob(u.values_b64);this.values=Array.from(bin,c=>c.charCodeAt(0)).slice(0,512).concat(Array(512)).slice(0,512)}catch(e){this.values=Array(512).fill(0)}}
     else this.values=Array(512).fill(0);
-    const sig=`${this.selectionKey}|${this.rate}|${this.active}|${this.priority}|${this.sequence}|${u.values_b64||JSON.stringify(u.values||[])}`;if(sig===this._lastSig)return;this._lastSig=sig;this.render();
+    // Audit-confirmed: the "DMX UNIVERSE MATRIX" table and the Art-Net/sACN
+    // diagnostic cards read data this signature used to ignore entirely
+    // (this._findDmxState()'s matrix attribute, this._rxDiag()'s protocol
+    // stats) -- so a source going LIVE->LOST, or a protocol error
+    // appearing, never triggered a re-render unless the *selected*
+    // universe's own fields also happened to change at the same moment.
+    // That let those two sections silently go stale while the rest of the
+    // page (this pill, the channel grid) kept updating normally, showing
+    // disagreeing values for what should be the same live state.
+    const matrix=this._findDmxState()?.attributes?.matrix||[];
+    const matrixSig=matrix.map(r=>`${r.protocol}${r.universe}:${(r.sources||[]).map(x=>`${x.active?1:0},${x.packet_rate||0},${x.sequence_loss_pct||0},${x.last_seen_age_s||0}`).join(';')}`).join('|');
+    const rx=this._rxDiag()||{},pdiag=rx.protocols||{};
+    const rxSig=JSON.stringify(['ARTNET','SACN'].map(k=>{const d=pdiag[k]||{};return [d.state,d.packets_received,d.packets_parsed,d.last_error,(d.joined_groups||[]).length]}));
+    const sig=`${this.selectionKey}|${this.rate}|${this.active}|${this.priority}|${this.sequence}|${u.values_b64||JSON.stringify(u.values||[])}|${matrixSig}|${rxSig}`;if(sig===this._lastSig)return;this._lastSig=sig;this.render();
   }
   render(){
     const choices=this._choices();const current=choices.find(x=>x.key===this.selectionKey);const isLive=Boolean(current?.observed&&this.rate>0);const hasObserved=Boolean(current?.observed);const rx=this._rxDiag()||{},pdiag=rx.protocols||{},ad=pdiag.ARTNET||{},sd=pdiag.SACN||{};
@@ -298,7 +375,7 @@ class DmxMonitorPanel extends HTMLElement {
     const matrixHtml=matrix.length?`<section class="card"><div class="bar"><div><b>DMX UNIVERSE MATRIX</b><div class="muted">Sources passives · FPS · priorité · CID sACN · pertes · dernière réception</div></div></div><div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:10px"><thead><tr><th>Univers</th><th>Source</th><th>Nom / CID</th><th>FPS</th><th>Priority</th><th>Loss</th><th>Jitter</th><th>Âge</th><th>État</th></tr></thead><tbody>${matrix.flatMap(r=>(r.sources||[]).map((x,i)=>`<tr style="border-top:1px solid #293039"><td style="padding:6px">${i===0?`${esc(r.protocol)} U${r.universe}${r.multi_source?' ⚠':''}`:''}</td><td>${esc(x.source||'—')}</td><td>${esc(x.source_name||'—')}<br><span class="muted">${esc(x.cid||'CID —')}</span></td><td>${Number(x.packet_rate||0).toFixed(1)}</td><td>${x.priority??'—'}</td><td>${Number(x.sequence_loss_pct||0).toFixed(2)}%</td><td>${Number(x.jitter_ms||0).toFixed(1)} ms</td><td>${Number(x.last_seen_age_s||0).toFixed(1)} s</td><td class="${x.active?'good':'bad'}">${x.active?'LIVE':'LOST'}</td></tr>`)).join('')}</tbody></table></div></section>`:'';
     this.shadowRoot.innerHTML=`<style>${css}</style><header class="top"><div class="title">DMX View</div><div class="sub">RÉCEPTION UNIQUEMENT · données observées réelles · aucune valeur de démonstration</div><div class="tools"><button class="select" id="prev">◀</button><select class="select" id="uni">${opts||'<option value="">Aucun univers configuré/observé</option>'}</select><button class="select" id="next">▶</button><input class="select" id="listen-universes" style="width:120px" value="${esc(this._findConfig().universes||'')}" placeholder="1-16,21"><button class="select" id="apply-universes">Écouter</button><span class="pill ${isLive?'ok':hasObserved?'warn':'off'}">${status}</span><span class="pill">${esc(this.protocol)}</span><span class="pill">Source ${esc(this.source)}</span><span class="pill">${this.rate.toFixed(1)} pkt/s</span><span class="pill">${this.active} actifs</span><span class="pill">Priority ${this.priority??'—'}</span><span class="pill">Seq ${this.sequence??'—'}</span></div></header><main class="body">${matrixHtml}<div class="diaggrid">${protoCard('Art-Net',ad)}${protoCard('sACN',sd)}</div><section class="card"><div class="bar"><div><b>Universe ${this.universe||'—'} · DMX 1–512</b><div class="muted">${hasObserved?'Valeurs reçues du listener sélectionné.':'Univers configuré mais aucun paquet correspondant observé.'}</div></div></div><div class="grid">${cells}</div><div class="foot">Sélection : ${[...this.selected].sort((a,b)=>a-b).join(', ')||'—'} · Aucun paquet n'est émis.</div></section></main>`;
     const sel=this.shadowRoot.querySelector('#uni');if(sel)sel.value=this.selectionKey;sel?.addEventListener('change',e=>{this.selectionKey=e.target.value;try{sessionStorage.setItem('show-network-dmx-selection',this.selectionKey)}catch(err){}this._lastSig='';this.syncLive();});const step=(d)=>{const i=Math.max(0,choices.findIndex(x=>x.key===this.selectionKey));if(choices.length){this.selectionKey=choices[(i+d+choices.length)%choices.length].key;try{sessionStorage.setItem('show-network-dmx-selection',this.selectionKey)}catch(err){}this._lastSig='';this.syncLive();}};this.shadowRoot.querySelector('#prev')?.addEventListener('click',()=>step(-1));this.shadowRoot.querySelector('#next')?.addEventListener('click',()=>step(1));this.shadowRoot.querySelector('#apply-universes')?.addEventListener('click',async()=>{const raw=this.shadowRoot.querySelector('#listen-universes')?.value?.trim();if(!raw)return;const b=this.shadowRoot.querySelector('#apply-universes');b.disabled=true;b.textContent='…';try{await this._hass.callService('dmx_monitor','set_dmx_universes',{universes:raw});b.textContent='OK';}catch(e){b.textContent='Erreur';}setTimeout(()=>{b.disabled=false;b.textContent='Écouter'},1200);});
-    this.shadowRoot.querySelectorAll('.cell').forEach(c=>c.addEventListener('click',()=>{const ch=Number(c.dataset.ch);this.selected.has(ch)?this.selected.delete(ch):this.selected.add(ch);c.classList.toggle('selected',this.selected.has(ch));this.dispatchEvent(new CustomEvent('dmx-channel-selected',{detail:{channel:ch,universe:this.universe,source:this.source,protocol:this.protocol},bubbles:true,composed:true}));this.shadowRoot.querySelector('.foot').textContent=`Sélection : ${[...this.selected].sort((a,b)=>a-b).join(', ')||'—'} · Aucun paquet n'est émis.`;}));
+    this.shadowRoot.querySelectorAll('.cell').forEach(c=>c.addEventListener('click',()=>{const ch=Number(c.dataset.ch);this.selected.has(ch)?this.selected.delete(ch):this.selected.add(ch);this._saveSelectedChannels();c.classList.toggle('selected',this.selected.has(ch));this.dispatchEvent(new CustomEvent('dmx-channel-selected',{detail:{channel:ch,universe:this.universe,source:this.source,protocol:this.protocol},bubbles:true,composed:true}));this.shadowRoot.querySelector('.foot').textContent=`Sélection : ${[...this.selected].sort((a,b)=>a-b).join(', ')||'—'} · Aucun paquet n'est émis.`;}));
   }
 }
 snDefine("dmx-monitor-panel",DmxMonitorPanel);
@@ -326,8 +403,16 @@ class MaInspectorPanel extends HTMLElement {
   connectedCallback(){this.render();}
   render(){
     const d=this.data||{}, stations=d.stations||[], osc=d.osc||{}, diag=d.diagnostics||{}, rx=d.rx_diagnostics||{};
-    const css=`:host{display:block;background:#0d0f11;color:#e8eaed;min-height:100vh;font-family:Inter,system-ui,sans-serif}.head{padding:18px 22px;background:#17191d;border-bottom:1px solid #30343a}.title{font-size:23px;font-weight:700}.sub{color:#8e969f;font-size:11px;margin-top:3px}.body{padding:14px}.cards{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.card{background:#16191d;border:1px solid #2d3238;border-radius:9px;padding:13px}.big{font-size:20px;font-weight:700}.muted{font-size:11px;color:#8e969f}.ok{color:#69df9b}.warn{color:#e7bd68}.table{margin-top:12px;background:#16191d;border:1px solid #2d3238;border-radius:9px;overflow:hidden}.row{display:grid;grid-template-columns:1.4fr 1.4fr 1fr 1fr 1fr 1fr 1.3fr;padding:10px 12px;border-bottom:1px solid #282d33;font-size:11px}.headrow{background:#1b1f24;color:#929aa3;font-weight:600}.diag{margin-top:12px}.link{color:#9bc5ff}@media(max-width:1000px){.cards{grid-template-columns:repeat(2,1fr)}.row{grid-template-columns:1.4fr 1fr 1fr}}`;
-    const rows=stations.length?stations.map(x=>`<div class="row"><span>${x.name||"MA"}</span><span>${esc(x.device_type||'Non classifiée')}</span><span>${x.ip||"—"}</span><span>${x.session_index??"UNKNOWN"}</span><span class="${x.state==='LIVE'?'ok':'warn'}">${x.state||"UNKNOWN"}</span><span>${x.age_s??"—"} s</span><span><a class="link" target="_blank" href="${x.web_remote_url||'#'}">Web Remote</a></span></div>`).join(""):`<div class="row"><span>—</span><span>Non classifiée</span><span>—</span><span>UNKNOWN</span><span>NO DATA</span><span>—</span><span>—</span></div>`;
+    const css=`:host{display:block;background:#0d0f11;color:#e8eaed;min-height:100vh;font-family:Inter,system-ui,sans-serif}.head{padding:18px 22px;background:#17191d;border-bottom:1px solid #30343a}.title{font-size:23px;font-weight:700}.sub{color:#8e969f;font-size:11px;margin-top:3px}.body{padding:14px}.cards{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.card{background:#16191d;border:1px solid #2d3238;border-radius:9px;padding:13px}.big{font-size:20px;font-weight:700}.muted{font-size:11px;color:#8e969f}.ok{color:#69df9b}.warn{color:#e7bd68}.table{margin-top:12px;background:#16191d;border:1px solid #2d3238;border-radius:9px;overflow:hidden}.row{display:grid;grid-template-columns:1.4fr 1.4fr 1fr 1fr 1fr 1fr 1.3fr;padding:10px 12px;border-bottom:1px solid #282d33;font-size:11px}.headrow{background:#1b1f24;color:#929aa3;font-weight:600}.diag{margin-top:12px}.link{color:#9bc5ff;border-bottom:1px dashed #9bc5ff;padding-bottom:1px}.link-off{color:#5c636b}@media(max-width:1000px){.cards{grid-template-columns:repeat(2,1fr)}.row{grid-template-columns:1.4fr 1fr 1fr}}`;
+    const rows=stations.length?stations.map(x=>{
+      const wr=x.web_remote||'unknown';
+      let wrCell;
+      if(!x.web_remote_url){wrCell='<span class="link-off" title="Aucune IP web remote annoncée par cette station">Web Remote —</span>';}
+      else if(wr==='available'){wrCell=`<a class="link" target="_blank" rel="noopener" href="${x.web_remote_url}" title="Port TCP 8080 accessible lors du dernier sondage passif (connexion simple, aucune session MA-Net3 rejointe)">Web Remote ✓ disponible</a>`;}
+      else if(wr==='unavailable'){wrCell=`<span class="link-off" title="Port TCP 8080 injoignable lors du dernier sondage — ${esc(x.web_remote_url)}">Web Remote ✗ injoignable</span>`;}
+      else{wrCell=`<a class="link" target="_blank" rel="noopener" href="${x.web_remote_url}" title="URL candidate déduite de l'IP annoncée — pas encore sondée">Web Remote ⚠ non vérifié</a>`;}
+      return `<div class="row"><span>${x.name||"MA"}</span><span>${esc(x.device_type||'Non classifiée')}</span><span>${x.ip||"—"}</span><span>${x.session_index??"UNKNOWN"}</span><span class="${x.state==='LIVE'?'ok':'warn'}">${x.state||"UNKNOWN"}</span><span>${x.age_s??"—"} s</span><span>${wrCell}</span></div>`;
+    }).join(""):`<div class="row"><span>—</span><span>Non classifiée</span><span>—</span><span>UNKNOWN</span><span>NO DATA</span><span>—</span><span>—</span></div>`;
     this.shadowRoot.innerHTML=`<style>${css}</style><header class="head"><div class="title">MA Remote</div><div class="sub">grandMA3 · MA-NET3 · PASSIVE DIAGNOSTICS · NO SESSION JOIN / NO CONTROL</div></header><main class="body"><div class="cards"><div class="card"><div class="muted">MA-Net3</div><div class="big ok">${stations.length?'● ACTIVE':'○ WAITING'}</div><div class="muted">UDP 30020</div></div><div class="card"><div class="muted">Stations</div><div class="big">${d.station_count||0}</div></div><div class="card"><div class="muted">Live</div><div class="big">${d.live_stations||0}</div></div><div class="card"><div class="muted">Sessions</div><div class="big">${d.session_count||0}</div><div class="muted">passive only</div></div><div class="card"><div class="muted">OSC</div><div class="big">${osc.default_port||8000}</div><div class="muted">${osc.transport||'UDP/TCP'}</div></div></div><div class="table"><div class="row headrow"><span>Station</span><span>Type prouvé</span><span>IP</span><span>Session</span><span>State</span><span>Age</span><span>Web Remote</span></div>${rows}</div><div class="table diag"><div class="row headrow"><span>Diagnostic</span><span>Result</span><span>Protocol</span><span>Detail</span><span></span><span></span></div><div class="row"><span>UDP listener</span><span class="${rx.state==='listening'?'ok':'warn'}">${esc(rx.state||'—')}</span><span>MA-Net3</span><span>${esc(rx.interface||'—')} · ${esc(rx.bound_endpoint||'—')}</span><span>${rx.last_source?`src ${esc(rx.last_source)}`:'no packets'}</span><span>${rx.last_error?esc(rx.last_error):'no error'}</span></div><div class="row"><span>Multicast groups</span><span>${(rx.joined_groups||[]).length}/${(rx.configured_groups||[]).length}</span><span>MA-Net3</span><span>${esc((rx.joined_groups||[]).join(', ')||'—')}</span><span></span><span>${esc((rx.join_errors||[]).join(' | ')||'')}</span></div><div class="row"><span>Raw packet</span><span>${rx.last_packet_size??'—'} B</span><span>MA-Net3</span><span>${esc(rx.last_packet_prefix_ascii||'—')}</span><span>${esc(rx.last_packet_prefix_hex||'—')}</span><span></span></div>${(rx.raw_sources||[]).map(x=>`<div class="row"><span>Raw source</span><span>${esc(x.source_ip||'—')}</span><span>${x.packets??0} pkt</span><span>${x.last_size??'—'} B</span><span>${esc(x.prefix_ascii||'—')}</span><span>${esc((x.identity_hints||[]).join(' | ')||x.prefix_hex||'—')}</span></div>`).join('')}<div class="row"><span>Session join</span><span class="ok">DISABLED</span><span>MA-Net3</span><span>No join / no control</span><span></span><span></span></div><div class="row"><span>Web Remote probe</span><span class="ok">DISABLED</span><span>HTTP</span><span>URL candidate only</span><span></span><span></span></div><div class="row"><span>OSC commands</span><span class="ok">DISABLED</span><span>OSC</span><span>Info only · default ${osc.default_port||8000}</span><span></span><span></span></div></div></main>`;
   }
 }
@@ -339,7 +424,7 @@ class OscLearnPanel extends HTMLElement {
   constructor(){super();this._hass=null;this._busy=false;}
   set hass(h){this._hass=h;this.render();}
   _state(){return Object.values(this._hass?.states||{}).find(x=>x.attributes?.osc_learn)?.attributes||{};}
-  async _call(service){if(!this._hass||this._busy)return;this._busy=true;try{await this._hass.callService('dmx_monitor',service,{});}catch(e){this._error=e?.message||String(e);}finally{this._busy=false;this.render();}}
+  async _call(service){if(!this._hass||this._busy)return;this._busy=true;this.render();try{await this._hass.callService('dmx_monitor',service,{});}catch(e){this._error=e?.message||String(e);}finally{this._busy=false;this.render();}}
   connectedCallback(){this.render();}
   render(){
     const a=this._state(), learn=a.osc_learn||{}, input=a.osc_input||{}; const rows=learn.suggestions||[]; const active=!!learn.active;
@@ -351,7 +436,7 @@ class OscLearnPanel extends HTMLElement {
  .row{display:grid;grid-template-columns:1.5fr .6fr .7fr .7fr 1fr .8fr;gap:8px;padding:10px;border-bottom:1px solid #282d33;font-size:11px}.table{margin-top:12px;background:#15181c;border:1px solid #2c3239;border-radius:10px;overflow:hidden}.head{color:#8d969f;font-size:9px;text-transform:uppercase}
  </style>
  <h2>OSC LEARN</h2><div class="sub">Apprentissage réel des messages reçus par l'entrée OSC. Aucune commande n'est envoyée.</div>
- <div class="toolbar"><button id="learn" class="${active?'active':''}">${active?'STOP LEARN':'START LEARN'}</button><button id="clear">EFFACER</button><span class="hint">Entrée OSC: ${input.enabled?'ACTIVE':'INACTIVE'} · ${input.messages??0} msg · dernière adresse ${input.last_address||'—'} · source ${input.last_source||'—'}</span>${this._error?`<span class="err">${esc(this._error)}</span>`:''}</div>
+ <div class="toolbar"><button id="learn" class="${active?'active':''}" ${this._busy?'disabled':''}>${this._busy?'…':(active?'STOP LEARN':'START LEARN')}</button><button id="clear" ${this._busy?'disabled':''}>EFFACER</button><span class="hint">Entrée OSC: ${input.enabled?'ACTIVE':'INACTIVE'} · ${input.messages??0} msg · dernière adresse ${input.last_address||'—'} · source ${input.last_source||'—'}</span>${this._error?`<span class="err">${esc(this._error)}</span>`:''}</div>
  <div class="table"><div class="row head"><span>ADDRESS</span><span>TYPE</span><span>MIN</span><span>MAX</span><span>SUGGESTION</span><span>SAMPLES</span></div>${rows.length?rows.map(x=>`<div class="row"><span>${esc(x.address||'—')}</span><span>${esc(x.value_type||'—')}</span><span>${x.observed_min??'—'}</span><span>${x.observed_max??'—'}</span><span>${esc((x.suggested_destination||'—')+' · '+(x.suggested_attribute||'—'))}</span><span>${x.samples??0}</span></div>`).join(''):`<div class="row"><span class="hint">${active?'En attente de messages OSC…':'Learn arrêté'}</span><span>—</span><span>—</span><span>—</span><span>—</span><span>—</span></div>`}</div>`;
     this.querySelector('#learn')?.addEventListener('click',()=>this._call(active?'stop_osc_learn':'start_osc_learn'));
     this.querySelector('#clear')?.addEventListener('click',()=>this._call('clear_osc_learn'));
@@ -536,34 +621,97 @@ snDefine("osc-source-profiles",OscSourceProfiles);
 
 /* ===== rule-builder.js ===== */
 class ShowNetworkRuleBuilder extends HTMLElement {
-  constructor(){super();this.selected=new Set();this.rules=[];this._hass=null;this.editing=null;this._onDmx=e=>this.acceptDmxSelection(e)}
+  constructor(){super();this.selected=ShowNetworkRuleBuilder._loadSelection();this.rules=[];this._hass=null;this.editing=null;this._selectsRestored=false;this._onDmx=e=>this.acceptDmxSelection(e)}
+  static _loadSelection(){
+    // Same failure as the DMX view: the dashboard recreates this whole
+    // element (document.createElement) on every hass push while the
+    // Rules tab is open, so connectedCallback runs fresh each time and a
+    // plain instance Set is wiped -- audit-confirmed: "Clic 142 puis 1
+    // sans sélection persistante vérifiable." sessionStorage survives
+    // that recreation.
+    try{
+      const raw=sessionStorage.getItem('show-network-rule-builder-selection');
+      const arr=raw?JSON.parse(raw):[];
+      return new Set(Array.isArray(arr)?arr.map(Number).filter(n=>Number.isFinite(n)):[]);
+    }catch(e){return new Set();}
+  }
+  _saveSelection(){try{sessionStorage.setItem('show-network-rule-builder-selection',JSON.stringify([...this.selected]))}catch(e){}}
+  _defaultFormDraft(){return {editing:null,name:'Nouvelle règle',universe:'1',source:'',mode:'any',x:'1',ton:'10',toff:'5',on:'0',off:'0',domain:'',service:'',entity:'',data:'',offdomain:'',offservice:'',offentity:'',offdata:''}}
+  _loadFormDraft(){
+    // The channel-selection fix above covers only the grid; the rest of
+    // this form (name, thresholds, delays, both actions and their JSON)
+    // is torn down and lost the same way on every recreation. Persist it
+    // the same way, plus which rule (if any) is being edited so a
+    // recreation mid-edit doesn't silently fall back to "create new
+    // rule" on the next Save.
+    try{
+      const raw=sessionStorage.getItem('show-network-rule-builder-form');
+      if(raw){const parsed=JSON.parse(raw);return {...this._defaultFormDraft(),...parsed};}
+    }catch(e){}
+    return this._defaultFormDraft();
+  }
+  _saveFormDraft(){
+    const q=id=>this.q(id)?.value??'';
+    const draft={editing:this.editing,name:q('#name'),universe:q('#universe'),source:q('#source'),mode:q('#mode'),x:q('#x'),ton:q('#ton'),toff:q('#toff'),on:q('#on'),off:q('#off'),domain:q('#domain'),service:q('#service'),entity:q('#entity'),data:q('#data'),offdomain:q('#offdomain'),offservice:q('#offservice'),offentity:q('#offentity'),offdata:q('#offdata')};
+    try{sessionStorage.setItem('show-network-rule-builder-form',JSON.stringify(draft))}catch(e){}
+  }
+  _resetFormDraft(){try{sessionStorage.removeItem('show-network-rule-builder-form')}catch(e){}}
   connectedCallback(){window.addEventListener('dmx-channel-selected',this._onDmx);this.render();this.sync()}
   disconnectedCallback(){window.removeEventListener('dmx-channel-selected',this._onDmx)}
-  set hass(v){this._hass=v;this.sync();this.refreshTargets()}
-  acceptDmxSelection(e){const d=e.detail||{};if(!d.channel)return;if(d.universe)this.q('#universe').value=d.universe;if(d.source)this.q('#source').value=d.source;this.selected.add(+d.channel);this.paint()}
+  set hass(v){
+    this._hass=v;this.sync();this.refreshTargets();
+    // render() runs once from connectedCallback(), *before* the dashboard
+    // ever assigns hass (see _mountPanels: appendChild happens first,
+    // el.hass=... right after) -- so the domain/service/entity draft
+    // restoration can't happen there; this._hass is still null at that
+    // point. Do it here instead, once options actually exist to restore
+    // into, and only once per element lifetime so it doesn't keep
+    // clobbering the user's live selection on every later hass push.
+    if(!this._selectsRestored && this._hass){
+      this._selectsRestored=true;
+      const fd=this._formDraft||(this._formDraft=this._loadFormDraft());
+      if(fd.domain){this.q('#domain').value=fd.domain;this.refreshServices('#domain','#service','#entity');this.q('#service').value=fd.service;this.q('#entity').value=fd.entity;}
+      if(fd.offdomain){this.q('#offdomain').value=fd.offdomain;this.refreshServices('#offdomain','#offservice','#offentity');this.q('#offservice').value=fd.offservice;this.q('#offentity').value=fd.offentity;}
+    }
+  }
+  acceptDmxSelection(e){const d=e.detail||{};if(!d.channel)return;if(d.universe)this.q('#universe').value=d.universe;if(d.source)this.q('#source').value=d.source;this.selected.add(+d.channel);this._saveSelection();this._saveFormDraft();this.paint()}
   q(id){return this.querySelector(id)}
   async sync(){const states=Object.values(this._hass?.states||{});const s=states.find(x=>Array.isArray(x.attributes?.dmx_rules));if(s)this.rules=s.attributes.dmx_rules.map(r=>({...r,channels:[...(r.channels||[])]}));this.renderList()}
   async call(service,data){if(!this._hass){this.setTrace('Home Assistant non connecté.');return false}try{await this._hass.callService('dmx_monitor',service,data);await new Promise(r=>setTimeout(r,400));await this.sync();setTimeout(()=>this.sync(),1500);return true}catch(e){this.setTrace(`Erreur HA : ${e?.message||e}`);return false}}
-  render(){this.innerHTML=`<style>:host{display:block;background:#090b0e;color:#eee;font-family:Inter,system-ui,sans-serif;padding:16px}.layout{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:14px}.panel{background:#111419;border:1px solid #292f36;border-radius:8px;padding:12px}.grid{display:grid;grid-template-columns:repeat(16,1fr);gap:3px}.ch{height:36px;border:1px solid #2a3037;background:#252a30;color:#ddd;border-radius:3px;font-size:9px}.ch.selected{background:#1d5c3a;border-color:#45a56f}.ch.hot{box-shadow:inset 0 -4px 0 #d4a72c}.v{display:block;font-weight:700;margin-top:3px}label{display:block;font-size:10px;color:#9da5ad;margin:8px 0 4px}input,select,textarea{width:100%;box-sizing:border-box;background:#090b0e;color:#eee;border:1px solid #303740;border-radius:5px;padding:7px}.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.actions{display:flex;gap:7px;margin-top:12px;flex-wrap:wrap}.action{border:1px solid #3b444e;background:#191e24;color:#eee;border-radius:5px;padding:8px 10px}.primary{background:#1d5c3a}.danger{background:#32191c}.list{margin-top:10px;display:grid;gap:6px}.rule{border:1px solid #292f36;border-radius:6px;padding:8px;background:#0d1014}.rule strong{display:block}.pill{font-size:9px;color:#9da5ad}.trace{margin-top:12px;border-top:1px solid #292f36;padding-top:10px;font-size:11px}.mono{font-family:ui-monospace,monospace}.hint{font-size:9px;color:#7f8992}</style>
+  render(){
+    const fd=this._formDraft||(this._formDraft=this._loadFormDraft());
+    this.editing=fd.editing||null;
+    this.innerHTML=`<style>:host{display:block;background:#090b0e;color:#eee;font-family:Inter,system-ui,sans-serif;padding:16px}.layout{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:14px}.panel{background:#111419;border:1px solid #292f36;border-radius:8px;padding:12px;min-width:0}.grid{display:grid;grid-template-columns:repeat(16,1fr);gap:3px}.ch{height:36px;border:1px solid #2a3037;background:#252a30;color:#ddd;border-radius:3px;font-size:9px}.ch.selected{background:#1d5c3a;border-color:#45a56f}.ch.hot{box-shadow:inset 0 -4px 0 #d4a72c}.v{display:block;font-weight:700;margin-top:3px}label{display:block;font-size:10px;color:#9da5ad;margin:8px 0 4px}input,select,textarea{width:100%;box-sizing:border-box;background:#090b0e;color:#eee;border:1px solid #303740;border-radius:5px;padding:7px}.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.actions{display:flex;gap:7px;margin-top:12px;flex-wrap:wrap}.action{border:1px solid #3b444e;background:#191e24;color:#eee;border-radius:5px;padding:8px 10px}.primary{background:#1d5c3a}.danger{background:#32191c}.list{margin-top:10px;display:grid;gap:6px}.rule{border:1px solid #292f36;border-radius:6px;padding:8px;background:#0d1014}.rule strong{display:block}.pill{font-size:9px;color:#9da5ad}.trace{margin-top:12px;border-top:1px solid #292f36;padding-top:10px;font-size:11px}.mono{font-family:ui-monospace,monospace}.hint{font-size:9px;color:#7f8992}@media(max-width:900px){.layout{grid-template-columns:1fr}.grid{grid-template-columns:repeat(8,1fr)}}</style>
 <h2>RULE BUILDER</h2><div style="font-size:10px;color:#8d969f;margin-bottom:12px">DMX VIEW → RULE · HOME ASSISTANT · RECEIVE ONLY</div>
 <div class="layout"><div class="panel"><div class="grid" id="grid"></div><div class="hint" style="margin-top:8px">Clique un canal pour le sélectionner. Jaune = niveau DMX non nul.</div></div><div class="panel">
-<label>Nom</label><input id="name" value="Nouvelle règle"><div class="row"><div><label>Univers</label><input id="universe" type="number" min="1" value="1"></div><div><label>Source</label><select id="source"><option value="">Toutes</option><option>ENTTEC</option><option>sACN</option><option>Art-Net</option></select></div></div>
-<div class="row"><div><label>Mode</label><select id="mode"><option value="any">ANY</option><option value="all">ALL</option><option value="x_of_y">X OF Y</option></select></div><div><label>X</label><input id="x" type="number" min="1" value="1"></div></div>
-<div class="row"><div><label>Threshold ON</label><input id="ton" type="number" min="0" max="255" value="10"></div><div><label>Threshold OFF</label><input id="toff" type="number" min="0" max="255" value="5"></div></div>
-<div class="row"><div><label>Délai ON (ms)</label><input id="on" type="number" min="0" value="0"></div><div><label>Délai OFF (ms)</label><input id="off" type="number" min="0" value="0"></div></div>
-<label>Action ON — domaine</label><select id="domain"></select><label>Service ON</label><select id="service"></select><label>Entité ON</label><select id="entity"><option value="">Aucune / service global</option></select><label>Données ON JSON</label><textarea id="data" rows="2" placeholder='{"brightness_pct":50}'></textarea>
-<label>Action OFF / retour</label><div class="row"><select id="offdomain"></select><select id="offservice"></select></div><select id="offentity" style="margin-top:5px"><option value="">Aucune / service global</option></select><label>Données OFF JSON</label><textarea id="offdata" rows="2" placeholder='{"transition":2}'></textarea>
+<label>Nom</label><input id="name" value="${esc(fd.name)}"><div class="row"><div><label>Univers</label><input id="universe" type="number" min="1" value="${esc(fd.universe)}"></div><div><label>Source</label><select id="source"><option value="" ${fd.source===''?'selected':''}>Toutes</option><option ${fd.source==='ENTTEC'?'selected':''}>ENTTEC</option><option ${fd.source==='sACN'?'selected':''}>sACN</option><option ${fd.source==='Art-Net'?'selected':''}>Art-Net</option></select></div></div>
+<div class="row"><div><label>Mode</label><select id="mode"><option value="any" ${fd.mode==='any'?'selected':''}>ANY</option><option value="all" ${fd.mode==='all'?'selected':''}>ALL</option><option value="x_of_y" ${fd.mode==='x_of_y'?'selected':''}>X OF Y</option></select></div><div><label>X</label><input id="x" type="number" min="1" value="${esc(fd.x)}"></div></div>
+<div class="row"><div><label>Threshold ON</label><input id="ton" type="number" min="0" max="255" value="${esc(fd.ton)}"></div><div><label>Threshold OFF</label><input id="toff" type="number" min="0" max="255" value="${esc(fd.toff)}"></div></div>
+<div class="row"><div><label>Délai ON (ms)</label><input id="on" type="number" min="0" value="${esc(fd.on)}"></div><div><label>Délai OFF (ms)</label><input id="off" type="number" min="0" value="${esc(fd.off)}"></div></div>
+<label>Action ON — domaine</label><select id="domain"></select><label>Service ON</label><select id="service"></select><label>Entité ON</label><select id="entity"><option value="">Aucune / service global</option></select><label>Données ON JSON</label><textarea id="data" rows="2" placeholder='{"brightness_pct":50}'>${esc(fd.data)}</textarea>
+<label>Action OFF / retour</label><div class="row"><select id="offdomain"></select><select id="offservice"></select></div><select id="offentity" style="margin-top:5px"><option value="">Aucune / service global</option></select><label>Données OFF JSON</label><textarea id="offdata" rows="2" placeholder='{"transition":2}'>${esc(fd.offdata)}</textarea>
 <div class="actions"><button class="action" id="clear">Effacer sélection</button><button class="action primary" id="save">Créer / enregistrer</button><button class="action" id="test">Tester live</button><button class="action danger" id="clear-history">Effacer l'historique</button></div><div class="trace"><b>Pourquoi active ?</b><div id="trace">Sélectionne des canaux.</div></div><div class="list" id="list"></div></div></div>`;
     const g=this.q('#grid');for(let i=1;i<=512;i++){let b=document.createElement('button');b.className='ch';b.dataset.ch=i;b.textContent=i;b.onclick=()=>this.toggle(i);g.appendChild(b)}
-    this.q('#clear').onclick=()=>{this.selected.clear();this.editing=null;this.paint()};this.q('#save').onclick=()=>this.save();this.q('#test').onclick=()=>this.test();this.q('#clear-history').onclick=()=>this.call('clear_rule_history',{});
-    this.q('#domain').onchange=()=>this.refreshServices('#domain','#service','#entity');this.q('#offdomain').onchange=()=>this.refreshServices('#offdomain','#offservice','#offentity');this.refreshTargets();this.paint();this.renderList()
+    this.q('#clear').onclick=()=>{this.selected.clear();this._saveSelection();this.editing=null;this._resetFormDraft();this.paint()};this.q('#save').onclick=()=>this.save();this.q('#test').onclick=()=>this.test();this.q('#clear-history').onclick=()=>this.call('clear_rule_history',{});
+    // Text/number/textarea fields above already carry the draft's value
+    // via the template; the two static selects (source, mode) via their
+    // matching <option selected>. #domain/#service/#entity and their OFF
+    // counterparts start empty (populated dynamically below) -- setting
+    // .value on an empty <select> is a silent no-op in every browser, so
+    // those four still need restoring once refreshTargets() has actually
+    // given them options to match against.
+    this.q('#domain').onchange=()=>this.refreshServices('#domain','#service','#entity');this.q('#offdomain').onchange=()=>this.refreshServices('#offdomain','#offservice','#offentity');this.refreshTargets();
+    this.querySelectorAll('#name,#universe,#source,#mode,#x,#ton,#toff,#on,#off,#domain,#service,#entity,#data,#offdomain,#offservice,#offentity,#offdata').forEach(el=>{
+      el.addEventListener(el.tagName==='SELECT'?'change':'input',()=>this._saveFormDraft());
+    });
+    this.paint();this.renderList()
   }
-  toggle(c){this.selected.has(c)?this.selected.delete(c):this.selected.add(c);this.paint()}
+  toggle(c){this.selected.has(c)?this.selected.delete(c):this.selected.add(c);this._saveSelection();this.paint()}
   paint(){this.querySelectorAll('.ch').forEach(b=>b.classList.toggle('selected',this.selected.has(+b.dataset.ch)));const a=[...this.selected].sort((x,y)=>x-y);this.setTrace(a.length?`<span class="mono">${a.join(', ')}</span> · ${a.length} canal(aux)`:'Sélectionne des canaux.')}
   setTrace(t){const e=this.q('#trace');if(e)e.innerHTML=t}
   json(id){try{const v=this.q(id)?.value||'';return v?JSON.parse(v):{}}catch{return null}}
   detail(){const q=id=>this.q(id)?.value||'',on=this.json('#data'),off=this.json('#offdata');const channels=[...this.selected].sort((a,b)=>a-b);if(on===null||off===null){this.setTrace('JSON invalide.');return null}if(!channels.length){this.setTrace('Sélectionne au moins un canal.');return null}if(q('#mode')==='x_of_y'&&(+q('#x')<1||+q('#x')>channels.length)){this.setTrace('X doit être compris entre 1 et le nombre de canaux.');return null}return {name:q('#name').trim(),universe:+q('#universe'),source:q('#source')||null,channels,mode:q('#mode'),x:+q('#x'),threshold_on:+q('#ton'),threshold_off:+q('#toff'),on_delay_ms:+q('#on'),off_delay_ms:+q('#off'),enabled:false,test_mode:false,action:{domain:q('#domain'),entity_id:q('#entity')||null,service:q('#service'),data:on},off_action:{domain:q('#offdomain'),entity_id:q('#offentity')||null,service:q('#offservice'),data:off}}}
-  async save(){const d=this.detail();if(!d||!d.name){this.setTrace('Nom obligatoire.');return}const service=this.editing?'update_rule':'create_rule',payload=this.editing?{old_name:this.editing,...d}:d;if(await this.call(service,payload)){this.editing=d.name;this.setTrace('Règle enregistrée. Activation explicite requise.')}}
+  async save(){const d=this.detail();if(!d||!d.name){this.setTrace('Nom obligatoire.');return}const service=this.editing?'update_rule':'create_rule',payload=this.editing?{old_name:this.editing,...d}:d;if(await this.call(service,payload)){this.editing=d.name;this._saveFormDraft();this.setTrace('Règle enregistrée. Activation explicite requise.')}}
   async test(){const d=this.detail();if(!d)return;const ok=await this.call('test_rule',{name:this.editing||d.name,values:this.currentValues()});if(ok)this.setTrace('Test exécuté sans action HA et sans modifier l’état de la règle.')}
   currentValues(){
     const u=+this.q('#universe').value,s=this.q('#source').value;const states=this._hass?.states||{};
@@ -580,7 +728,7 @@ class ShowNetworkRuleBuilder extends HTMLElement {
   refreshTargets(){if(!this._hass)return;this.refreshServices('#domain','#service','#entity');this.refreshServices('#offdomain','#offservice','#offentity')}
   refreshServices(domainSel,serviceSel,entitySel){const d=this.q(domainSel),s=this.q(serviceSel),e=this.q(entitySel);if(!d||!s||!e)return;const services=this._hass?.services||{}, domains=Object.keys(services).sort();const prevD=d.value;d.innerHTML=domains.map(x=>`<option value="${x}">${x}</option>`).join('');if(domains.includes(prevD))d.value=prevD;const domain=services[d.value]||{}, names=Object.keys(domain).sort(),prevS=s.value;s.innerHTML=names.map(x=>`<option value="${x}">${x}</option>`).join('');if(names.includes(prevS))s.value=prevS;const entities=Object.values(this._hass.states||{}).filter(x=>x.entity_id?.startsWith(`${d.value}.`));const prevE=e.value;e.innerHTML='<option value="">Aucune / service global</option>'+entities.map(x=>`<option value="${x.entity_id}">${x.entity_id} — ${x.attributes?.friendly_name||''}</option>`).join('');if(entities.some(x=>x.entity_id===prevE))e.value=prevE}
   renderList(){const l=this.q('#list');if(!l)return;l.innerHTML='<b>Règles Home Assistant</b>';if(!this.rules.length){l.innerHTML+='<div class="pill">Aucune règle.</div>';return}this.rules.forEach(r=>{const d=document.createElement('div');d.className='rule';d.innerHTML=`<strong>${r.name}</strong><span class="pill">U${r.universe} · ${r.source||'toutes'} · ${(r.channels||[]).length} ch · ${r.enabled?'ACTIVE':'INACTIVE'} · ${r.test_mode?'TEST':''}</span><div class="actions"><button class="action" data-a="toggle">${r.enabled?'Désactiver':'Activer'}</button><button class="action" data-a="testmode">${r.test_mode?'Quitter test':'Mode test'}</button><button class="action" data-a="edit">Éditer</button><button class="action" data-a="duplicate">Dupliquer</button><button class="action danger" data-a="delete">Supprimer</button></div>`;d.querySelectorAll('button').forEach(b=>b.onclick=()=>this.ruleAction(r,b.dataset.a));l.appendChild(d)})}
-  async ruleAction(r,a){if(a==='toggle')return this.call('set_rule_enabled',{name:r.name,enabled:!r.enabled});if(a==='testmode')return this.call('set_rule_test_mode',{name:r.name,enabled:!r.test_mode});if(a==='delete')return this.call('remove_rule',{name:r.name});if(a==='duplicate')return this.call('create_rule',{...r,name:`${r.name} copie`,enabled:false});if(a==='edit'){this.editing=r.name;this.selected=new Set(r.channels||[]);const m={'#name':r.name,'#universe':r.universe,'#source':r.source||'','#mode':r.mode||'any','#x':r.x||1,'#ton':r.threshold_on??10,'#toff':r.threshold_off??5,'#on':r.on_delay_ms||0,'#off':r.off_delay_ms||0,'#domain':r.action?.domain||'light','#entity':r.action?.entity_id||'','#service':r.action?.service||'turn_on','#data':JSON.stringify(r.action?.data||{}),'#offdomain':r.off_action?.domain||'light','#offentity':r.off_action?.entity_id||'','#offservice':r.off_action?.service||'turn_off','#offdata':JSON.stringify(r.off_action?.data||{})};for(const[id,v]of Object.entries(m)){const el=this.q(id);if(el)el.value=v}this.refreshTargets();this.paint()}}
+  async ruleAction(r,a){if(a==='toggle')return this.call('set_rule_enabled',{name:r.name,enabled:!r.enabled});if(a==='testmode')return this.call('set_rule_test_mode',{name:r.name,enabled:!r.test_mode});if(a==='delete')return this.call('remove_rule',{name:r.name});if(a==='duplicate')return this.call('create_rule',{...r,name:`${r.name} copie`,enabled:false});if(a==='edit'){this.editing=r.name;this.selected=new Set(r.channels||[]);this._saveSelection();const m={'#name':r.name,'#universe':r.universe,'#source':r.source||'','#mode':r.mode||'any','#x':r.x||1,'#ton':r.threshold_on??10,'#toff':r.threshold_off??5,'#on':r.on_delay_ms||0,'#off':r.off_delay_ms||0,'#domain':r.action?.domain||'light','#entity':r.action?.entity_id||'','#service':r.action?.service||'turn_on','#data':JSON.stringify(r.action?.data||{}),'#offdomain':r.off_action?.domain||'light','#offentity':r.off_action?.entity_id||'','#offservice':r.off_action?.service||'turn_off','#offdata':JSON.stringify(r.off_action?.data||{})};for(const[id,v]of Object.entries(m)){const el=this.q(id);if(el)el.value=v}this.refreshTargets();this.paint();this._saveFormDraft()}}
 }
 snDefine('show-network-rule-builder',ShowNetworkRuleBuilder);
 
@@ -918,13 +1066,29 @@ snDefine("show-network-dashboard",ShowNetworkDashboard);
 class ShowNetworkHABuilderPanel extends HTMLElement {
   setConfig(c){this._config=c||{};}
   set hass(h){this._hass=h; this.render();}
+  _defaultBuilderDraft(){return {name:'',type:'switch',area:''}}
+  _loadBuilderDraft(){
+    try{
+      const raw=sessionStorage.getItem('show-network-ha-builder-draft');
+      if(raw){const parsed=JSON.parse(raw);return {...this._defaultBuilderDraft(),...parsed};}
+    }catch(e){}
+    return this._defaultBuilderDraft();
+  }
+  _saveBuilderDraft(d){try{sessionStorage.setItem('show-network-ha-builder-draft',JSON.stringify(d))}catch(e){}}
+  _resetBuilderDraft(){this._builderDraft=this._defaultBuilderDraft();try{sessionStorage.removeItem('show-network-ha-builder-draft')}catch(e){}}
   render(){
     const h=this._hass; if(!h)return;
     const state=h.states?.['sensor.dmx_monitor_ha_builder'];
     const items=state?.attributes?.items||[];
     const call=(service,data={})=>h.callService?.('dmx_monitor',service,data);
-    this.innerHTML=`<style>:host{display:block;font-family:system-ui}.box{padding:16px;border:1px solid #30363d;border-radius:14px;background:#111519;color:#eee}.head{display:flex;justify-content:space-between;gap:12px;align-items:center}.title{font-weight:800;letter-spacing:.04em}.small{font-size:11px;color:#929ba4}.grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;margin-top:12px}@media(max-width:800px){.grid{grid-template-columns:1fr}}input,select{width:100%;box-sizing:border-box;padding:9px;border-radius:8px;border:1px solid #39414a;background:#181d22;color:#eee}.btn{margin-top:10px;padding:9px 12px;border:1px solid #39414a;background:#181d22;color:#eee;border-radius:8px;cursor:pointer}.item{margin-top:8px;padding:10px;border:1px solid #252b31;border-radius:9px}.remove{float:right}.ok{color:#68df9a}</style><div class="box"><div class="head"><div><div class="title">HA BUILDER</div><div class="small">Crée des entités Show Network correctement typées, sans YAML.</div></div><div class="ok">${items.length} élément(s)</div></div><div class="grid"><input id="name" placeholder="Nom : Secours audio"><select id="type"><option value="switch">Switch</option><option value="sensor">Capteur</option><option value="binary_sensor">Binary sensor</option><option value="button">Bouton</option><option value="number">Nombre</option></select><input id="area" placeholder="Zone / Area"></div><button class="btn" id="create">Créer dans Home Assistant</button><div>${items.map(x=>`<div class="item"><button class="btn remove" data-id="${x.item_id}">Supprimer</button><b>${x.name}</b> · ${x.entity_type}<div class="small">${x.item_id}${x.area?` · ${x.area}`:''}</div>${x.entity_type!=='button'?`<div style="margin-top:6px;display:flex;gap:6px"><input data-state-field="${x.item_id}" placeholder="${x.entity_type==='switch'||x.entity_type==='binary_sensor'?'on / off':'valeur'}" style="flex:1"><button class="btn" data-set-state="${x.item_id}" style="margin:0">Définir l'état</button></div>`:''}</div>`).join('')}</div></div>`;
-    this.querySelector('#create')?.addEventListener('click',async()=>{const name=this.querySelector('#name').value.trim();if(!name)return;await call('ha_builder_create',{name,entity_type:this.querySelector('#type').value,area:this.querySelector('#area').value.trim()});});
+    const d=this._builderDraft||(this._builderDraft=this._loadBuilderDraft());
+    const types=['switch','sensor','binary_sensor','button','number'];
+    const typeLabels={switch:'Switch',sensor:'Capteur',binary_sensor:'Binary sensor',button:'Bouton',number:'Nombre'};
+    this.innerHTML=`<style>:host{display:block;font-family:system-ui}.box{padding:16px;border:1px solid #30363d;border-radius:14px;background:#111519;color:#eee}.head{display:flex;justify-content:space-between;gap:12px;align-items:center}.title{font-weight:800;letter-spacing:.04em}.small{font-size:11px;color:#929ba4}.grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;margin-top:12px}@media(max-width:800px){.grid{grid-template-columns:1fr}}input,select{width:100%;box-sizing:border-box;padding:9px;border-radius:8px;border:1px solid #39414a;background:#181d22;color:#eee}.btn{margin-top:10px;padding:9px 12px;border:1px solid #39414a;background:#181d22;color:#eee;border-radius:8px;cursor:pointer}.item{margin-top:8px;padding:10px;border:1px solid #252b31;border-radius:9px}.remove{float:right}.ok{color:#68df9a}</style><div class="box"><div class="head"><div><div class="title">HA BUILDER</div><div class="small">Crée des entités Show Network correctement typées, sans YAML.</div></div><div class="ok">${items.length} élément(s)</div></div><div class="grid"><input id="name" placeholder="Nom : Secours audio" value="${esc(d.name)}"><select id="type">${types.map(t=>`<option value="${t}" ${t===d.type?'selected':''}>${typeLabels[t]}</option>`).join('')}</select><input id="area" placeholder="Zone / Area" value="${esc(d.area)}"></div><button class="btn" id="create">Créer dans Home Assistant</button><div>${items.map(x=>`<div class="item"><button class="btn remove" data-id="${x.item_id}">Supprimer</button><b>${x.name}</b> · ${x.entity_type}<div class="small">${x.item_id}${x.area?` · ${x.area}`:''}</div>${x.entity_type!=='button'?`<div style="margin-top:6px;display:flex;gap:6px"><input data-state-field="${x.item_id}" placeholder="${x.entity_type==='switch'||x.entity_type==='binary_sensor'?'on / off':'valeur'}" style="flex:1"><button class="btn" data-set-state="${x.item_id}" style="margin:0">Définir l'état</button></div>`:''}</div>`).join('')}</div></div>`;
+    this.querySelector('#name')?.addEventListener('input',e=>{d.name=e.target.value;this._saveBuilderDraft(d)});
+    this.querySelector('#type')?.addEventListener('change',e=>{d.type=e.target.value;this._saveBuilderDraft(d)});
+    this.querySelector('#area')?.addEventListener('input',e=>{d.area=e.target.value;this._saveBuilderDraft(d)});
+    this.querySelector('#create')?.addEventListener('click',async()=>{const name=d.name.trim();if(!name)return;await call('ha_builder_create',{name,entity_type:d.type,area:d.area.trim()});this._resetBuilderDraft();this.render();});
     this.querySelectorAll('.remove').forEach(b=>b.addEventListener('click',()=>call('ha_builder_remove',{item_id:b.dataset.id})));
     this.querySelectorAll('[data-set-state]').forEach(b=>b.addEventListener('click',()=>{const f=this.querySelector(`[data-state-field="${b.dataset.setState}"]`);const v=f?.value?.trim();if(!v)return;call('ha_builder_set_state',{item_id:b.dataset.setState,state:v});}));
   }
@@ -1181,7 +1345,7 @@ ${section('💾 SAUVEGARDE & MAINTENANCE','Persistance et restauration de la con
       const vip=this._videoIp||{endpoint_count:0,online_count:0,protocols:{},endpoints:[]};const vrows=vip.endpoints||[];const proto=Object.entries(vip.protocols||{}).map(([k,v])=>`${esc(k)} ${v}`).join(' · ')||'aucun';
       const previewRow=this._videoPreviewKey?vrows.find(x=>x.key===this._videoPreviewKey):null;
       const previewUrl=(previewRow&&this._videoPreviewEntryId)?`/api/dmx_monitor/video_ip_preview?entry_id=${encodeURIComponent(this._videoPreviewEntryId)}&key=${encodeURIComponent(previewRow.key)}&t=${Date.now()}`:'';
-      inner+=`<div class="card" style="margin-top:12px"><div class="title">VIDÉO IP — SUPERVISION</div><div class="notice"><b>Aucune entité Sensor HA créée.</b> Le module peut rester totalement passif. L'aperçu vidéo basse qualité est séparé, optionnel et ne s'abonne au flux que pendant l'affichage.</div><div class="module-grid"><div class="card"><div class="title">Fonction</div><div class="big ${vip.enabled?'ok':'off'}" style="font-size:18px">${vip.enabled?'ACTIVÉE':'DÉSACTIVÉE'}</div></div><div class="card"><div class="title">Interface réseau</div><div class="big" style="font-size:18px">${esc(vip.interface||'0.0.0.0')}</div></div><div class="card"><div class="title">Endpoints observés</div><div class="big">${vip.endpoint_count??0}</div></div><div class="card"><div class="title">Aperçu basse qualité</div><div class="big ${vip.preview_enabled?'warning':'off'}" style="font-size:18px">${vip.preview_enabled?'AUTORISÉ':'OFF'}</div></div></div>${previewRow&&previewUrl?`<div class="card" style="margin-top:12px"><div class="title">APERÇU BASSE QUALITÉ · ${esc(previewRow.name||previewRow.host||'flux')}</div><div class="muted">640 px max · 5 fps · sans audio · une seule prévisualisation à la fois. Fermer remet le module en supervision pure.</div><div style="margin-top:10px;background:#050607;min-height:180px;display:flex;align-items:center;justify-content:center"><img src="${previewUrl}" style="max-width:100%;max-height:420px;object-fit:contain" alt="Aperçu vidéo basse qualité"></div><div class="footer"><button class="btn" id="video-preview-close">Fermer l'aperçu</button></div></div>`:''}<div class="notice">Protocoles: ${proto}. Pour changer l'interface réseau, activer/désactiver le module ou autoriser l'aperçu, utilise <b>Configurer les projecteurs</b> puis les options Show Network.</div>${vip.error?`<div class="notice">WebSocket supervision: ${esc(vip.error)}</div>`:''}${vrows.length?vrows.map(x=>`<div class="row"><span><b>${esc(x.name||x.host||'endpoint')}</b><br><span class="muted">${esc(x.evidence?.join(' · ')||x.discovery||'passif')}</span></span><span>${esc(x.protocol||'—')}</span><span>${esc(x.host||'—')}${x.port?':'+x.port:''}</span><span>${x.online?'RÉCENT':'STALE'} · ${x.age_s??'—'} s</span><span>${x.uri?esc(x.uri):'pas d’URI synthétique'}${x.vlc_direct&&vip.preview_enabled?`<br><button class="btn" data-video-preview="${esc(x.key)}" data-entry-id="${esc(x.entry_id||vip.entry_id||'')}">Voir basse qualité</button>`:''}</span></div>`).join(''):'<div class="muted" style="margin-top:12px">Aucun endpoint vidéo IP explicitement identifié. HTTP générique n’est pas classé vidéo sans preuve.</div>'}</div>`;
+      inner+=`<div class="card" style="margin-top:12px"><div class="title">VIDÉO IP — SUPERVISION</div><div class="notice"><b>Aucune entité Sensor HA créée.</b> Le module peut rester totalement passif. L'aperçu vidéo basse qualité est séparé, optionnel et ne s'abonne au flux que pendant l'affichage.</div><div class="module-grid"><div class="card"><div class="title">Fonction</div><div class="big ${vip.enabled?'ok':'off'}" style="font-size:18px">${vip.enabled?'ACTIVÉE':'DÉSACTIVÉE'}</div></div><div class="card"><div class="title">Interface réseau</div><div class="big" style="font-size:18px">${esc(vip.interface||'0.0.0.0')}</div></div><div class="card"><div class="title">Endpoints observés</div><div class="big">${vip.endpoint_count??0}</div></div><div class="card"><div class="title">Aperçu basse qualité</div><div class="big ${vip.preview_enabled?'warning':'off'}" style="font-size:18px">${vip.preview_enabled?'AUTORISÉ':'OFF'}</div></div></div>${previewRow&&previewUrl?`<div class="card" style="margin-top:12px"><div class="title">APERÇU BASSE QUALITÉ · ${esc(previewRow.name||previewRow.host||'flux')}</div><div class="muted">640 px max · 5 fps · sans audio · une seule prévisualisation à la fois. Fermer remet le module en supervision pure.</div><div style="margin-top:10px;background:#050607;min-height:180px;display:flex;align-items:center;justify-content:center"><img src="${previewUrl}" style="max-width:100%;max-height:420px;object-fit:contain" alt="Aperçu vidéo basse qualité"></div><div class="footer"><button class="btn" id="video-preview-close">Fermer l'aperçu</button></div></div>`:''}<div class="notice">Protocoles: ${proto}. Pour changer l'interface réseau, activer/désactiver le module ou autoriser l'aperçu, utilise <b>Configurer les projecteurs</b> puis les options Show Network.</div>${vip.error?`<div class="notice">WebSocket supervision: ${esc(vip.error)}</div>`:''}${vrows.length?vrows.map(x=>`<div class="row"><span><b>${esc(x.name||x.host||'endpoint')}</b><br><span class="muted">${esc(x.evidence?.join(' · ')||x.discovery||'passif')}</span></span><span>${esc(x.protocol||'—')}</span><span>${esc(x.host||'—')}${x.port?':'+x.port:''}</span><span>${x.online?'RÉCENT':'STALE'} · ${x.age_s??'—'} s</span><span>${x.uri?esc(x.uri):'pas d’URI synthétique'}${(x.candidate_stream_urls&&x.candidate_stream_urls.length)?`<br><span class="muted" title="Construites à partir du format documenté par le constructeur (identifiants et chemin exact selon modèle) — jamais sondées ni confirmées, deux variantes proposées car le préfixe h264/h265 dépend du modèle de caméra">⚠ URLs candidates non vérifiées :</span>${x.candidate_stream_urls.map(u=>`<br><code style="font-size:11px;word-break:break-all">${esc(u)}</code>`).join('')}`:''}${x.vlc_direct&&vip.preview_enabled?`<br><button class="btn" data-video-preview="${esc(x.key)}" data-entry-id="${esc(x.entry_id||vip.entry_id||'')}">Voir basse qualité</button>`:''}</span></div>`).join(''):'<div class="muted" style="margin-top:12px">Aucun endpoint vidéo IP explicitement identifié. HTTP générique n’est pas classé vidéo sans preuve.</div>'}</div>`;
     }
     if(key==='rdm'){const e=this._state('rdm_devices_total','sensor.dmx_monitor_rdm_devices_total');const a=e?.attributes||{};const dev=a.rdm_devices||[];const cfg=this._state('show_network_config','sensor.dmx_monitor_show_network_config')?.attributes||{};const writesArmed=cfg.rdm_allow_writes===true;const sec=this._securityState();const unlocked=sec.unlocked;const canWrite=writesArmed&&unlocked;const gdtfPatches=this._state('gdtf_library_count','sensor.dmx_monitor_gdtf_library_count')?.attributes?.patches||[];inner+=`<div class="card"><div class="title">RDM / RDMnet — DEVICE MANAGEMENT</div><div class="module-grid"><div class="card"><div class="title">Appareils</div><div class="big">${dev.length}</div></div><div class="card"><div class="title">En ligne</div><div class="big">${dev.filter(x=>x.online).length}</div></div><div class="card"><div class="title">Transports</div><div class="big">${esc((a.transports||[]).join(' / ')||'—')}</div></div></div><div class="notice">Découverte et GET sont read-only. Les SET RDM restent désactivés tant que <b>RDM writes</b> n'est pas armé dans les options et que Show Network n'est pas déverrouillé. Une UID peut être associée à un patch GDTF sans émettre de DMX.</div><div class="row"><span>RDM writes (options)</span><b class="${writesArmed?'ok':'off'}">${writesArmed?'ARMÉ':'DÉSARMÉ — voir Configurer bridges / écritures'}</b><span>Sécurité</span><b class="${unlocked?'ok':'off'}">${unlocked?'DÉVERROUILLÉE':'VERROUILLÉE'}</b></div><div class="footer"><button class="btn" id="rdm-refresh">Rafraîchir RDM</button></div>${dev.map(x=>`<div class="card"><div class="title">${esc(x.device_label||x.model_description||x.uid)}</div><div class="row"><span>UID</span><b>${esc(x.uid)}</b></div><div class="row"><span>Transport</span><b>${esc(x.transport)} ${x.universe!=null?'· U'+x.universe:(x.scope?'· '+esc(x.scope):'')}</b></div><div class="row"><span>Fabricant / modèle</span><b>${esc(x.manufacturer_label||'—')} · ${esc(x.model_description||'—')}</b></div><div class="row"><span>Adresse DMX</span><b>${x.dmx_start_address??'—'} · footprint ${x.dmx_footprint??'—'}</b></div><div class="row"><span>Personnalité</span><b>${x.current_personality??'—'} / ${x.personality_count??'—'}</b></div><div class="row"><span>Capteurs / status</span><b>${(x.sensors||[]).length} / ${(x.status_messages||[]).length}</b></div><div class="row"><span>Fraîcheur</span><b>${x.online?'ONLINE':'STALE'} · ${x.age_s??'—'} s</b></div>
 <div class="footer"><button class="btn" data-rdm-identify="1" data-uid="${esc(x.uid)}" data-transport="${esc(x.transport)}" data-universe="${x.universe??''}" data-scope="${esc(x.scope||'')}" ${canWrite?'':'disabled'}>Identify ON</button><button class="btn" data-rdm-identify="0" data-uid="${esc(x.uid)}" data-transport="${esc(x.transport)}" data-universe="${x.universe??''}" data-scope="${esc(x.scope||'')}" ${canWrite?'':'disabled'}>Identify OFF</button></div>
@@ -1341,28 +1505,56 @@ class DmxHaZonesPanel extends HTMLElement {
   _zones(){return this._state()?.attributes?.zones||[]}
   async _call(service,data){try{await this._hass.callService('dmx_monitor',service,data);this._msg='Enregistré';setTimeout(()=>this.render(),400);setTimeout(()=>this.render(),1500)}catch(e){this._msg=`Erreur: ${e?.message||e}`;this.render()}}
   _entities(){return Object.values(this._hass.states).filter(s=>s.entity_id.startsWith('light.')).map(s=>({id:s.entity_id,name:s.attributes.friendly_name||s.entity_id}))}
+  _defaultZoneDraft(){return {name:'Nouvelle zone',universe:'1',channels:'1-3',mode:'dimmer',fixture:'',source:'',fixtureTypes:'',selected:[]}}
+  _loadZoneDraft(){
+    // The module-switching dashboard recreates this whole element
+    // (document.createElement) on every hass push while this tab is open,
+    // so a plain instance field is wiped constantly -- the same failure
+    // this bundle already works around for DMX channel selection.
+    // Persisting the draft in sessionStorage instead survives that.
+    try{
+      const raw=sessionStorage.getItem('show-network-dmx-zone-draft');
+      if(raw){const parsed=JSON.parse(raw);return {...this._defaultZoneDraft(),...parsed};}
+    }catch(e){}
+    return this._defaultZoneDraft();
+  }
+  _saveZoneDraft(d){try{sessionStorage.setItem('show-network-dmx-zone-draft',JSON.stringify(d))}catch(e){}}
+  _resetZoneDraft(){this._zoneDraft=this._defaultZoneDraft();try{sessionStorage.removeItem('show-network-dmx-zone-draft')}catch(e){}}
   render(){
     if(!this._hass)return;
     const zones=this._zones(), lights=this._entities();
+    const d=this._zoneDraft||(this._zoneDraft=this._loadZoneDraft());
     this.innerHTML=`<style>
       :host{display:block;background:#090b0e;color:#eee;font-family:Inter,system-ui,sans-serif;padding:16px}h2{margin:0 0 4px;font-size:20px}.sub{color:#89929d;font-size:11px;margin-bottom:14px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px}.card{background:#11151a;border:1px solid #293038;border-radius:10px;padding:14px}.head{display:flex;justify-content:space-between;gap:8px;align-items:center}.name{font-weight:700}.pill{font-size:10px;border:1px solid #38414b;border-radius:20px;padding:4px 8px}.on{border-color:#2e9b64;color:#7ee2aa}.off{color:#9aa3ad}.meta{font-size:11px;color:#a9b0b8;margin:8px 0}.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}.row label{font-size:10px;color:#8f99a3;display:flex;flex-direction:column;gap:4px;flex:1;min-width:110px}input,select{background:#0b0e12;color:#eee;border:1px solid #333b44;border-radius:5px;padding:7px;font-size:11px}button{background:#1a222a;color:#eee;border:1px solid #3a4651;border-radius:6px;padding:7px 10px;font-size:11px;cursor:pointer}button:hover{background:#242e38}.new{margin-bottom:12px}
     </style>
     <h2>DMX → HA ZONES</h2><div class="sub">Zones d'éclairage façon Hue · un univers d'écoute par zone · sortie DMX interdite · RDM passif uniquement</div>
     <div class="card new"><div class="head"><span class="name">Créer une zone</span><span class="pill">${zones.length} zone(s)</span></div>
-      <div class="row"><label>Nom<input id="zn" value="Nouvelle zone"></label><label>Universe<input id="zu" type="number" min="1" max="63999" value="1"></label><label>Canaux<input id="zc" value="1-3"></label><label>Mode<select id="zm"><option>dimmer</option><option>rgb</option><option>rgbw</option><option>cct</option><option>switch</option></select></label></div>
-      <div class="row"><label>Fixture / Hue model<input id="zf" placeholder="LCT001 / fixture"></label><label>Source<input id="zs" placeholder="optionnel"></label></div>
+      <div class="row"><label>Nom<input id="zn" value="${esc(d.name)}"></label><label>Universe<input id="zu" type="number" min="1" max="63999" value="${esc(d.universe)}"></label><label>Canaux<input id="zc" value="${esc(d.channels)}"></label><label>Mode<select id="zm">${['dimmer','rgb','rgbw','cct','switch'].map(m=>`<option ${m===d.mode?'selected':''}>${m}</option>`).join('')}</select></label></div>
+      <div class="row"><label>Fixture / Hue model<input id="zf" placeholder="LCT001 / fixture" value="${esc(d.fixture)}"></label><label>Source<input id="zs" placeholder="optionnel" value="${esc(d.source)}"></label></div>
       <div class="sub" style="margin-top:-4px">Fixture: texte libre pour toi (ex: "PAR façade"). Hue model: code produit Hue précis (ex: LCT001) — seulement si tu veux que HA/l'app Hue traite cette zone comme une vraie lampe Hue. Source: laisse vide sauf si plusieurs consoles envoient sur le même univers et que tu veux filtrer par IP.</div>
-      <div class="row"><label style="flex:1 1 100%">Lampes HA<div id="zl-list" style="max-height:160px;overflow-y:auto;border:1px solid #333b44;border-radius:5px;padding:7px;background:#0b0e12;display:flex;flex-direction:column;gap:5px">${lights.map(x=>`<label style="flex-direction:row;align-items:center;gap:7px;font-size:12px;color:#eee"><input type="checkbox" class="zl-cb" value="${x.id}"> ${x.name}</label>`).join('')||'<span class="sub">Aucune lampe HA trouvée.</span>'}</div></label><label>Fixture par lampe (JSON, avancé — optionnel)<input id="zft" placeholder='{"light.xxx":"RGB fixture"}'></label></div>
+      <div class="row"><label style="flex:1 1 100%">Lampes HA<div id="zl-list" style="max-height:160px;overflow-y:auto;border:1px solid #333b44;border-radius:5px;padding:7px;background:#0b0e12;display:flex;flex-direction:column;gap:5px">${lights.map(x=>`<label style="flex-direction:row;align-items:center;gap:7px;font-size:12px;color:#eee"><input type="checkbox" class="zl-cb" value="${x.id}" ${d.selected.includes(x.id)?'checked':''}> ${x.name}</label>`).join('')||'<span class="sub">Aucune lampe HA trouvée.</span>'}</div></label><label>Fixture par lampe (JSON, avancé — optionnel)<input id="zft" placeholder='{"light.xxx":"RGB fixture"}' value="${esc(d.fixtureTypes)}"></label></div>
       <div class="sub" style="margin-top:-4px">Coche toutes les lampes de la zone ci-dessus (plusieurs possibles). Le champ JSON ne sert que si une lampe précise de la zone a besoin d'un profil différent des autres — à laisser vide dans la grande majorité des cas.</div>
       <div class="row"><button id="add">AJOUTER LA ZONE</button></div>
       ${this._msg?`<div class="sub" style="margin-top:8px">${esc(this._msg)}</div>`:''}
     </div>
     <div class="grid">${zones.map(z=>this._card(z)).join('')||'<div class="card">Aucune zone configurée.</div>'}</div>`;
+    this.querySelector('#zn')?.addEventListener('input',e=>{d.name=e.target.value;this._saveZoneDraft(d)});
+    this.querySelector('#zu')?.addEventListener('input',e=>{d.universe=e.target.value;this._saveZoneDraft(d)});
+    this.querySelector('#zc')?.addEventListener('input',e=>{d.channels=e.target.value;this._saveZoneDraft(d)});
+    this.querySelector('#zm')?.addEventListener('change',e=>{d.mode=e.target.value;this._saveZoneDraft(d)});
+    this.querySelector('#zf')?.addEventListener('input',e=>{d.fixture=e.target.value;this._saveZoneDraft(d)});
+    this.querySelector('#zs')?.addEventListener('input',e=>{d.source=e.target.value;this._saveZoneDraft(d)});
+    this.querySelector('#zft')?.addEventListener('input',e=>{d.fixtureTypes=e.target.value;this._saveZoneDraft(d)});
+    this.querySelectorAll('.zl-cb').forEach(cb=>cb.addEventListener('change',()=>{d.selected=[...this.querySelectorAll('.zl-cb:checked')].map(o=>o.value);this._saveZoneDraft(d)}));
     this.querySelector('#add')?.addEventListener('click',()=>{
-      const selected=[...this.querySelectorAll('.zl-cb:checked')].map(o=>o.value);
-      const name=this.querySelector('#zn').value.trim()||'Zone';
+      const selected=d.selected;
+      const name=d.name.trim()||'Zone';
       const id='zone_'+name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')+'_'+Date.now().toString(36);
-      this._call('create_dmx_ha_zone',{zone_id:id,name,universe:Number(this.querySelector('#zu').value),channels:this.querySelector('#zc').value,mode:this.querySelector('#zm').value,fixture_type:this.querySelector('#zf').value,fixture_types:(()=>{try{return JSON.parse(this.querySelector('#zft').value||'{}')}catch(e){return {}}})(),entity_ids:selected,source:this.querySelector('#zs').value,enabled:true,rdm_enabled:false});
+      let fixtureTypes={};
+      const rawFt=(d.fixtureTypes||'').trim();
+      if(rawFt){try{fixtureTypes=JSON.parse(rawFt)}catch(e){this._msg=`JSON invalide dans "Fixture par lampe": ${e.message}`;this.render();return}}
+      this._call('create_dmx_ha_zone',{zone_id:id,name,universe:Number(d.universe),channels:d.channels,mode:d.mode,fixture_type:d.fixture,fixture_types:fixtureTypes,entity_ids:selected,source:d.source,enabled:true,rdm_enabled:false});
+      this._resetZoneDraft();
     });
     this.querySelectorAll('[data-zone-toggle]').forEach(b=>b.addEventListener('click',()=>this._call('set_dmx_ha_zone_enabled',{zone_id:b.dataset.zoneToggle,enabled:b.dataset.value!=='true'})));
     this.querySelectorAll('[data-rdm-toggle]').forEach(b=>b.addEventListener('click',()=>this._call('set_dmx_ha_zone_rdm_enabled',{zone_id:b.dataset.rdmToggle,enabled:b.dataset.value!=='true'})));
@@ -1384,19 +1576,30 @@ snDefine('dmx-ha-zones-panel',DmxHaZonesPanel);
 /* ===== punchlight-network-panel.js ===== */
 class PunchLightNetworkPanel extends HTMLElement {
   set hass(h){this._hass=h;this.render()}
+  _loadScanState(){
+    // Same failure as SCAN NETWORK above: set hass() re-renders on every
+    // hass push with no guard, so a "Recherche..." string written
+    // directly into the button used to be overwritten well before the
+    // 3s discover_punchlight call actually finished (audit-confirmed: no
+    // visible feedback observed).
+    try{const raw=sessionStorage.getItem('show-network-punchlight-scan-state');return raw?JSON.parse(raw):null}catch(e){return null}
+  }
+  _saveScanState(state){try{sessionStorage.setItem('show-network-punchlight-scan-state',JSON.stringify(state))}catch(e){}}
   render(){
     if(!this._hass)return;
     const s=this._hass.states['sensor.dmx_monitor_punchlight_network'];
     const data=s?.attributes?.devices||[];
+    const scanState=this._loadScanState();
+    const scanActive=scanState && (scanState.status==='scanning' || (Date.now()-scanState.ts)<4000);
     const list=data.length?data.map(d=>'<div style="border-top:1px solid var(--divider-color);padding:8px 0">'+
       '<b>'+(d.name||'RTP-MIDI')+'</b><br>'+((d.addresses||[]).join(', ')||'IP inconnue')+' · port '+(d.port||'?')+'<br>'+      '<small>'+(d.type==='punchlight_dli_lan'?'PunchLight DLi-LAN — identifié':'Endpoint RTP-MIDI — candidat PunchLight, confirmation nécessaire')+'</small>'+      '</div>').join(''):'Aucun endpoint RTP-MIDI détecté.';
     this.innerHTML=`<ha-card header="🎙 PunchLight — Réseau">
       <div style="padding:12px;font-size:12px;color:var(--secondary-text-color)">
         Détection passive RTP-MIDI / Apple MIDI. Aucun MIDI ni contrôle n'est envoyé.
-        <div style="margin-top:10px"><button id="scan">🔎 Rechercher les PunchLight</button></div>
+        <div style="margin-top:10px"><button id="scan" ${scanState?.status==='scanning'?'disabled':''}>${scanActive?esc(scanState.message):'🔎 Rechercher les PunchLight'}</button></div>
         <div style="margin-top:10px">${list}</div>
       </div></ha-card>`;
-    this.querySelector('#scan')?.addEventListener('click',async()=>{const b=this.querySelector('#scan');b.disabled=true;b.textContent='Recherche…';try{const cfg=Object.values(this._hass.states||{}).find(x=>x.attributes&&('interface_dmx' in x.attributes))?.attributes||{};await this._hass.callService('dmx_monitor','discover_punchlight',{interface:cfg.interface_dmx||'0.0.0.0',timeout:3});b.textContent='Recherche terminée';setTimeout(()=>this.render(),250);}catch(e){b.textContent='Erreur: '+(e?.message||e)}finally{setTimeout(()=>{b.disabled=false;if(b.textContent==='Recherche terminée')b.textContent='🔎 Rechercher les PunchLight'},1200)}});
+    this.querySelector('#scan')?.addEventListener('click',async()=>{const b=this.querySelector('#scan');b.disabled=true;this._saveScanState({status:'scanning',message:'Recherche…',ts:Date.now()});b.textContent='Recherche…';try{const cfg=Object.values(this._hass.states||{}).find(x=>x.attributes&&('interface_dmx' in x.attributes))?.attributes||{};await this._hass.callService('dmx_monitor','discover_punchlight',{interface:cfg.interface_dmx||'0.0.0.0',timeout:3});this._saveScanState({status:'done',message:'Recherche terminée',ts:Date.now()});b.textContent='Recherche terminée';setTimeout(()=>this.render(),250);}catch(e){this._saveScanState({status:'error',message:'Erreur: '+(e?.message||e),ts:Date.now()});b.textContent='Erreur: '+(e?.message||e)}finally{setTimeout(()=>{b.disabled=false;if(b.textContent==='Recherche terminée')b.textContent='🔎 Rechercher les PunchLight'},1200)}});
   }
 }
 snDefine('punchlight-network-panel',PunchLightNetworkPanel);

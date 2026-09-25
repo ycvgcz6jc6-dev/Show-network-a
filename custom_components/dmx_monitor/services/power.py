@@ -1,7 +1,7 @@
 """Power Manager and receive-only DMX Circuit Monitor services."""
 from __future__ import annotations
 from homeassistant.core import HomeAssistant
-from ..services.common import coordinator_for_call, DOMAIN
+from ..services.common import coordinator_for_call, DOMAIN, guarded
 
 async def async_register(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, 'power_manager_upsert_button'):
@@ -45,8 +45,8 @@ async def async_register(hass: HomeAssistant) -> None:
         await hass.async_add_executor_job(c.dmx_circuit_monitor.remove,str(call.data['group_id']))
         c.publish(**c.dmx_circuit_monitor.snapshot())
 
-    hass.services.async_register(DOMAIN,'power_manager_upsert_button',_power_upsert)
-    hass.services.async_register(DOMAIN,'power_manager_remove_button',_power_remove)
-    hass.services.async_register(DOMAIN,'power_manager_run',_power_run)
-    hass.services.async_register(DOMAIN,'dmx_circuit_monitor_upsert',_circuit_upsert)
-    hass.services.async_register(DOMAIN,'dmx_circuit_monitor_remove',_circuit_remove)
+    hass.services.async_register(DOMAIN,'power_manager_upsert_button',guarded(_power_upsert))
+    hass.services.async_register(DOMAIN,'power_manager_remove_button',guarded(_power_remove))
+    hass.services.async_register(DOMAIN,'power_manager_run',guarded(_power_run))
+    hass.services.async_register(DOMAIN,'dmx_circuit_monitor_upsert',guarded(_circuit_upsert))
+    hass.services.async_register(DOMAIN,'dmx_circuit_monitor_remove',guarded(_circuit_remove))

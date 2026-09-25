@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
 
-from ..services.common import coordinator_for_call, DOMAIN
+from ..services.common import coordinator_for_call, DOMAIN, guarded
 
 async def async_register(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, "ha_builder_create"):
@@ -38,12 +38,12 @@ async def async_register(hass: HomeAssistant) -> None:
                 c.archive.record("ha", "builder_entity_removed", {"item_id": item_id})
             callbacks = getattr(c, "ha_builder_remove_callbacks", {})
             for cb in callbacks.values():
-                cb(item_id)
+                await cb(item_id)
         async def _ha_builder_set_state(call):
             c = coordinator_for_call(hass, call)
             await hass.async_add_executor_job(c.ha_builder.set_state, str(call.data["item_id"]), call.data.get("state"))
             c.data["ha_builder"] = c.ha_builder.snapshot()
             c.publish(ha_builder=c.data["ha_builder"])
-        hass.services.async_register(DOMAIN, "ha_builder_create", _ha_builder_create)
-        hass.services.async_register(DOMAIN, "ha_builder_remove", _ha_builder_remove)
-        hass.services.async_register(DOMAIN, "ha_builder_set_state", _ha_builder_set_state)
+        hass.services.async_register(DOMAIN, "ha_builder_create", guarded(_ha_builder_create))
+        hass.services.async_register(DOMAIN, "ha_builder_remove", guarded(_ha_builder_remove))
+        hass.services.async_register(DOMAIN, "ha_builder_set_state", guarded(_ha_builder_set_state))

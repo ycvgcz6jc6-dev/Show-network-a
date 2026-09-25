@@ -14,7 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 
 from .coordinator import ShowNetworkCoordinator
 from .entity import ShowNetworkEntity, DOMAIN
-from .ha_builder_entities import BuilderSensor, BuilderNumber
+from .ha_builder_entities import BuilderSensor, async_remove_builder_entity
 from .projector_platform import sensor_entities as projector_sensor_entities
 
 
@@ -84,6 +84,15 @@ SENSORS = (
     ("etc_cem3_temperature_max", "Température CPU ETC CEM3 max / Max ETC CEM3 CPU temperature", "°C"),
     ("switch_profiles", "Profils switches disponibles (catalogue) / Available switch profiles (catalogue)", None),
     ("switch_telemetry", "Télémétrie switches / Switch telemetry", None),
+    ("yamaha_osc_consoles", "Consoles Yamaha OSC / Yamaha OSC consoles", None),
+    ("qlab_status", "État QLab / QLab status", None),
+    ("resolume_status", "État Resolume / Resolume status", None),
+    ("nexus_audio_status", "État Nexus Audio / Nexus Audio status", None),
+    ("pdu_status", "État PDU / PDU status", None),
+    ("reolink_cameras", "Caméras Reolink / Reolink cameras", None),
+    ("nexus_audio_zones", "Sources Nexus Audio / Nexus Audio sources", None),
+    ("millumin_status", "État Millumin / Millumin status", None),
+    ("sendspin_dante_zones", "Zones Dante Sendspin / Sendspin Dante zones", None),
     ("projectors_total", "Projecteurs PJLink / PJLink projectors", None),
     ("projectors_online", "Projecteurs PJLink en ligne / Online PJLink projectors", None),
     ("projectors_errors", "Projecteurs PJLink en erreur / PJLink projectors with errors", None),
@@ -390,19 +399,25 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
         if self._key == "dmx_ha_mappings_total":
             return {"mappings": self.coordinator.data.get("dmx_ha_mappings", []), "light_sync_enabled": self.coordinator.data.get("light_sync_enabled", False)}
         if self._key in {"network_interfaces_up", "network_interfaces_stale", "network_packets_observed"}:
-            return {"interfaces": self.coordinator.data.get("network_interfaces", []), "network_health": self.coordinator.data.get("network_health", {})}
+            return {"interfaces": self.coordinator.data.get("network_interfaces", []), "network_health": self.coordinator.data.get("network_health", {}), "routes": self.coordinator.data.get("network_routes", [])}
         if self._key == "show_network_health":
-            return _bounded_attributes(dict(self.coordinator.data.get("show_network_health", {})))
+            bounded = self.coordinator.data.get("show_network_health_bounded")
+            return bounded if bounded is not None else _bounded_attributes(dict(self.coordinator.data.get("show_network_health", {})))
         if self._key == "show_network_devices":
-            return _bounded_attributes(dict(self.coordinator.data.get("device_model", {})))
+            bounded = self.coordinator.data.get("device_model_bounded")
+            return bounded if bounded is not None else _bounded_attributes(dict(self.coordinator.data.get("device_model", {})))
         if self._key == "show_network_doctor":
-            return _bounded_attributes(dict(self.coordinator.data.get("show_network_doctor", {})))
+            bounded = self.coordinator.data.get("show_network_doctor_bounded")
+            return bounded if bounded is not None else _bounded_attributes(dict(self.coordinator.data.get("show_network_doctor", {})))
         if self._key == "show_snapshot":
-            return _bounded_attributes(dict(self.coordinator.data.get("show_snapshot", {})))
+            bounded = self.coordinator.data.get("show_snapshot_bounded")
+            return bounded if bounded is not None else _bounded_attributes(dict(self.coordinator.data.get("show_snapshot", {})))
         if self._key == "incident_center":
-            return _bounded_attributes(dict(self.coordinator.data.get("incident_center", {})))
+            bounded = self.coordinator.data.get("incident_center_bounded")
+            return bounded if bounded is not None else _bounded_attributes(dict(self.coordinator.data.get("incident_center", {})))
         if self._key == "pre_show":
-            return _bounded_attributes(dict(self.coordinator.data.get("pre_show", {})))
+            bounded = self.coordinator.data.get("pre_show_bounded")
+            return bounded if bounded is not None else _bounded_attributes(dict(self.coordinator.data.get("pre_show", {})))
         if self._key in {"topology_nodes", "topology_links"}:
             return {"topology": self.coordinator.data.get("topology", {"nodes": [], "links": []})}
         if self._key == "journal_archive":
@@ -410,9 +425,11 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
         if self._key == "discovery_status":
             return dict(self.coordinator.data.get("discovery_status", {}))
         if self._key == "protocol_rx_diagnostics":
-            # Precomputed once per coordinator refresh cycle (see
-            # coordinator.py) instead of on every single attribute read --
-            # this is the fix for the confirmed 0.6s-per-update slowdown.
+            # Precomputed once per coordinator refresh cycle, batched
+            # with the other large diagnostic dicts below (see
+            # coordinator.py's _bound_all) instead of recomputed on
+            # every single attribute read -- this is the fix for the
+            # confirmed 0.6s-per-update slowdown on this exact sensor.
             bounded = self.coordinator.data.get("protocol_rx_diagnostics_bounded")
             if bounded is not None:
                 return bounded
@@ -434,13 +451,32 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
         if self._key == "etc_sensor_catalog":
             return {"sensors": self.coordinator.data.get("etc_sensor_catalog", [])}
         if self._key.startswith("etc_cem3_"):
-            return _bounded_attributes(dict(self.coordinator.data.get("etc_cem3", {})))
+            bounded = self.coordinator.data.get("etc_cem3_bounded")
+            return bounded if bounded is not None else _bounded_attributes(dict(self.coordinator.data.get("etc_cem3", {})))
         if self._key == "vendor_discovery":
             return {"services": self.coordinator.data.get("vendor_discovery", [])}
         if self._key == "switch_profiles":
             return {"profiles": self.coordinator.data.get("switch_profiles", [])}
         if self._key == "switch_telemetry":
             return {"switches": self.coordinator.data.get("switch_telemetry", [])}
+        if self._key == "yamaha_osc_consoles":
+            return {"consoles": self.coordinator.data.get("yamaha_osc_consoles", [])}
+        if self._key == "qlab_status":
+            return {"instances": self.coordinator.data.get("qlab_status", [])}
+        if self._key == "resolume_status":
+            return {"instances": self.coordinator.data.get("resolume_status", [])}
+        if self._key == "nexus_audio_status":
+            return {"instances": self.coordinator.data.get("nexus_audio_status", [])}
+        if self._key == "pdu_status":
+            return {"instances": self.coordinator.data.get("pdu_status", [])}
+        if self._key == "reolink_cameras":
+            return self.coordinator.data.get("reolink_cameras", {})
+        if self._key == "nexus_audio_zones":
+            return {"sources": self.coordinator.data.get("nexus_audio_zones", [])}
+        if self._key == "millumin_status":
+            return self.coordinator.data.get("millumin_status", {})
+        if self._key == "sendspin_dante_zones":
+            return {"zones": self.coordinator.data.get("sendspin_dante_zones", [])}
         if self._key in {"audio_amplifiers_total", "audio_amplifiers_online", "audio_amplifiers_errors", "audio_amplifier_temperature_max"}:
             return {
                 "amplifiers": self.coordinator.data.get("audio_amplifiers", []),
@@ -580,13 +616,27 @@ async def async_setup_entry(
     etc_hosts = list(getattr(getattr(coordinator, "etc_cem3_monitor", None), "hosts", ()))
     entities.extend(ETCCEM3RackSensor(coordinator, host) for host in etc_hosts)
     entities.extend(ETCCEM3MetricSensor(coordinator, host, metric) for host in etc_hosts for metric in ETCCEM3MetricSensor.METRICS)
-    entities.extend(BuilderSensor(coordinator, item) for item in coordinator.ha_builder.items.values() if item.entity_type == "sensor" and item.enabled)
-    entities.extend(BuilderNumber(coordinator, item) for item in coordinator.ha_builder.items.values() if item.entity_type == "number" and item.enabled)
+    builder_entities = [BuilderSensor(coordinator, item) for item in coordinator.ha_builder.items.values() if item.entity_type == "sensor" and item.enabled]
+    entities.extend(builder_entities)
     async_add_entities(entities)
+    live_builder_sensors = {e.item_id: e for e in builder_entities}
     coordinator.ha_builder_callbacks = getattr(coordinator, "ha_builder_callbacks", {})
-    coordinator.ha_builder_callbacks["sensor"] = lambda item: async_add_entities([BuilderSensor(coordinator, item)])
-    coordinator.ha_builder_callbacks["number"] = lambda item: async_add_entities([BuilderNumber(coordinator, item)])
+    def _add_sensor(item):
+        e = BuilderSensor(coordinator, item)
+        live_builder_sensors[item.item_id] = e
+        async_add_entities([e])
+    coordinator.ha_builder_callbacks["sensor"] = _add_sensor
+    # "number" items are owned exclusively by number.py's own async_setup_entry.
+    # This module used to also register them here, which added every
+    # HA Builder "number" item a second time under the sensor.* domain in
+    # addition to the correct number.* entity (audit-confirmed duplicate:
+    # "un sensor portant aussi le nom du nombre est visible en plus de number").
     coordinator.ha_builder_remove_callbacks = getattr(coordinator, "ha_builder_remove_callbacks", {})
+    async def _remove_sensor(item_id):
+        entity = live_builder_sensors.pop(item_id, None)
+        if entity is not None:
+            await async_remove_builder_entity(hass, "sensor", entity)
+    coordinator.ha_builder_remove_callbacks["sensor"] = _remove_sensor
 
 
 

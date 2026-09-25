@@ -24,6 +24,41 @@ _VIDEO_MARKERS = (
 )
 
 
+def _reolink_candidate_stream_urls(host: str, port: int | None) -> list[str]:
+    """Candidate RTSP URLs for a Reolink device, built from Reolink's own
+    documented format (support.reolink.com/articles/900000630706
+    -Introduction-to-RTSP/: "rtsp://<username>:<password>@<IP address>/
+    Preview_<channel number>_<stream type>", default port 554) combined
+    with the concrete path segment ("h264Preview_01_main" /
+    "h265Preview_01_main") confirmed by Reolink's own community-support
+    replies and independent camera-integration guides (VisioForge SDK
+    docs, Frigate NVR docs).
+
+    Deliberately TWO candidates, not one: a real, reported Home Assistant
+    core issue (github.com/home-assistant/core/issues/85659, a Reolink
+    RLC-820A) shows the h264-prefixed path 404s on some newer camera
+    generations, which require h265Preview_... instead -- a genuine,
+    model-dependent ambiguity passive mDNS discovery has no way to
+    resolve on its own. Presenting a single guessed URL as "the" answer
+    would be silently wrong for some real cameras; both candidates are
+    returned, clearly unverified (see the "candidate", never-probed
+    wording used identically for grandMA3's Web Remote URL in
+    ma_remote.py before its own real TCP probe existed).
+
+    Never opens a socket to test either URL -- this module's own
+    docstring statement ("no sockets are opened to media endpoints")
+    applies here too. Credentials are never known from mDNS, so the
+    placeholders are left as literal <username>:<password> tokens for
+    the person to fill in themselves, matching Reolink's own
+    documentation's own notation for the same reason.
+    """
+    port_part = f":{port}" if port and port != 554 else ""
+    return [
+        f"rtsp://<username>:<password>@{host}{port_part}/h264Preview_01_main",
+        f"rtsp://<username>:<password>@{host}{port_part}/h265Preview_01_main",
+    ]
+
+
 def _text(value: Any) -> str:
     if value is None:
         return ""
@@ -99,6 +134,7 @@ class VideoIPEndpoint:
     host: str | None = None
     port: int | None = None
     uri: str | None = None
+    candidate_stream_urls: list[str] = field(default_factory=list)
     discovery: str = "passive"
     interface: str | None = None
     evidence: list[str] = field(default_factory=list)
@@ -115,6 +151,7 @@ class VideoIPEndpoint:
             "host": self.host,
             "port": self.port,
             "uri": self.uri,
+            "candidate_stream_urls": list(self.candidate_stream_urls),
             "discovery": self.discovery,
             "interface": self.interface,
             "evidence": list(self.evidence[-8:]),
@@ -197,6 +234,19 @@ class VideoIPSupervision:
         ep.host = host or ep.host
         ep.port = port or ep.port
         ep.uri = uri or ep.uri
+        if protocol == "RTSP" and host and not path and "reolink" in _haystack(row):
+            # No explicit path in the mDNS advertisement (very common --
+            # not every RTSP DNS-SD announcement includes a stream path),
+            # so the plain `uri` above is just "rtsp://host:port", which
+            # will not work against a real Reolink camera. See
+            # _reolink_candidate_stream_urls's own docstring for why two
+            # unverified candidates are offered rather than one guess.
+            ep.candidate_stream_urls = _reolink_candidate_stream_urls(host, port)
+        elif path:  # a real path was given by this observation -- any earlier
+            # unverified Reolink guess is now moot, drop it rather than
+            # leave a stale, lower-confidence candidate sitting next to a
+            # confirmed uri.
+            ep.candidate_stream_urls = []
         ep.discovery = "mDNS/DNS-SD"
         ep.interface = (self.interface if self.interface != "0.0.0.0" else (_text(row.get("interface")) or ep.interface))
         ep.properties = props or ep.properties

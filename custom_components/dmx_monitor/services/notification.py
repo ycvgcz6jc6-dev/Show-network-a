@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
 
-from ..services.common import coordinator_for_call, DOMAIN
+from ..services.common import coordinator_for_call, DOMAIN, guarded
 
 async def async_register(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, "set_notification_config"):
@@ -16,4 +16,4 @@ async def async_register(hass: HomeAssistant) -> None:
             c.publish(notification=c.data["notification"])
             if c.archive:
                 c.archive.record("ha", "notification_config_changed", {"enabled": c.notifications.enabled, "configured": bool(c.notifications.target)})
-        hass.services.async_register(DOMAIN, "set_notification_config", _set_notification_config)
+        hass.services.async_register(DOMAIN, "set_notification_config", guarded(_set_notification_config))

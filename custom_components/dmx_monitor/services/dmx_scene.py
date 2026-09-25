@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
-from .common import coordinator_for_call, DOMAIN
+from .common import coordinator_for_call, DOMAIN, guarded
 
 
 async def async_register(hass: HomeAssistant) -> None:
@@ -46,8 +46,8 @@ async def async_register(hass: HomeAssistant) -> None:
         await c.dmx_scene_bank.recall(str(call.data["scene_id"]))
         c.publish(**c.dmx_scene_bank.snapshot())
 
-    hass.services.async_register(DOMAIN, "dmx_scene_configure_output", _configure)
-    hass.services.async_register(DOMAIN, "dmx_scene_save", _save)
-    hass.services.async_register(DOMAIN, "dmx_scene_delete", _delete)
-    hass.services.async_register(DOMAIN, "dmx_scene_set_enabled", _enable)
-    hass.services.async_register(DOMAIN, "dmx_scene_recall", _recall)
+    hass.services.async_register(DOMAIN, "dmx_scene_configure_output", guarded(_configure))
+    hass.services.async_register(DOMAIN, "dmx_scene_save", guarded(_save))
+    hass.services.async_register(DOMAIN, "dmx_scene_delete", guarded(_delete))
+    hass.services.async_register(DOMAIN, "dmx_scene_set_enabled", guarded(_enable))
+    hass.services.async_register(DOMAIN, "dmx_scene_recall", guarded(_recall))

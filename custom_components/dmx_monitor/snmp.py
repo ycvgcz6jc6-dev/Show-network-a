@@ -158,3 +158,17 @@ async def async_walk(host: str, community: str, base_oid: str, *, timeout: float
         if oid in seen or not (oid == base or oid.startswith(base+'.')): break
         seen.add(oid); rows.append(item); current=oid
     return rows
+
+def index_suffix(oid: str, base: str) -> str | None:
+    """The trailing index portion of a walked table OID (everything after
+    ``base``), or None if ``oid`` isn't actually under ``base`` at all (a
+    walk can run one step past its own subtree before async_walk's own
+    boundary check stops it). Shared by every module that walks an SNMP
+    table -- switch_port_telemetry.py (IF-MIB, single ifIndex),
+    lldp_discovery.py (LLDP-MIB's composite index), switch_temperature.py
+    (ENTITY-SENSOR-MIB) -- kept here rather than in any one of them to
+    avoid a circular import between modules that both need it."""
+    base = base.strip('.')
+    if oid == base or not oid.startswith(base + '.'):
+        return None
+    return oid[len(base) + 1:]

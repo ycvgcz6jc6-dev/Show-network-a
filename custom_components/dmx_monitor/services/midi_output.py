@@ -6,7 +6,7 @@ from dataclasses import asdict
 from homeassistant.core import HomeAssistant
 from ..const import DOMAIN
 from ..midi_output import MIDITarget
-from ..services.common import coordinator_for_call
+from ..services.common import coordinator_for_call, guarded
 
 
 async def async_register(hass: HomeAssistant) -> None:
@@ -51,7 +51,7 @@ async def async_register(hass: HomeAssistant) -> None:
         await c.midi_output.async_send(target, str(call.data["message_type"]), data)
         c.publish(midi_output=c.midi_output.snapshot(), midi_output_sent=c.midi_output.sent)
 
-    hass.services.async_register(DOMAIN, "set_midi_output_enabled", _set_enabled)
-    hass.services.async_register(DOMAIN, "create_midi_target", _create_target)
-    hass.services.async_register(DOMAIN, "remove_midi_target", _remove_target)
-    hass.services.async_register(DOMAIN, "send_midi", _send)
+    hass.services.async_register(DOMAIN, "set_midi_output_enabled", guarded(_set_enabled))
+    hass.services.async_register(DOMAIN, "create_midi_target", guarded(_create_target))
+    hass.services.async_register(DOMAIN, "remove_midi_target", guarded(_remove_target))
+    hass.services.async_register(DOMAIN, "send_midi", guarded(_send))

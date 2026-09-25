@@ -74,7 +74,25 @@
           "qlcplus_enabled": "Abilita bridge QLC+",
           "qlcplus_host": "Indirizzo IP QLC+",
           "qlcplus_port": "Porta WebSocket QLC+",
-          "ups_hosts": "Gruppi di continuità UPS (IP separati da virgole)"
+          "ups_hosts": "Gruppi di continuità UPS (IP separati da virgole)",
+          "dmx_artnet_enabled": "Ascolta Art-Net",
+          "dmx_sacn_enabled": "Ascolta sACN",
+          "dmx_source": "Filtra una sorgente DMX (IP, vuoto = tutte)",
+          "ma_enabled": "Abilita l'ascolto MA-Net3",
+          "yamaha_osc_hosts": "Host Yamaha OSC",
+          "qlab_hosts": "Host QLab",
+          "resolume_hosts": "Host Resolume",
+          "nexus_audio_hosts": "Host Nexus Audio",
+          "millumin_listen_port": "Porta di ascolto Millumin (0 = disabilitato)",
+          "millumin_ping_target": "Destinazione ping Millumin (host:porta, opzionale)",
+          "greengo_multicast_group": "Gruppo multicast Green-GO (vuoto = disabilitato)",
+          "sendspin_dante_players": "Entità media_player Sendspin/spin2dante",
+          "avdecc_bridge_url": "URL del bridge AVDECC",
+          "rdm_bridge_url": "URL del bridge RDM",
+          "rdmnet_bridge_url": "URL del bridge RDMnet",
+          "pdu_hosts": "Host PDU (host:produttore, separati da virgole; produttori: apc, raritan)",
+          "reolink_ha_enabled": "Leggi le telecamere Reolink dall'integrazione ufficiale di Home Assistant",
+          "nexus_audio_players": "Entità media_player Nexus Audio (separate da virgole)"
         },
         "data_description": {
           "aes70_hosts": "Comma-separated AES70 hostnames or IP addresses to query."
@@ -153,9 +171,31 @@
           "qlcplus_enabled": "Abilita bridge QLC+",
           "qlcplus_host": "Indirizzo IP QLC+",
           "qlcplus_port": "Porta WebSocket QLC+",
-          "ups_hosts": "Gruppi di continuità UPS (IP separati da virgole)"
+          "ups_hosts": "Gruppi di continuità UPS (IP separati da virgole)",
+          "dmx_artnet_enabled": "Ascolta Art-Net",
+          "dmx_sacn_enabled": "Ascolta sACN",
+          "dmx_source": "Filtra una sorgente DMX (IP, vuoto = tutte)",
+          "ma_enabled": "Abilita l'ascolto MA-Net3",
+          "yamaha_osc_hosts": "Host Yamaha OSC",
+          "qlab_hosts": "Host QLab",
+          "resolume_hosts": "Host Resolume",
+          "nexus_audio_hosts": "Host Nexus Audio",
+          "millumin_listen_port": "Porta di ascolto Millumin (0 = disabilitato)",
+          "millumin_ping_target": "Destinazione ping Millumin (host:porta, opzionale)",
+          "greengo_multicast_group": "Gruppo multicast Green-GO (vuoto = disabilitato)",
+          "sendspin_dante_players": "Entità media_player Sendspin/spin2dante",
+          "avdecc_bridge_url": "URL del bridge AVDECC",
+          "rdm_bridge_url": "URL del bridge RDM",
+          "rdmnet_bridge_url": "URL del bridge RDMnet",
+          "pdu_hosts": "Host PDU (host:produttore, separati da virgole; produttori: apc, raritan)",
+          "reolink_ha_enabled": "Leggi le telecamere Reolink dall'integrazione ufficiale di Home Assistant",
+          "nexus_audio_players": "Entità media_player Nexus Audio (separate da virgole)"
         }
       }
+    },
+    "error": {
+      "invalid_json": "Il campo «proiettori» deve essere JSON valido (un elenco).",
+      "port_in_use": "La porta di ingresso OSC configurata è già utilizzata da un altro processo. Scegliere un'altra porta o liberare quella attuale."
     }
   },
   "options": {
@@ -230,9 +270,33 @@
           "qlcplus_enabled": "Abilita bridge QLC+",
           "qlcplus_host": "Indirizzo IP QLC+",
           "qlcplus_port": "Porta WebSocket QLC+",
-          "ups_hosts": "Gruppi di continuità UPS (IP separati da virgole)"
+          "ups_hosts": "Gruppi di continuità UPS (IP separati da virgole)",
+          "dmx_artnet_enabled": "Ascolta Art-Net",
+          "dmx_sacn_enabled": "Ascolta sACN",
+          "dmx_source": "Filtra una sorgente DMX (IP, vuoto = tutte)",
+          "ma_enabled": "Abilita l'ascolto MA-Net3",
+          "yamaha_osc_hosts": "Host Yamaha OSC",
+          "qlab_hosts": "Host QLab",
+          "resolume_hosts": "Host Resolume",
+          "nexus_audio_hosts": "Host Nexus Audio",
+          "millumin_listen_port": "Porta di ascolto Millumin (0 = disabilitato)",
+          "millumin_ping_target": "Destinazione ping Millumin (host:porta, opzionale)",
+          "greengo_multicast_group": "Gruppo multicast Green-GO (vuoto = disabilitato)",
+          "sendspin_dante_players": "Entità media_player Sendspin/spin2dante",
+          "avdecc_bridge_url": "URL del bridge AVDECC",
+          "rdm_bridge_url": "URL del bridge RDM",
+          "rdmnet_bridge_url": "URL del bridge RDMnet",
+          "aes70_hosts": "Host AES70/OCA",
+          "aes70_port": "Porta AES70/OCA",
+          "pdu_hosts": "Host PDU (host:produttore, separati da virgole; produttori: apc, raritan)",
+          "reolink_ha_enabled": "Leggi le telecamere Reolink dall'integrazione ufficiale di Home Assistant",
+          "nexus_audio_players": "Entità media_player Nexus Audio (separate da virgole)"
         }
       }
+    },
+    "error": {
+      "invalid_json": "Il campo «proiettori» deve essere JSON valido (un elenco).",
+      "port_in_use": "La porta di ingresso OSC configurata è già utilizzata da un altro processo. Scegliere un'altra porta o liberare quella attuale."
     }
   }
 }

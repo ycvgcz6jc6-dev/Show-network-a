@@ -33,7 +33,7 @@ class ShowSnapshotManager:
     def _capture(data: dict) -> dict:
         devices=[]
         for d in data.get("device_model", {}).get("devices", []):
-            devices.append({k:d.get(k) for k in ("id","name","ip","mac","manufacturer","model","firmware","interface","vlan","switch_name","switch_port","link_speed_mbps","protocols") if d.get(k) not in (None,"",[])})
+            devices.append({k:d.get(k) for k in ("id","name","ip","mac","manufacturer","model","firmware","interface","vlan","switch_name","switch_port","link_speed_mbps","protocols","monitor_mode") if d.get(k) not in (None,"",[])})
         dmx=[]
         for row in data.get("dmx_universe_matrix", []):
             for s in row.get("sources", []):
@@ -76,9 +76,19 @@ class ShowSnapshotManager:
         active=self._data.get("active"); snap=self._data.get("snapshots",{}).get(active) if active else None
         if not snap: return {"state":"no_reference","active":None,"snapshots":list(self._data.get("snapshots",{})),"differences":[]}
         ref=snap["reference"]; cur=self._capture(data); diffs=[]
+        # Phase C10 (rapport maître S100): "Les favoris deviennent le
+        # périmètre privilégié de Doctor/Incident/History." Cross-
+        # referenced against the *current* device model (favorite status
+        # is a live preference, not something worth freezing into an old
+        # reference snapshot) rather than threading a new parameter
+        # through compare()'s signature, since `data` -- the full
+        # coordinator snapshot -- already carries device_model by the
+        # time compare() runs (coordinator.py builds device_model earlier
+        # in the same refresh cycle).
+        favorite_ids={d.get("id") for d in (data.get("device_model") or {}).get("devices", []) if d.get("monitor_mode")=="monitor"}
         rd={self._device_key(x):x for x in ref.get("devices",[]) if self._device_key(x)}; cd={self._device_key(x):x for x in cur.get("devices",[]) if self._device_key(x)}
-        for k in sorted(rd.keys()-cd.keys()): diffs.append({"severity":"warning","kind":"device_missing","label":rd[k].get("name") or rd[k].get("ip") or k,"reference":rd[k]})
-        for k in sorted(cd.keys()-rd.keys()): diffs.append({"severity":"info","kind":"device_new","label":cd[k].get("name") or cd[k].get("ip") or k,"current":cd[k]})
+        for k in sorted(rd.keys()-cd.keys()): diffs.append({"severity":"warning","kind":"device_missing","label":rd[k].get("name") or rd[k].get("ip") or k,"reference":rd[k],"favorite_related":k in favorite_ids or rd[k].get("monitor_mode")=="monitor"})
+        for k in sorted(cd.keys()-rd.keys()): diffs.append({"severity":"info","kind":"device_new","label":cd[k].get("name") or cd[k].get("ip") or k,"current":cd[k],"favorite_related":k in favorite_ids})
         rs={self._dmx_key(x):x for x in ref.get("dmx_sources",[])}; cs={self._dmx_key(x):x for x in cur.get("dmx_sources",[])}
         for k in sorted(rs.keys()-cs.keys()): diffs.append({"severity":"warning","kind":"dmx_source_missing","label":f"{k[0]} U{k[1]} {k[2]}","reference":rs[k]})
         for k in sorted(cs.keys()-rs.keys()): diffs.append({"severity":"info","kind":"dmx_source_new","label":f"{k[0]} U{k[1]} {k[2]}","current":cs[k]})
@@ -91,7 +101,7 @@ class ShowSnapshotManager:
             for field in ("ip","mac","firmware","interface","vlan","switch_name","switch_port","link_speed_mbps"):
                 if r.get(field) not in (None,"") and c.get(field) not in (None,"") and r.get(field) != c.get(field):
                     sev = "warning" if field in {"mac","firmware","vlan","switch_name","switch_port","link_speed_mbps"} else "info"
-                    diffs.append({"severity":sev,"kind":"device_fact_changed","field":field,"label":r.get("name") or c.get("name") or k,"reference":r.get(field),"current":c.get(field)})
+                    diffs.append({"severity":sev,"kind":"device_fact_changed","field":field,"label":r.get("name") or c.get("name") or k,"reference":r.get(field),"current":c.get(field),"favorite_related":k in favorite_ids})
         def swkey(x): return str(x.get("ip") or x.get("name") or "")
         def pkey(x): return str(x.get("index") if x.get("index") is not None else x.get("name") or "")
         rsw={swkey(x):x for x in ref.get("switches",[]) if swkey(x)}; csw={swkey(x):x for x in cur.get("switches",[]) if swkey(x)}
@@ -108,4 +118,5 @@ class ShowSnapshotManager:
             for k in sorted(rsub.keys()-csub.keys()): diffs.append({"severity":"warning","kind":"dante_subscription_missing","label":f"{k[2]}/{k[3]} → {k[0]}/{k[1]}","reference":rsub[k]})
             for k in sorted(csub.keys()-rsub.keys()): diffs.append({"severity":"info","kind":"dante_subscription_new","label":f"{k[2]}/{k[3]} → {k[0]}/{k[1]}","current":csub[k]})
         warnings=sum(1 for x in diffs if x["severity"]=="warning")
-        return {"state":"warning" if warnings else "match","active":active,"created_at":snap.get("created_at"),"snapshots":list(self._data.get("snapshots",{})),"reference_counts":{"devices":len(rd),"dmx_sources":len(rs),"switches":len(ref.get("switches",[])),"dante_subscriptions":len(ref.get("dante_subscriptions",[]))},"current_counts":{"devices":len(cd),"dmx_sources":len(cs),"switches":len(cur.get("switches",[])),"dante_subscriptions":len(cur.get("dante_subscriptions",[]))},"difference_count":len(diffs),"warning_count":warnings,"differences":diffs[:100]}
+        favorite_differences=sum(1 for x in diffs if x.get("favorite_related"))
+        return {"state":"warning" if warnings else "match","active":active,"created_at":snap.get("created_at"),"snapshots":list(self._data.get("snapshots",{})),"reference_counts":{"devices":len(rd),"dmx_sources":len(rs),"switches":len(ref.get("switches",[])),"dante_subscriptions":len(ref.get("dante_subscriptions",[]))},"current_counts":{"devices":len(cd),"dmx_sources":len(cs),"switches":len(cur.get("switches",[])),"dante_subscriptions":len(cur.get("dante_subscriptions",[]))},"difference_count":len(diffs),"warning_count":warnings,"favorite_difference_count":favorite_differences,"differences":diffs[:100]}

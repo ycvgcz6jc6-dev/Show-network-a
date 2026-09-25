@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
-from ..services.common import coordinator_for_call, DOMAIN
+from ..services.common import coordinator_for_call, DOMAIN, guarded
 
 
 async def async_register(hass: HomeAssistant) -> None:
@@ -52,8 +52,8 @@ async def async_register(hass: HomeAssistant) -> None:
         if c.archive:
             c.archive.record("system", "gdtf_control_gate_changed", {"enabled": c.fixture_control.control_enabled})
 
-    hass.services.async_register(DOMAIN, "gdtf_import", _import)
-    hass.services.async_register(DOMAIN, "fixture_patch_upsert", _patch_upsert)
-    hass.services.async_register(DOMAIN, "fixture_patch_remove", _patch_remove)
-    hass.services.async_register(DOMAIN, "fixture_set_attribute", _set_attribute)
-    hass.services.async_register(DOMAIN, "set_fixture_control_enabled", _set_control_enabled)
+    hass.services.async_register(DOMAIN, "gdtf_import", guarded(_import))
+    hass.services.async_register(DOMAIN, "fixture_patch_upsert", guarded(_patch_upsert))
+    hass.services.async_register(DOMAIN, "fixture_patch_remove", guarded(_patch_remove))
+    hass.services.async_register(DOMAIN, "fixture_set_attribute", guarded(_set_attribute))
+    hass.services.async_register(DOMAIN, "set_fixture_control_enabled", guarded(_set_control_enabled))

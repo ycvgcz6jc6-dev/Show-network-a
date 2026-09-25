@@ -74,7 +74,25 @@
           "qlcplus_enabled": "QLC+-brug inschakelen",
           "qlcplus_host": "QLC+ IP-adres",
           "qlcplus_port": "QLC+ WebSocket-poort",
-          "ups_hosts": "UPS-eenheden (IP's gescheiden door komma's)"
+          "ups_hosts": "UPS-eenheden (IP's gescheiden door komma's)",
+          "dmx_artnet_enabled": "Art-Net beluisteren",
+          "dmx_sacn_enabled": "sACN beluisteren",
+          "dmx_source": "Een DMX-bron filteren (IP, leeg = alle)",
+          "ma_enabled": "MA-Net3-luisteren inschakelen",
+          "yamaha_osc_hosts": "Yamaha OSC-hosts",
+          "qlab_hosts": "QLab-hosts",
+          "resolume_hosts": "Resolume-hosts",
+          "nexus_audio_hosts": "Nexus Audio-hosts",
+          "millumin_listen_port": "Millumin-luisterpoort (0 = uitgeschakeld)",
+          "millumin_ping_target": "Millumin-ping-doel (host:poort, optioneel)",
+          "greengo_multicast_group": "Green-GO-multicastgroep (leeg = uitgeschakeld)",
+          "sendspin_dante_players": "Sendspin/spin2dante media_player-entiteiten",
+          "avdecc_bridge_url": "AVDECC-bridge-URL",
+          "rdm_bridge_url": "RDM-bridge-URL",
+          "rdmnet_bridge_url": "RDMnet-bridge-URL",
+          "pdu_hosts": "PDU-hosts (host:merk, kommagescheiden; merken: apc, raritan)",
+          "reolink_ha_enabled": "Reolink-camera's lezen uit de officiële Home Assistant-integratie",
+          "nexus_audio_players": "Nexus Audio media_player-entiteiten (kommagescheiden)"
         },
         "data_description": {
           "aes70_hosts": "Comma-separated AES70 hostnames or IP addresses to query."
@@ -153,9 +171,31 @@
           "qlcplus_enabled": "QLC+-brug inschakelen",
           "qlcplus_host": "QLC+ IP-adres",
           "qlcplus_port": "QLC+ WebSocket-poort",
-          "ups_hosts": "UPS-eenheden (IP's gescheiden door komma's)"
+          "ups_hosts": "UPS-eenheden (IP's gescheiden door komma's)",
+          "dmx_artnet_enabled": "Art-Net beluisteren",
+          "dmx_sacn_enabled": "sACN beluisteren",
+          "dmx_source": "Een DMX-bron filteren (IP, leeg = alle)",
+          "ma_enabled": "MA-Net3-luisteren inschakelen",
+          "yamaha_osc_hosts": "Yamaha OSC-hosts",
+          "qlab_hosts": "QLab-hosts",
+          "resolume_hosts": "Resolume-hosts",
+          "nexus_audio_hosts": "Nexus Audio-hosts",
+          "millumin_listen_port": "Millumin-luisterpoort (0 = uitgeschakeld)",
+          "millumin_ping_target": "Millumin-ping-doel (host:poort, optioneel)",
+          "greengo_multicast_group": "Green-GO-multicastgroep (leeg = uitgeschakeld)",
+          "sendspin_dante_players": "Sendspin/spin2dante media_player-entiteiten",
+          "avdecc_bridge_url": "AVDECC-bridge-URL",
+          "rdm_bridge_url": "RDM-bridge-URL",
+          "rdmnet_bridge_url": "RDMnet-bridge-URL",
+          "pdu_hosts": "PDU-hosts (host:merk, kommagescheiden; merken: apc, raritan)",
+          "reolink_ha_enabled": "Reolink-camera's lezen uit de officiële Home Assistant-integratie",
+          "nexus_audio_players": "Nexus Audio media_player-entiteiten (kommagescheiden)"
         }
       }
+    },
+    "error": {
+      "invalid_json": "Het veld ‘projectoren’ moet geldige JSON zijn (een lijst).",
+      "port_in_use": "De geconfigureerde OSC-ingangspoort wordt al gebruikt door een ander proces. Kies een andere poort of maak de huidige vrij."
     }
   },
   "options": {
@@ -230,9 +270,33 @@
           "qlcplus_enabled": "QLC+-brug inschakelen",
           "qlcplus_host": "QLC+ IP-adres",
           "qlcplus_port": "QLC+ WebSocket-poort",
-          "ups_hosts": "UPS-eenheden (IP's gescheiden door komma's)"
+          "ups_hosts": "UPS-eenheden (IP's gescheiden door komma's)",
+          "dmx_artnet_enabled": "Art-Net beluisteren",
+          "dmx_sacn_enabled": "sACN beluisteren",
+          "dmx_source": "Een DMX-bron filteren (IP, leeg = alle)",
+          "ma_enabled": "MA-Net3-luisteren inschakelen",
+          "yamaha_osc_hosts": "Yamaha OSC-hosts",
+          "qlab_hosts": "QLab-hosts",
+          "resolume_hosts": "Resolume-hosts",
+          "nexus_audio_hosts": "Nexus Audio-hosts",
+          "millumin_listen_port": "Millumin-luisterpoort (0 = uitgeschakeld)",
+          "millumin_ping_target": "Millumin-ping-doel (host:poort, optioneel)",
+          "greengo_multicast_group": "Green-GO-multicastgroep (leeg = uitgeschakeld)",
+          "sendspin_dante_players": "Sendspin/spin2dante media_player-entiteiten",
+          "avdecc_bridge_url": "AVDECC-bridge-URL",
+          "rdm_bridge_url": "RDM-bridge-URL",
+          "rdmnet_bridge_url": "RDMnet-bridge-URL",
+          "aes70_hosts": "AES70/OCA-hosts",
+          "aes70_port": "AES70/OCA-poort",
+          "pdu_hosts": "PDU-hosts (host:merk, kommagescheiden; merken: apc, raritan)",
+          "reolink_ha_enabled": "Reolink-camera's lezen uit de officiële Home Assistant-integratie",
+          "nexus_audio_players": "Nexus Audio media_player-entiteiten (kommagescheiden)"
         }
       }
+    },
+    "error": {
+      "invalid_json": "Het veld ‘projectoren’ moet geldige JSON zijn (een lijst).",
+      "port_in_use": "De geconfigureerde OSC-ingangspoort wordt al gebruikt door een ander proces. Kies een andere poort of maak de huidige vrij."
     }
   }
 }

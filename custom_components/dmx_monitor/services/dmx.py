@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
 
-from ..services.common import coordinator_for_call, DOMAIN
+from ..services.common import coordinator_for_call, DOMAIN, guarded
 from ..rules import parse_channel_selection
 from ..dmx_ha_mapping import DmxHAMapping
 from ..dmx_ha_zones import DmxHAZone
@@ -13,7 +13,6 @@ async def async_register(hass: HomeAssistant) -> None:
         async def _create_dmx_ha_mapping(call):
             coordinator = coordinator_for_call(hass, call)
             from ..dmx_ha_mapping_storage import DmxHAMappingStore
-            import dataclasses
             data = call.data
             channels = tuple(parse_channel_selection(str(data["channels"])))
             mapping = DmxHAMapping(
@@ -97,11 +96,11 @@ async def async_register(hass: HomeAssistant) -> None:
             coordinator = coordinator_for_call(hass, call)
             await coordinator.async_set_dmx_ha_mapping_highlight(str(call.data["mapping_id"]), bool(call.data["enabled"]))
 
-        hass.services.async_register(DOMAIN, "create_dmx_ha_mapping", _create_dmx_ha_mapping)
-        hass.services.async_register(DOMAIN, "remove_dmx_ha_mapping", _remove_dmx_ha_mapping)
-        hass.services.async_register(DOMAIN, "set_dmx_ha_mapping_highlight", _set_dmx_ha_mapping_highlight)
-        hass.services.async_register(DOMAIN, "create_dmx_ha_zone", _create_dmx_ha_zone)
-        hass.services.async_register(DOMAIN, "remove_dmx_ha_zone", _remove_dmx_ha_zone)
-        hass.services.async_register(DOMAIN, "set_dmx_ha_zone_enabled", _set_dmx_ha_zone_enabled)
-        hass.services.async_register(DOMAIN, "set_dmx_ha_zone_rdm_enabled", _set_dmx_ha_zone_rdm_enabled)
-        hass.services.async_register(DOMAIN, "observe_dmx_ha_rdm", _observe_dmx_ha_rdm)
+        hass.services.async_register(DOMAIN, "create_dmx_ha_mapping", guarded(_create_dmx_ha_mapping))
+        hass.services.async_register(DOMAIN, "remove_dmx_ha_mapping", guarded(_remove_dmx_ha_mapping))
+        hass.services.async_register(DOMAIN, "set_dmx_ha_mapping_highlight", guarded(_set_dmx_ha_mapping_highlight))
+        hass.services.async_register(DOMAIN, "create_dmx_ha_zone", guarded(_create_dmx_ha_zone))
+        hass.services.async_register(DOMAIN, "remove_dmx_ha_zone", guarded(_remove_dmx_ha_zone))
+        hass.services.async_register(DOMAIN, "set_dmx_ha_zone_enabled", guarded(_set_dmx_ha_zone_enabled))
+        hass.services.async_register(DOMAIN, "set_dmx_ha_zone_rdm_enabled", guarded(_set_dmx_ha_zone_rdm_enabled))
+        hass.services.async_register(DOMAIN, "observe_dmx_ha_rdm", guarded(_observe_dmx_ha_rdm))

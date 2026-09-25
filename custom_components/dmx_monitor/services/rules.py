@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
 
-from ..services.common import coordinator_for_call, DOMAIN
+from ..services.common import coordinator_for_call, DOMAIN, guarded
 from ..rules import DmxAction, DmxCondition, DmxRule, parse_channel_selection
 
 async def async_register(hass: HomeAssistant) -> None:
@@ -80,11 +80,11 @@ async def async_register(hass: HomeAssistant) -> None:
             await coordinator.async_save_rules()
             coordinator.publish(dmx_rules=coordinator.rules.snapshot())
 
-        hass.services.async_register(DOMAIN, "create_rule", _create_rule)
-        hass.services.async_register(DOMAIN, "update_rule", _update_rule)
-        hass.services.async_register(DOMAIN, "remove_rule", _remove_rule)
-        hass.services.async_register(DOMAIN, "set_rule_enabled", _set_rule_enabled)
-        hass.services.async_register(DOMAIN, "set_rule_test_mode", _set_rule_test_mode)
+        hass.services.async_register(DOMAIN, "create_rule", guarded(_create_rule))
+        hass.services.async_register(DOMAIN, "update_rule", guarded(_update_rule))
+        hass.services.async_register(DOMAIN, "remove_rule", guarded(_remove_rule))
+        hass.services.async_register(DOMAIN, "set_rule_enabled", guarded(_set_rule_enabled))
+        hass.services.async_register(DOMAIN, "set_rule_test_mode", guarded(_set_rule_test_mode))
 
         async def _test_rule(call):
             coordinator = coordinator_for_call(hass, call)
@@ -102,7 +102,19 @@ async def async_register(hass: HomeAssistant) -> None:
                         break
             if values is None:
                 raise ValueError("No DMX snapshot available for this rule")
-            result = coordinator.rules.test(rule, [int(v) for v in values[:512]])
+            values = [int(v) for v in values[:512]]
+            # DMX channel values are single bytes (0-255). Audit-confirmed
+            # gap: passing out-of-range values (e.g. 256, -1) was silently
+            # accepted with "aucune erreur affichée, aucun résultat détaillé"
+            # -- neither rejected nor normalized. Reject clearly instead of
+            # letting invalid simulated data flow into threshold comparisons.
+            out_of_range = [v for v in values if v < 0 or v > 255]
+            if out_of_range:
+                raise ValueError(
+                    f"DMX values must be between 0 and 255 (got out-of-range: {out_of_range[:5]}"
+                    f"{', ...' if len(out_of_range) > 5 else ''})"
+                )
+            result = coordinator.rules.test(rule, values)
             coordinator.publish(dmx_rule_test={
                 "rule": result.rule_name,
                 "active": result.trace.active,
@@ -119,13 +131,13 @@ async def async_register(hass: HomeAssistant) -> None:
             coordinator.rules.history.clear()
             coordinator.publish(dmx_rule_traces=coordinator.rules.trace_snapshot())
 
-        hass.services.async_register(DOMAIN, "test_rule", _test_rule)
+        hass.services.async_register(DOMAIN, "test_rule", guarded(_test_rule))
 
-        hass.services.async_register(DOMAIN, "clear_rule_history", _clear_rule_history)
+        hass.services.async_register(DOMAIN, "clear_rule_history", guarded(_clear_rule_history))
 
         async def _set_light_sync(call):
             coordinator = coordinator_for_call(hass, call)
             enabled = bool(call.data.get("enabled", False))
             coordinator.set_light_sync_enabled(enabled)
 
-        hass.services.async_register(DOMAIN, "set_light_sync_enabled", _set_light_sync)
+        hass.services.async_register(DOMAIN, "set_light_sync_enabled", guarded(_set_light_sync))

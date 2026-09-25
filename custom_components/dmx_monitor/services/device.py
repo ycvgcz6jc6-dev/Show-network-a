@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
 
-from ..services.common import coordinator_for_call, DOMAIN
+from ..services.common import coordinator_for_call, DOMAIN, guarded
 
 async def async_register(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, "set_device_override"):
@@ -48,8 +48,8 @@ async def async_register(hass: HomeAssistant) -> None:
             coordinator.inventory.clear_override(str(call.data["unique_id"]))
             coordinator.publish(device_inventory=coordinator.inventory.public())
 
-        hass.services.async_register(DOMAIN, "set_device_override", _set_device_override)
-        hass.services.async_register(DOMAIN, "register_manual_device", _register_manual_device)
+        hass.services.async_register(DOMAIN, "set_device_override", guarded(_set_device_override))
+        hass.services.async_register(DOMAIN, "register_manual_device", guarded(_register_manual_device))
         async def _scan_network(call):
             coordinator = coordinator_for_call(hass, call)
             scan = getattr(coordinator, "async_scan_network", None)
@@ -58,8 +58,8 @@ async def async_register(hass: HomeAssistant) -> None:
             await scan()
             coordinator.publish(device_inventory=coordinator.inventory.public(include_hidden=True))
 
-        hass.services.async_register(DOMAIN, "clear_device_override", _clear_device_override)
-        hass.services.async_register(DOMAIN, "scan_network", _scan_network)
+        hass.services.async_register(DOMAIN, "clear_device_override", guarded(_clear_device_override))
+        hass.services.async_register(DOMAIN, "scan_network", guarded(_scan_network))
 
         async def _manual_register_amplifier(call):
             coordinator = coordinator_for_call(hass, call)
@@ -82,5 +82,5 @@ async def async_register(hass: HomeAssistant) -> None:
             coordinator.audio_amplifiers.remove(f"manual:{str(call.data['host']).strip()}")
             coordinator.publish(**coordinator.audio_amplifiers.snapshot())
 
-        hass.services.async_register(DOMAIN, "manual_register_amplifier", _manual_register_amplifier)
-        hass.services.async_register(DOMAIN, "manual_remove_amplifier", _manual_remove_amplifier)
+        hass.services.async_register(DOMAIN, "manual_register_amplifier", guarded(_manual_register_amplifier))
+        hass.services.async_register(DOMAIN, "manual_remove_amplifier", guarded(_manual_remove_amplifier))

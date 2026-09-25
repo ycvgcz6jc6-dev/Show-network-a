@@ -74,7 +74,25 @@
           "qlcplus_enabled": "QLC+-Brücke aktivieren",
           "qlcplus_host": "QLC+-IP-Adresse",
           "qlcplus_port": "QLC+ WebSocket-Port",
-          "ups_hosts": "USV-Geräte (IPs durch Kommas getrennt)"
+          "ups_hosts": "USV-Geräte (IPs durch Kommas getrennt)",
+          "dmx_artnet_enabled": "Art-Net abhören",
+          "dmx_sacn_enabled": "sACN abhören",
+          "dmx_source": "DMX-Quelle filtern (IP, leer = alle)",
+          "ma_enabled": "MA-Net3-Abhören aktivieren",
+          "yamaha_osc_hosts": "Yamaha-OSC-Hosts",
+          "qlab_hosts": "QLab-Hosts",
+          "resolume_hosts": "Resolume-Hosts",
+          "nexus_audio_hosts": "Nexus-Audio-Hosts",
+          "millumin_listen_port": "Millumin-Empfangsport (0 = deaktiviert)",
+          "millumin_ping_target": "Millumin-Ping-Ziel (Host:Port, optional)",
+          "greengo_multicast_group": "Green-GO-Multicast-Gruppe (leer = deaktiviert)",
+          "sendspin_dante_players": "Sendspin/spin2dante-media_player-Entitäten",
+          "avdecc_bridge_url": "AVDECC-Bridge-URL",
+          "rdm_bridge_url": "RDM-Bridge-URL",
+          "rdmnet_bridge_url": "RDMnet-Bridge-URL",
+          "pdu_hosts": "PDU-Hosts (Host:Hersteller, kommagetrennt; Hersteller: apc, raritan)",
+          "reolink_ha_enabled": "Reolink-Kameras aus der offiziellen Home-Assistant-Integration lesen",
+          "nexus_audio_players": "Nexus-Audio-media_player-Entitäten (kommagetrennt)"
         },
         "data_description": {
           "aes70_hosts": "Comma-separated AES70 hostnames or IP addresses to query."
@@ -153,9 +171,31 @@
           "qlcplus_enabled": "QLC+-Brücke aktivieren",
           "qlcplus_host": "QLC+-IP-Adresse",
           "qlcplus_port": "QLC+ WebSocket-Port",
-          "ups_hosts": "USV-Geräte (IPs durch Kommas getrennt)"
+          "ups_hosts": "USV-Geräte (IPs durch Kommas getrennt)",
+          "dmx_artnet_enabled": "Art-Net abhören",
+          "dmx_sacn_enabled": "sACN abhören",
+          "dmx_source": "DMX-Quelle filtern (IP, leer = alle)",
+          "ma_enabled": "MA-Net3-Abhören aktivieren",
+          "yamaha_osc_hosts": "Yamaha-OSC-Hosts",
+          "qlab_hosts": "QLab-Hosts",
+          "resolume_hosts": "Resolume-Hosts",
+          "nexus_audio_hosts": "Nexus-Audio-Hosts",
+          "millumin_listen_port": "Millumin-Empfangsport (0 = deaktiviert)",
+          "millumin_ping_target": "Millumin-Ping-Ziel (Host:Port, optional)",
+          "greengo_multicast_group": "Green-GO-Multicast-Gruppe (leer = deaktiviert)",
+          "sendspin_dante_players": "Sendspin/spin2dante-media_player-Entitäten",
+          "avdecc_bridge_url": "AVDECC-Bridge-URL",
+          "rdm_bridge_url": "RDM-Bridge-URL",
+          "rdmnet_bridge_url": "RDMnet-Bridge-URL",
+          "pdu_hosts": "PDU-Hosts (Host:Hersteller, kommagetrennt; Hersteller: apc, raritan)",
+          "reolink_ha_enabled": "Reolink-Kameras aus der offiziellen Home-Assistant-Integration lesen",
+          "nexus_audio_players": "Nexus-Audio-media_player-Entitäten (kommagetrennt)"
         }
       }
+    },
+    "error": {
+      "invalid_json": "Das Feld „Projektoren“ muss gültiges JSON sein (eine Liste).",
+      "port_in_use": "Der konfigurierte OSC-Eingangsport wird bereits von einem anderen Prozess verwendet. Wählen Sie einen anderen Port oder geben Sie den aktuellen frei."
     }
   },
   "options": {
@@ -230,9 +270,33 @@
           "qlcplus_enabled": "QLC+-Brücke aktivieren",
           "qlcplus_host": "QLC+-IP-Adresse",
           "qlcplus_port": "QLC+ WebSocket-Port",
-          "ups_hosts": "USV-Geräte (IPs durch Kommas getrennt)"
+          "ups_hosts": "USV-Geräte (IPs durch Kommas getrennt)",
+          "dmx_artnet_enabled": "Art-Net abhören",
+          "dmx_sacn_enabled": "sACN abhören",
+          "dmx_source": "DMX-Quelle filtern (IP, leer = alle)",
+          "ma_enabled": "MA-Net3-Abhören aktivieren",
+          "yamaha_osc_hosts": "Yamaha-OSC-Hosts",
+          "qlab_hosts": "QLab-Hosts",
+          "resolume_hosts": "Resolume-Hosts",
+          "nexus_audio_hosts": "Nexus-Audio-Hosts",
+          "millumin_listen_port": "Millumin-Empfangsport (0 = deaktiviert)",
+          "millumin_ping_target": "Millumin-Ping-Ziel (Host:Port, optional)",
+          "greengo_multicast_group": "Green-GO-Multicast-Gruppe (leer = deaktiviert)",
+          "sendspin_dante_players": "Sendspin/spin2dante-media_player-Entitäten",
+          "avdecc_bridge_url": "AVDECC-Bridge-URL",
+          "rdm_bridge_url": "RDM-Bridge-URL",
+          "rdmnet_bridge_url": "RDMnet-Bridge-URL",
+          "aes70_hosts": "AES70/OCA-Hosts",
+          "aes70_port": "AES70/OCA-Port",
+          "pdu_hosts": "PDU-Hosts (Host:Hersteller, kommagetrennt; Hersteller: apc, raritan)",
+          "reolink_ha_enabled": "Reolink-Kameras aus der offiziellen Home-Assistant-Integration lesen",
+          "nexus_audio_players": "Nexus-Audio-media_player-Entitäten (kommagetrennt)"
         }
       }
+    },
+    "error": {
+      "invalid_json": "Das Feld „Projektoren“ muss gültiges JSON sein (eine Liste).",
+      "port_in_use": "Der konfigurierte OSC-Eingangsport wird bereits von einem anderen Prozess verwendet. Wählen Sie einen anderen Port oder geben Sie den aktuellen frei."
     }
   }
 }

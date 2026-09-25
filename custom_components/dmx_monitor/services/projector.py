@@ -1,9 +1,11 @@
 """Show Network projector service handlers."""
 from __future__ import annotations
 
+import functools
+
 from homeassistant.core import HomeAssistant
 
-from ..services.common import coordinator_for_call, DOMAIN
+from ..services.common import coordinator_for_call, DOMAIN, guarded
 
 
 def _target(coordinator, host: str, fallback_port: int) -> tuple[str, dict]:
@@ -30,7 +32,7 @@ async def async_register(hass: HomeAssistant) -> None:
             fallback_port = int(call.data.get("port", 4352))
             profile, cfg = _target(coordinator, host, fallback_port)
             result = await hass.async_add_executor_job(
-                ctrl.send, host, profile=profile, config=cfg, name=command, value=value
+                functools.partial(ctrl.send, host, profile=profile, config=cfg, name=command, value=value)
             )
             if coordinator.archive:
                 coordinator.archive.record("projector", "projector_command", {
@@ -59,7 +61,7 @@ async def async_register(hass: HomeAssistant) -> None:
             if coordinator.archive:
                 coordinator.archive.record("system", "projector_control_gate_changed", {"enabled": coordinator.projector_controller.control_enabled})
 
-        hass.services.async_register(DOMAIN, "projector_power", _projector_power)
-        hass.services.async_register(DOMAIN, "projector_input", _projector_input)
-        hass.services.async_register(DOMAIN, "projector_mute", _projector_mute)
-        hass.services.async_register(DOMAIN, "set_projector_control_enabled", _projector_control)
+        hass.services.async_register(DOMAIN, "projector_power", guarded(_projector_power))
+        hass.services.async_register(DOMAIN, "projector_input", guarded(_projector_input))
+        hass.services.async_register(DOMAIN, "projector_mute", guarded(_projector_mute))
+        hass.services.async_register(DOMAIN, "set_projector_control_enabled", guarded(_projector_control))

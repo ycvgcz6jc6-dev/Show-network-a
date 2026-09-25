@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
 
-from ..services.common import coordinator_for_call, DOMAIN
+from ..services.common import coordinator_for_call, DOMAIN, guarded
 
 async def async_register(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, "chaos_signal_loss"):
@@ -23,7 +23,7 @@ async def async_register(hass: HomeAssistant) -> None:
             c = coordinator_for_call(hass, call)
             if not getattr(c, "chaos_enabled", False): raise ValueError("Diagnostics / chaos tests are disabled")
             c.clear_chaos()
-        hass.services.async_register(DOMAIN, "chaos_signal_loss", _chaos_signal_loss)
-        hass.services.async_register(DOMAIN, "chaos_signal_restore", _chaos_signal_restore)
-        hass.services.async_register(DOMAIN, "chaos_ptp_drift", _chaos_ptp_drift)
-        hass.services.async_register(DOMAIN, "chaos_clear", _chaos_clear)
+        hass.services.async_register(DOMAIN, "chaos_signal_loss", guarded(_chaos_signal_loss))
+        hass.services.async_register(DOMAIN, "chaos_signal_restore", guarded(_chaos_signal_restore))
+        hass.services.async_register(DOMAIN, "chaos_ptp_drift", guarded(_chaos_ptp_drift))
+        hass.services.async_register(DOMAIN, "chaos_clear", guarded(_chaos_clear))

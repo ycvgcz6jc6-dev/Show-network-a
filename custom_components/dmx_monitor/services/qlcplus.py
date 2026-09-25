@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
-from .common import coordinator_for_call, DOMAIN
+from .common import coordinator_for_call, DOMAIN, guarded
 
 
 async def async_register(hass: HomeAssistant) -> None:
@@ -42,8 +42,8 @@ async def async_register(hass: HomeAssistant) -> None:
         await _bridge(c).async_update()
         c.publish(**_bridge(c).snapshot())
 
-    hass.services.async_register(DOMAIN, "qlcplus_set_widget_value", _set_widget_value)
-    hass.services.async_register(DOMAIN, "qlcplus_cue_list_control", _cue_list_control)
-    hass.services.async_register(DOMAIN, "qlcplus_frame_control", _frame_control)
-    hass.services.async_register(DOMAIN, "qlcplus_set_function_status", _set_function_status)
-    hass.services.async_register(DOMAIN, "qlcplus_refresh", _refresh)
+    hass.services.async_register(DOMAIN, "qlcplus_set_widget_value", guarded(_set_widget_value))
+    hass.services.async_register(DOMAIN, "qlcplus_cue_list_control", guarded(_cue_list_control))
+    hass.services.async_register(DOMAIN, "qlcplus_frame_control", guarded(_frame_control))
+    hass.services.async_register(DOMAIN, "qlcplus_set_function_status", guarded(_set_function_status))
+    hass.services.async_register(DOMAIN, "qlcplus_refresh", guarded(_refresh))

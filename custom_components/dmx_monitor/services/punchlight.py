@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
 
-from ..services.common import coordinator_for_call, DOMAIN
+from ..services.common import coordinator_for_call, DOMAIN, guarded
 from ..punchlight_network import async_scan as async_scan_punchlight_network
 
 async def async_register(hass: HomeAssistant) -> None:
@@ -16,4 +16,4 @@ async def async_register(hass: HomeAssistant) -> None:
             c.publish(punchlight_network=devices)
             if c.archive:
                 c.archive.record("punchlight", "network_discovery", {"interface": interface_name, "count": len(devices)})
-        hass.services.async_register(DOMAIN, "discover_punchlight", _discover_punchlight)
+        hass.services.async_register(DOMAIN, "discover_punchlight", guarded(_discover_punchlight))

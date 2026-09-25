@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
 
-from ..services.common import coordinator_for_call, DOMAIN
+from ..services.common import coordinator_for_call, DOMAIN, guarded
 from ..osc_mapping import Mapping
 
 async def async_register(hass: HomeAssistant) -> None:
@@ -35,5 +35,5 @@ async def async_register(hass: HomeAssistant) -> None:
             coordinator.control_mapping_engine.remove(str(call.data["mapping_id"]))
             coordinator.control_mapping_store.save([__import__("dataclasses").asdict(x) for x in coordinator.control_mapping_engine.mappings.values()])
             coordinator.publish(control_mappings=list(coordinator.control_mapping_engine.mappings))
-        hass.services.async_register(DOMAIN,"create_control_mapping",_create_control_mapping)
-        hass.services.async_register(DOMAIN,"remove_control_mapping",_remove_control_mapping)
+        hass.services.async_register(DOMAIN, "create_control_mapping", guarded(_create_control_mapping))
+        hass.services.async_register(DOMAIN, "remove_control_mapping", guarded(_remove_control_mapping))

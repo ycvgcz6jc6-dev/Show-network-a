@@ -78,7 +78,21 @@
           "qlcplus_host": "Adresse IP QLC+",
           "qlcplus_port": "Port WebSocket QLC+",
           "generic_switch_hosts": "Autres switches (IP séparées par des virgules)",
-          "ups_hosts": "Onduleurs / UPS (IP séparées par des virgules)"
+          "ups_hosts": "Onduleurs / UPS (IP séparées par des virgules)",
+          "yamaha_osc_hosts": "Hôtes Yamaha OSC",
+          "qlab_hosts": "Hôtes QLab",
+          "resolume_hosts": "Hôtes Resolume",
+          "nexus_audio_hosts": "Hôtes Nexus Audio",
+          "millumin_listen_port": "Port d’écoute Millumin (0 = désactivé)",
+          "millumin_ping_target": "Cible du ping Millumin (hôte:port, optionnel)",
+          "greengo_multicast_group": "Groupe multicast Green-GO (vide = désactivé)",
+          "sendspin_dante_players": "Entités media_player Sendspin/spin2dante",
+          "avdecc_bridge_url": "URL du pont AVDECC",
+          "rdm_bridge_url": "URL du pont RDM",
+          "rdmnet_bridge_url": "URL du pont RDMnet",
+          "pdu_hosts": "Hôtes PDU (host:marque, séparés par des virgules ; marques : apc, raritan)",
+          "reolink_ha_enabled": "Lire les caméras Reolink depuis l’intégration Home Assistant officielle",
+          "nexus_audio_players": "Entités media_player Nexus Audio (séparées par des virgules)"
         },
         "data_description": {
           "aes70_hosts": "Adresses IP/nom DNS AES70 à interroger, séparées par des virgules."
@@ -161,7 +175,21 @@
           "qlcplus_host": "Adresse IP QLC+",
           "qlcplus_port": "Port WebSocket QLC+",
           "generic_switch_hosts": "Autres switches (IP séparées par des virgules)",
-          "ups_hosts": "Onduleurs / UPS (IP séparées par des virgules)"
+          "ups_hosts": "Onduleurs / UPS (IP séparées par des virgules)",
+          "yamaha_osc_hosts": "Hôtes Yamaha OSC",
+          "qlab_hosts": "Hôtes QLab",
+          "resolume_hosts": "Hôtes Resolume",
+          "nexus_audio_hosts": "Hôtes Nexus Audio",
+          "millumin_listen_port": "Port d’écoute Millumin (0 = désactivé)",
+          "millumin_ping_target": "Cible du ping Millumin (hôte:port, optionnel)",
+          "greengo_multicast_group": "Groupe multicast Green-GO (vide = désactivé)",
+          "sendspin_dante_players": "Entités media_player Sendspin/spin2dante",
+          "avdecc_bridge_url": "URL du pont AVDECC",
+          "rdm_bridge_url": "URL du pont RDM",
+          "rdmnet_bridge_url": "URL du pont RDMnet",
+          "pdu_hosts": "Hôtes PDU (host:marque, séparés par des virgules ; marques : apc, raritan)",
+          "reolink_ha_enabled": "Lire les caméras Reolink depuis l’intégration Home Assistant officielle",
+          "nexus_audio_players": "Entités media_player Nexus Audio (séparées par des virgules)"
         }
       }
     },
@@ -246,7 +274,23 @@
           "qlcplus_host": "Adresse IP QLC+",
           "qlcplus_port": "Port WebSocket QLC+",
           "generic_switch_hosts": "Autres switches (IP séparées par des virgules)",
-          "ups_hosts": "Onduleurs / UPS (IP séparées par des virgules)"
+          "ups_hosts": "Onduleurs / UPS (IP séparées par des virgules)",
+          "yamaha_osc_hosts": "Hôtes Yamaha OSC",
+          "qlab_hosts": "Hôtes QLab",
+          "resolume_hosts": "Hôtes Resolume",
+          "nexus_audio_hosts": "Hôtes Nexus Audio",
+          "millumin_listen_port": "Port d’écoute Millumin (0 = désactivé)",
+          "millumin_ping_target": "Cible du ping Millumin (hôte:port, optionnel)",
+          "greengo_multicast_group": "Groupe multicast Green-GO (vide = désactivé)",
+          "sendspin_dante_players": "Entités media_player Sendspin/spin2dante",
+          "avdecc_bridge_url": "URL du pont AVDECC",
+          "rdm_bridge_url": "URL du pont RDM",
+          "rdmnet_bridge_url": "URL du pont RDMnet",
+          "aes70_hosts": "Hôtes AES70/OCA",
+          "aes70_port": "Port AES70/OCA",
+          "pdu_hosts": "Hôtes PDU (host:marque, séparés par des virgules ; marques : apc, raritan)",
+          "reolink_ha_enabled": "Lire les caméras Reolink depuis l’intégration Home Assistant officielle",
+          "nexus_audio_players": "Entités media_player Nexus Audio (séparées par des virgules)"
         }
       }
     },

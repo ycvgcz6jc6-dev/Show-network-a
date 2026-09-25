@@ -2,7 +2,7 @@ from __future__ import annotations
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
-from .ha_builder_entities import BuilderSwitch, BuilderButton
+from .ha_builder_entities import BuilderSwitch, async_remove_builder_entity
 class OSCOutputSafetySwitch(CoordinatorEntity, SwitchEntity):
     _attr_name = "OSC output safety gate"
     _attr_has_entity_name = True
@@ -98,13 +98,28 @@ class DmxSceneOutputSafetySwitch(CoordinatorEntity, SwitchEntity):
 async def async_setup_entry(hass,entry,async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]['coordinator']
     entities = [ProjectorControlSwitch(coordinator), OSCOutputSafetySwitch(coordinator), EnttecListenSwitch(coordinator), FixtureControlSafetySwitch(coordinator), DmxSceneOutputSafetySwitch(coordinator), MIDIOutputSafetySwitch(coordinator), ShowControlSafetySwitch(coordinator)]
-    entities.extend(BuilderSwitch(coordinator, item) for item in coordinator.ha_builder.items.values() if item.entity_type == "switch" and item.enabled)
-    entities.extend(BuilderButton(coordinator, item) for item in coordinator.ha_builder.items.values() if item.entity_type == "button" and item.enabled)
+    builder_entities = [BuilderSwitch(coordinator, item) for item in coordinator.ha_builder.items.values() if item.entity_type == "switch" and item.enabled]
+    entities.extend(builder_entities)
     async_add_entities(entities)
+    live_builder_switches = {e.item_id: e for e in builder_entities}
     coordinator.ha_builder_callbacks = getattr(coordinator, "ha_builder_callbacks", {})
-    coordinator.ha_builder_callbacks["switch"] = lambda item: async_add_entities([BuilderSwitch(coordinator, item)])
-    coordinator.ha_builder_callbacks["button"] = lambda item: async_add_entities([BuilderButton(coordinator, item)])
+    def _add_switch(item):
+        e = BuilderSwitch(coordinator, item)
+        live_builder_switches[item.item_id] = e
+        async_add_entities([e])
+    coordinator.ha_builder_callbacks["switch"] = _add_switch
+    # "button" items are owned by button.py's own async_setup_entry, not by
+    # this module. They used to be added here via the switch platform's
+    # async_add_entities, which registered them under the switch.* domain
+    # instead of button.* -- so switch.turn_off was called on a
+    # BuilderButton, which has no async_turn_off (audit-confirmed:
+    # 'BuilderButton' object has no attribute 'async_turn_off').
     coordinator.ha_builder_remove_callbacks = getattr(coordinator, "ha_builder_remove_callbacks", {})
+    async def _remove_switch(item_id):
+        entity = live_builder_switches.pop(item_id, None)
+        if entity is not None:
+            await async_remove_builder_entity(hass, "switch", entity)
+    coordinator.ha_builder_remove_callbacks["switch"] = _remove_switch
 
 class FixtureControlSafetySwitch(CoordinatorEntity, SwitchEntity):
     _attr_name = "GDTF fixture control safety gate"

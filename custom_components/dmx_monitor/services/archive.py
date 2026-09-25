@@ -1,9 +1,11 @@
 """Show Network archive, configuration backup and diagnostics handlers."""
 from __future__ import annotations
 
+import functools
+
 from homeassistant.core import HomeAssistant
 
-from ..services.common import coordinator_for_call, DOMAIN
+from ..services.common import coordinator_for_call, DOMAIN, guarded
 
 
 async def async_register(hass: HomeAssistant) -> None:
@@ -64,11 +66,13 @@ async def async_register(hass: HomeAssistant) -> None:
         config_status = await hass.async_add_executor_job(c.config_backups.status)
         resources = c.resource_registry.snapshot() if c.resource_registry else []
         path = await hass.async_add_executor_job(
-            c.diagnostics_exporter.export,
-            dict(c.data),
-            config_status=config_status,
-            archive_status=archive_status,
-            resources=resources,
+            functools.partial(
+                c.diagnostics_exporter.export,
+                dict(c.data),
+                config_status=config_status,
+                archive_status=archive_status,
+                resources=resources,
+            )
         )
         if c.archive:
             c.archive.record("diagnostics", "support_bundle_created", {"target": str(path)})
@@ -80,9 +84,9 @@ async def async_register(hass: HomeAssistant) -> None:
         status["diagnostics"] = c.diagnostics_exporter.status()
         return status
 
-    hass.services.async_register(DOMAIN, "archive_export", _archive_export)
-    hass.services.async_register(DOMAIN, "archive_backup", _archive_backup)
-    hass.services.async_register(DOMAIN, "archive_set_destination", _archive_set_destination)
-    hass.services.async_register(DOMAIN, "config_backup_create", _config_backup_create)
-    hass.services.async_register(DOMAIN, "config_backup_restore", _config_backup_restore)
-    hass.services.async_register(DOMAIN, "diagnostics_export", _diagnostics_export)
+    hass.services.async_register(DOMAIN, "archive_export", guarded(_archive_export))
+    hass.services.async_register(DOMAIN, "archive_backup", guarded(_archive_backup))
+    hass.services.async_register(DOMAIN, "archive_set_destination", guarded(_archive_set_destination))
+    hass.services.async_register(DOMAIN, "config_backup_create", guarded(_config_backup_create))
+    hass.services.async_register(DOMAIN, "config_backup_restore", guarded(_config_backup_restore))
+    hass.services.async_register(DOMAIN, "diagnostics_export", guarded(_diagnostics_export))

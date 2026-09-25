@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
 
+from .common import guarded
 from ..const import (
     DOMAIN,
     CONF_DMX_ARTNET_ENABLED,
@@ -96,5 +97,5 @@ async def async_register(hass: HomeAssistant) -> None:
         hass.config_entries.async_update_entry(entry, options=new_options)
         await hass.config_entries.async_reload(entry.entry_id)
 
-    hass.services.async_register(DOMAIN, "set_module_enabled", _set_module_enabled)
-    hass.services.async_register(DOMAIN, "set_dmx_universes", _set_dmx_universes)
+    hass.services.async_register(DOMAIN, "set_module_enabled", guarded(_set_module_enabled))
+    hass.services.async_register(DOMAIN, "set_dmx_universes", guarded(_set_dmx_universes))

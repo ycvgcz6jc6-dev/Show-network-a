@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
 
-from ..services.common import coordinator_for_call, DOMAIN
+from ..services.common import coordinator_for_call, DOMAIN, guarded
 
 async def async_register(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, "set_security_password"):
@@ -31,6 +31,6 @@ async def async_register(hass: HomeAssistant) -> None:
             c.midi_output.set_enabled(False)
             c.show_control.enabled = False
             c.publish(security=c.security.snapshot(), projector_control_enabled=False, midi_output=c.midi_output.snapshot(), **c.show_control.snapshot())
-        hass.services.async_register(DOMAIN, "set_security_password", _set_security_password)
-        hass.services.async_register(DOMAIN, "unlock_security", _unlock_security)
-        hass.services.async_register(DOMAIN, "lock_security", _lock_security)
+        hass.services.async_register(DOMAIN, "set_security_password", guarded(_set_security_password))
+        hass.services.async_register(DOMAIN, "unlock_security", guarded(_unlock_security))
+        hass.services.async_register(DOMAIN, "lock_security", guarded(_lock_security))

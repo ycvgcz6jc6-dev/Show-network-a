@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
 
-from ..services.common import coordinator_for_call, DOMAIN
+from ..services.common import coordinator_for_call, DOMAIN, guarded
 from ..osc_output import OSCTarget
 from ..osc_profiles import PROFILES
 
@@ -71,11 +71,11 @@ async def async_register(hass: HomeAssistant) -> None:
                 raise ValueError("OSC args must be a list")
             c.osc_output.send(target, address, args)
             c.publish_osc_status()
-        hass.services.async_register(DOMAIN, "set_osc_output_enabled", _set_osc_output_enabled)
-        hass.services.async_register(DOMAIN, "create_osc_target", _create_osc_target)
-        hass.services.async_register(DOMAIN, "remove_osc_target", _remove_osc_target)
-        hass.services.async_register(DOMAIN, "send_osc", _send_osc)
-        hass.services.async_register(DOMAIN, "send_osc_profile_action", _send_osc_profile_action)
-        hass.services.async_register(DOMAIN, "start_osc_learn", _start_osc_learn)
-        hass.services.async_register(DOMAIN, "stop_osc_learn", _stop_osc_learn)
-        hass.services.async_register(DOMAIN, "clear_osc_learn", _clear_osc_learn)
+        hass.services.async_register(DOMAIN, "set_osc_output_enabled", guarded(_set_osc_output_enabled))
+        hass.services.async_register(DOMAIN, "create_osc_target", guarded(_create_osc_target))
+        hass.services.async_register(DOMAIN, "remove_osc_target", guarded(_remove_osc_target))
+        hass.services.async_register(DOMAIN, "send_osc", guarded(_send_osc))
+        hass.services.async_register(DOMAIN, "send_osc_profile_action", guarded(_send_osc_profile_action))
+        hass.services.async_register(DOMAIN, "start_osc_learn", guarded(_start_osc_learn))
+        hass.services.async_register(DOMAIN, "stop_osc_learn", guarded(_stop_osc_learn))
+        hass.services.async_register(DOMAIN, "clear_osc_learn", guarded(_clear_osc_learn))

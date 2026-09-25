@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
-from .common import coordinator_for_call, DOMAIN
+from .common import coordinator_for_call, DOMAIN, guarded
 from ..rdm_inventory import normalize_uid
 
 
@@ -53,8 +53,8 @@ async def async_register(hass: HomeAssistant) -> None:
         await hass.async_add_executor_job(c.fixture_control.save)
         c.publish(**c.fixture_control.snapshot())
 
-    hass.services.async_register(DOMAIN, "rdm_refresh", _refresh)
-    hass.services.async_register(DOMAIN, "rdm_set_start_address", _address)
-    hass.services.async_register(DOMAIN, "rdm_set_personality", _personality)
-    hass.services.async_register(DOMAIN, "rdm_identify", _identify)
-    hass.services.async_register(DOMAIN, "rdm_link_fixture", _link)
+    hass.services.async_register(DOMAIN, "rdm_refresh", guarded(_refresh))
+    hass.services.async_register(DOMAIN, "rdm_set_start_address", guarded(_address))
+    hass.services.async_register(DOMAIN, "rdm_set_personality", guarded(_personality))
+    hass.services.async_register(DOMAIN, "rdm_identify", guarded(_identify))
+    hass.services.async_register(DOMAIN, "rdm_link_fixture", guarded(_link))

@@ -5,7 +5,7 @@ import asyncio
 from homeassistant.core import HomeAssistant
 from ..const import DOMAIN
 from ..show_control import ShowControlCue
-from ..services.common import coordinator_for_call
+from ..services.common import coordinator_for_call, guarded
 
 
 async def async_register(hass: HomeAssistant) -> None:
@@ -73,7 +73,7 @@ async def async_register(hass: HomeAssistant) -> None:
             c.publish(**c.show_control.snapshot(), midi_output=c.midi_output.snapshot(), midi_output_sent=c.midi_output.sent)
             c.publish_osc_status()
 
-    hass.services.async_register(DOMAIN, "set_show_control_enabled", _set_enabled)
-    hass.services.async_register(DOMAIN, "upsert_show_control_cue", _upsert)
-    hass.services.async_register(DOMAIN, "remove_show_control_cue", _remove)
-    hass.services.async_register(DOMAIN, "fire_show_control_cue", _fire)
+    hass.services.async_register(DOMAIN, "set_show_control_enabled", guarded(_set_enabled))
+    hass.services.async_register(DOMAIN, "upsert_show_control_cue", guarded(_upsert))
+    hass.services.async_register(DOMAIN, "remove_show_control_cue", guarded(_remove))
+    hass.services.async_register(DOMAIN, "fire_show_control_cue", guarded(_fire))
