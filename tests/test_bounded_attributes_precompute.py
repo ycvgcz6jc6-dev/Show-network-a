@@ -83,3 +83,19 @@ def test_etc_cem3_rack_sensor_uses_precomputed_bounded_value():
     data = {"etc_cem3": {"racks": []}, "etc_cem3_bounded": precomputed}
     result = _sensor(data, "etc_cem3_racks_total").extra_state_attributes
     assert result == precomputed
+
+
+def test_device_inventory_keeps_interface_field_for_the_discovery_panel_filter():
+    """Regression test for a real user report ('toujours pas possible de
+    choisir les cartes dans réseaux pour regarder par carte'): the
+    per-NIC filter dropdown in the discovery panel (ShowNetworkDiscovery,
+    interfaceOf(r) => r.interface) reads this exact field from
+    device_inventory's own rows -- it was trimmed away entirely, so the
+    filter always had nothing to offer. Field confirmed to genuinely
+    exist on DeviceInventory itself (device_inventory.py) before this
+    fix; it just never survived sensor.py's field allowlist."""
+    data = {"device_inventory": [
+        {"unique_id": "a", "display_name": "GigaCore", "interface": "enp10s0"},
+    ]}
+    result = _sensor(data, "device_inventory").extra_state_attributes
+    assert result["devices"][0]["interface"] == "enp10s0"

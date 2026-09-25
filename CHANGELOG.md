@@ -624,6 +624,211 @@ explicitement, accumulation multi-paquets, `start()` idempotent,
 (contrôle), qui nécessiteraient de décoder le contenu des messages —
 pas fait, faute de spécification vérifiée du format exact.
 
+## 0.15.27 (suite 43) — Le vrai bug derrière "pas de sélecteur d'interface en topologie" : perte totale de données, pas un trou de champ
+
+Signalement : dans le panneau "Topologie live", impossible de choisir
+une interface pour filtrer, alors que la découverte automatique
+fonctionne. J'ai d'abord cherché un composant séparé
+(`ShowNetworkTopologyPanel`, distinct du panneau "Réseaux" déjà
+corrigé) — son mécanisme de filtre est complet et correct dans le code,
+lisant `sensor.dmx_monitor_show_network_devices` (en réalité
+`sensor.equipements_consolides_consolidated_devices`, nom d'entité basé
+sur le libellé français).
+
+**Vérifié en direct plutôt que deviné** : cette entité affiche bien
+`54` comme état (54 appareils réellement détectés), mais ses attributs
+ne contenaient que `truncated`, `original_bytes`, `message` — **aucune
+clé `devices` du tout**. Le mécanisme de limitation de taille pour le
+Recorder HA (`bound_attributes()`) fait **une seule** passe de
+compaction avec des limites fixes (20 éléments de liste, 40 clés de
+dictionnaire) ; si cette unique passe ne suffit toujours pas, il
+abandonne **entièrement** et remplace toute la donnée par un message —
+plutôt que de réessayer avec des limites plus strictes.
+
+Un appareil réel de `device_model.py` a ~28 champs, dont deux imbriqués
+(`physical_links`, `physical_path`) — bien plus riche que ce que le
+test existant (6 champs plats) simulait. Avec 54 appareils de cette
+forme réelle, même après troncature à 20 éléments, le résultat dépasse
+encore la limite — et l'ancien code jetait tout plutôt que de retenter.
+**Ça explique le sélecteur d'interface vide** : la liste `devices` dont
+il dépend n'existait tout simplement plus dans les attributs.
+
+Corrigé avec une compaction **progressive** : plusieurs passes avec des
+limites de plus en plus strictes (20→10→5→2→1 éléments) avant
+d'abandonner en dernier recours — un appareil réel dégrade maintenant
+vers "moins d'appareils affichés" plutôt que "zéro appareil affiché".
+
+**Double preuve, pas juste un raisonnement** : un test reproduit
+fidèlement la forme réelle de `device_model.py` (28 champs, structures
+imbriquées) avec 54 appareils, confirme que le nouveau code garde de
+vraies données ; un second test reproduit **l'ancien** algorithme à une
+seule passe contre ce même jeu de données réalistes et confirme qu'il
+aurait bien échoué — preuve négative autant que positive, comme pour le
+correctif du menu configuration.
+
+2 nouveaux tests (5 au total dans ce fichier, avec les 3 déjà
+existants). 424/424 tests sur toute la suite.
+
+**Non encore reconfirmé en direct** : cette correction devrait résoudre
+le sélecteur d'interface du panneau Topologie (et tout autre endroit
+lisant cette même liste d'appareils), puisque la cause racine est la
+perte totale de la liste, pas un champ manquant précis — mais je ne
+l'ai pas encore revérifié après ton prochain déploiement.
+
+## 0.15.27 (suite 42) — LA vraie cause du 500 sur le menu configuration, trouvée dans les logs
+
+L'utilisateur a rapporté l'erreur exacte : "Le flux de configuration
+n'a pas pu être chargé: 500 Internal Server Error". Mon correctif
+précédent (délai limite sur les énumérations matérielles) était une
+vraie amélioration mais **pas** la cause de cette erreur précise — je
+l'avais dit clairement à l'époque plutôt que de prétendre l'avoir
+résolue.
+
+**Cause exacte trouvée dans le vrai traceback** :
+
+```
+ValueError: unable to serialize schema: <function _optional_pdu_hosts at 0x...>
+```
+
+Home Assistant doit sérialiser le schéma du formulaire en JSON pour
+l'envoyer au frontend et afficher le menu — et une fonction Python
+personnalisée utilisée comme validateur (`vol.All(str,
+_optional_pdu_hosts)`) n'a **aucune représentation sérialisable**. Un
+seul champ dans tout le schéma suffit à faire planter la sérialisation
+de l'ensemble, donc tout le menu, pour un 500 — exactement le symptôme
+rapporté.
+
+**4 fonctions ajoutées cette session avaient ce défaut** (6 usages
+au total) : `_optional_bridge_url` (AVDECC/RDM/RDMnet), `_optional_
+multicast_group` (Green-GO), `_optional_host_port` (Millumin ping),
+`_optional_pdu_hosts` (PDU). Corrigé en les remplaçant par une seule
+fonction `_field_format_errors()`, appelée **après** la soumission du
+formulaire plutôt qu'intégrée au schéma — exactement le même schéma
+architectural déjà utilisé par la vérification de conflit de port OSC
+préexistante dans ce projet, que j'aurais dû suivre dès le départ.
+
+**Vérifié avec une double preuve directe**, pas seulement un
+raisonnement : un schéma minimal reproduisant les 6 champs corrigés
+sérialise avec succès via `voluptuous_serialize` (la bibliothèque HA
+traditionnelle) ; reproduire l'ancien schéma cassé (fonction brute en
+validateur) confirme qu'il échoue bien de la même façon — la preuve
+négative autant que positive. Un test de garde supplémentaire vérifie
+qu'aucun autre champ de l'ensemble du schéma (93 champs) n'a le même
+défaut.
+
+12 nouveaux tests dans 3 fichiers (2 réécrits car ils testaient les
+anciennes fonctions supprimées, 1 nouveau pour les 2 champs qui
+n'avaient pas encore de couverture dédiée). Traductions des 4 nouveaux
+messages d'erreur ajoutées immédiatement dans les 6 langues (282 clés,
+toutes complètes).
+
+422/422 tests sur toute la suite.
+
+## 0.15.27 (suite 41) — Trois signalements directs de l'utilisateur, trois vraies causes trouvées
+
+**1. Menu configuration inaccessible.** `_choices_for_hass` lance trois
+énumérations matérielles en parallèle (interfaces réseau, ports USB
+ENTTEC, ports MIDI) — **sans aucun délai limite**. Si l'énumération
+USB ou MIDI se bloque sur le système, tout le menu configuration reste
+bloqué indéfiniment, exactement comme le bug d'arrêt des ressources
+corrigé plus tôt. Corrigé avec la même philosophie : chaque source a
+maintenant son propre délai (5s par défaut), une source lente tombe en
+liste vide plutôt que de bloquer les deux autres. Testé avec un vrai
+délai de 2 secondes prouvant que les deux autres sources répondent
+quand même en moins de 1,5s.
+
+**2. Configuration réelle des circuits ETC absente de l'interface.**
+En creusant la demande de l'utilisateur, j'ai d'abord cru trouver un
+bug majeur (`etc_cem3_racks_total` sans attributs du tout) — **erreur
+de ma part**, corrigée en retraçant plus loin : une branche par préfixe
+expose déjà tout le snapshot brut. Le vrai problème était plus simple :
+le frontend n'affichait jamais le détail par circuit (module, mode de
+contrôle, courbe) alors que le backend le calcule déjà correctement
+(XML properties fusionné avec XML levels). Ajouté l'affichage
+(liste déroulante par rack, jusqu'à 200 circuits). Retiré la ligne CPU
+du panneau principal (confirmé absente de la vraie page CEM3 fournie
+par l'utilisateur, ne peut jamais afficher autre chose qu'un tiret) et
+le champ `cpu_temperature_c` du catalogue de métriques — nettoyage
+demandé explicitement plutôt que du bruit permanent.
+
+**3. Impossible de choisir une carte réseau dans "Réseaux" pour filtrer
+par carte.** Le mécanisme de filtre (menu déroulant, logique de
+filtrage) était déjà entièrement construit et correct — mais le champ
+`interface` qu'il lit sur chaque appareil découvert avait été
+**retiré par le filtrage des champs retenus** dans `device_inventory`
+(un filtrage pré-existant, que j'avais fidèlement reproduit sans le
+remettre en question lors de mon travail de précalcul plus tôt cette
+session). Le champ existe bel et bien dans les données brutes
+(`device_inventory.py`), il ne survivait simplement jamais jusqu'au
+capteur. Ajouté aux deux emplacements où ce filtrage a lieu. Vérifié
+avec un vrai test DOM : le menu déroulant liste maintenant les vraies
+cartes réseau découvertes (`enp10s0`, `enp3s0f0`) plutôt que d'être
+vide.
+
+7 nouveaux tests, dont un test DOM réel prouvant que le sélecteur de
+carte se peuple correctement.
+
+408/408 tests sur toute la suite.
+
+## 0.15.27 (suite 40) — Vérification post-déploiement : 3 vrais bugs trouvés et corrigés en direct
+
+Première vraie confrontation de ce travail avec l'installation réelle,
+après déploiement par l'utilisateur. L'intégration a chargé sans erreur
+(`state: loaded`), aucune entrée au niveau ERROR — mais 3 avertissements
+réels trouvés dans les journaux Home Assistant.
+
+**1. Appel bloquant confirmé sur `show_network_show_snapshots.json`.**
+`ShowSnapshotManager.__init__` chargeait le fichier de façon
+synchrone, directement dans la boucle d'événements (le message HA
+exact : "Detected blocking call to open"). En creusant, ce projet avait
+déjà un pattern établi lors d'une session antérieure pour ce type
+précis de problème (`_safe_load`, une liste de chargements différés
+individuellement protégés) — appliqué à 7 autres gestionnaires d'état
+persistant, mais celui-ci avait été oublié. Corrigé en l'alignant
+exactement sur le même modèle (`pre_show._load`/`incident_center._load`).
+Deux autres candidats vérifiés par prudence (`ha_builder.py`,
+`security.py`) : déjà correctement gérés, fausses alertes écartées
+après lecture du code.
+
+**2. Capteur lent confirmé** :
+`sensor.inventaire_equipements_device_inventory` à 0,690s par mise à
+jour — la même catégorie de problème déjà en partie corrigée plus tôt
+cette session (précalcul groupé des attributs volumineux, étendu à 7
+capteurs), mais cette clé précise (`device_inventory`, distincte de
+`device_model` que j'avais déjà couverte) avait été oubliée. Étendue
+au même précalcul, avec la même transformation de champs que
+`sensor.py` applique déjà, pour que la valeur précalculée corresponde
+exactement à ce qu'un calcul à la volée aurait produit.
+
+**3. Tâches non annulées à l'arrêt confirmées**
+(`sacn-supervisor`, `artnet-supervisor`). Pas un bug dans ces tâches
+elles-mêmes (`DmxNetworkReceiver.stop()` attend déjà correctement leur
+annulation) — le vrai problème était dans `ResourceRegistry.async_stop_all()` :
+toutes les ressources sont arrêtées séquentiellement, **sans aucune
+limite de temps par ressource**. Avec le nombre de nouveaux moniteurs
+ajoutés cette session (Millumin, Green-GO, et d'autres, chacun avec son
+propre socket/écouteur à fermer), le temps cumulé a pu dépasser ce que
+Home Assistant tolère globalement pour l'arrêt — une ressource lente ou
+bloquée plus tôt dans la séquence pouvant affamer celles qui suivent.
+Corrigé avec un délai limite individuel de 5 secondes par ressource ;
+testé avec de vrais délais asyncio prouvant qu'une ressource lente
+n'empêche plus les suivantes d'être arrêtées à temps.
+
+**Fausses alertes vérifiées et écartées** : 18 entités indisponibles
+repérées au total. Deux racks CEM3 (dont celui documenté par
+l'utilisateur) : le capteur principal affiche `offline` — appareil
+simplement injoignable en ce moment, pas un bug de parsing (mes
+correctifs CEM3 n'ont simplement pas encore eu de sondage réussi à
+traiter). `binary_sensor.punchlight_ready`/`punchlight_enregistrement` :
+même schéma — appareil MIDI configuré mais aucune note observée depuis
+le démarrage, cohérent avec du matériel pas encore actif, pas un bug.
+
+15 nouveaux tests (dont 7 pour `resource_registry.py`, qui n'avait
+aucun test du tout malgré son rôle central dans l'arrêt propre de
+toutes les ressources du projet).
+
+406/406 tests sur toute la suite.
+
 ## 0.15.27 (suite 39) — Trois points repris : PDU (APC/Raritan), Reolink (intégration officielle), spin2dante (préparé), plus une correction sur Nexus Audio
 
 **PDU** — OID récupérés directement depuis le code source réel de

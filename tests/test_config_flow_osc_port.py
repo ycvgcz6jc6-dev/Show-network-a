@@ -6,6 +6,7 @@ later in the Home Assistant log after the integration fails to start.
 """
 from __future__ import annotations
 
+import asyncio
 import socket
 
 import pytest
@@ -46,6 +47,48 @@ async def test_choices_for_hass_discovers_choices_in_executor(monkeypatch):
         ["/dev/ttyUSB0"],
         ["MIDI In"],
     )
+
+
+@pytest.mark.asyncio
+async def test_choices_for_hass_a_stuck_source_does_not_hang_the_whole_menu(monkeypatch):
+    """Regression test for a real report ('je n'arrive plus à accéder au
+    menu configuration'): none of the three discovery sources previously
+    had any timeout, so a stuck USB/MIDI enumeration could hang the
+    entire config/options menu open indefinitely. A slow source must now
+    time out and fall back to an empty list rather than blocking the
+    other two. Uses the real _choices_for_hass with its timeout
+    parameter shortened, not a reimplementation."""
+    import time as _time
+
+    def _slow_discover_ports():
+        _time.sleep(2.0)
+        return []
+
+    monkeypatch.setattr(
+        "custom_components.dmx_monitor.config_flow.network_interface_snapshot",
+        lambda: [{"addresses": ["192.0.2.10"]}],
+    )
+    monkeypatch.setattr(
+        "custom_components.dmx_monitor.config_flow.discover_ports",
+        _slow_discover_ports,
+    )
+    monkeypatch.setattr(
+        "custom_components.dmx_monitor.config_flow.MIDIInputRuntime.list_input_ports",
+        lambda: ["MIDI In"],
+    )
+
+    class _RealExecutorHass:
+        async def async_add_executor_job(self, fn, *args):
+            return await asyncio.to_thread(fn, *args)
+
+    start = asyncio.get_running_loop().time()
+    interfaces, enttec_ports, midi_ports = await _choices_for_hass(_RealExecutorHass(), timeout=0.3)
+    elapsed = asyncio.get_running_loop().time() - start
+
+    assert elapsed < 1.5, "must not have waited for the full 2s slow enumeration"
+    assert interfaces == ["0.0.0.0", "192.0.2.10"]  # unaffected by the other source's timeout
+    assert midi_ports == ["MIDI In"]                 # unaffected
+    assert enttec_ports == []                        # timed out -> empty, not a crash
 
 
 def test_udp_port_available_detects_a_free_port():
