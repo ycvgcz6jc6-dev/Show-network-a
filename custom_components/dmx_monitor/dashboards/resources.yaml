@@ -1,4 +1,0 @@
-# Show Network frontend is shipped as one module to reduce Lovelace resource
-# loading and keep all custom elements on one versioned asset.
-- url: /api/dmx_monitor/static/show-network.js?v=0.15.0
-  type: module
