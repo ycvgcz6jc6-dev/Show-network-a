@@ -1,5 +1,6 @@
 from custom_components.dmx_monitor.device_inventory import DeviceInventory
 from custom_components.dmx_monitor.device_fingerprints import fingerprint_mdns
+from custom_components.dmx_monitor.discovery_pipeline import DiscoveryPipeline
 
 
 def test_same_ip_on_two_interfaces_does_not_cross_merge(tmp_path):
@@ -37,7 +38,32 @@ def test_apple_model_only_from_explicit_txt_model():
     assert explicit.vendor == 'Apple'
     assert explicit.model == 'Macmini9,1'
 
-from custom_components.dmx_monitor.discovery_pipeline import DiscoveryPipeline
+def test_arp_then_mdns_on_same_ip_merges_not_duplicates(tmp_path):
+    """Audit-confirmed: 'IP dupliquées entre ARP et DNS-SD'.
+
+    ARP's own fallback ids are interface-qualified
+    ("candidate:<ip>:<iface>", see runtime/setup.py), while
+    DiscoveryPipeline.mdns_result()'s fallback is plain "candidate:<ip>"
+    with no serial/mac -- so before the promotion gate in upsert() was
+    loosened to try find_by_ip() for any IP (not just ones also carrying
+    a serial/mac), an mDNS hit for an address ARP had already recorded
+    could never merge into it and always created a second, separate
+    inventory record for the same physical device.
+    """
+    inv = DeviceInventory(str(tmp_path / "overrides.json"))
+    pipeline = DiscoveryPipeline(inv)
+
+    arp_dev = inv.upsert(
+        ip="10.4.1.50", mac=None, protocols={"IPv4/ARP"},
+        sources={"arp_cache"}, confidence="candidate", confidence_score=0.65,
+        interface="enp10s0", unique_id="candidate:10.4.1.50:enp10s0",
+    )
+    mdns_dev = pipeline.mdns_result("10.4.1.50", "_http._tcp.local.", "GigaCore16i", {})
+
+    assert len(inv.devices) == 1, "ARP and mDNS results for the same IP must merge into one record"
+    assert mdns_dev is arp_dev
+    assert arp_dev.hostname == "GigaCore16i", "the mDNS hit should still enrich the merged record"
+
 
 def test_mdns_vendor_enrichment_reuses_pipeline_record(tmp_path):
     inv=DeviceInventory(str(tmp_path/'overrides.json'))
@@ -47,3 +73,23 @@ def test_mdns_vendor_enrichment_reuses_pipeline_record(tmp_path):
                         category='network_switch', unique_id=dev.unique_id)
     assert enriched is dev
     assert len(inv.devices) == 1
+
+
+def test_mdns_with_neither_ip_nor_name_creates_no_phantom_row(tmp_path):
+    """Audit-confirmed: 'une ligne vide affichée comme si elle existait'.
+
+    With neither an IP nor a name, the only thing left to key a record on
+    is the bare service_type -- not device-specific, so every
+    unidentified mDNS announcement of that service type from any device
+    used to collapse into one shared, ever-refreshed, effectively blank
+    inventory row. mdns_result() must decline to create a record rather
+    than fabricate one from non-device-specific evidence.
+    """
+    inv = DeviceInventory(str(tmp_path / "overrides.json"))
+    pipeline = DiscoveryPipeline(inv)
+
+    result = pipeline.mdns_result(None, "_http._tcp.local.", "", {})
+
+    assert result is None
+    assert len(inv.devices) == 0, "no inventory row should be created from unattributable evidence"
+
