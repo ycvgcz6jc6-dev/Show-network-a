@@ -148,6 +148,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry, settings:
     await _safe_load("DMX-to-HA mappings", coordinator._load_dmx_ha_mappings)
     await _safe_load("pre-show profile", coordinator.pre_show._load)
     await _safe_load("incident center state", coordinator.incident_center._load)
+    await _safe_load("show snapshots", coordinator.show_snapshots._load)
     generic_switch_hosts = [h.strip() for h in str(settings.get(CONF_GENERIC_SWITCH_HOSTS, "") or "").replace(";", ",").split(",") if h.strip()]
     all_switch_hosts = sorted(set(hosts) | set(generic_switch_hosts))
     if all_switch_hosts:

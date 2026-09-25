@@ -14,7 +14,17 @@ class ShowSnapshotManager:
     def __init__(self, config_dir: str) -> None:
         self.path = Path(config_dir) / ".storage" / "show_network_show_snapshots.json"
         self._data: dict[str, Any] = {"active": None, "snapshots": {}}
-        self._load()
+        # NOTE (audit fix, confirmed in production logs after 0.15.27
+        # deployment): self._load() used to run directly here -- this
+        # constructor is called synchronously from
+        # ShowNetworkCoordinator.__init__, itself on the event loop, so a
+        # blocking file read happened on every single startup ("Detected
+        # blocking call to open ... show_network_show_snapshots.json").
+        # Deferred to runtime/setup.py's _safe_load list instead, matching
+        # the exact pattern already used there for pre_show._load and
+        # incident_center._load -- this class had simply been missed when
+        # that pattern was first applied to the other persisted-state
+        # managers.
 
     def _load(self) -> None:
         try:

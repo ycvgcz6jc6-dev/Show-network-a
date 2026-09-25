@@ -441,12 +441,17 @@ class ShowNetworkSensor(ShowNetworkEntity, SensorEntity):
         if self._key in {"ma_packets", "ma_sources", "ma_groups", "ma_stations", "ma_live_stations", "ma_sessions"}:
             return {"ma_remote": self.coordinator.data.get("ma_remote", {}), "rx_diagnostics": self.coordinator.data.get("protocol_rx_diagnostics", {}).get("ma_net3", {})}
         if self._key == "device_inventory":
+            bounded = self.coordinator.data.get("device_inventory_bounded")
+            if bounded is not None:
+                return bounded
             rows = self.coordinator.data.get("device_inventory", [])
             # Compact presentation data only; raw evidence stays available in the inventory panel.
+            # "interface" kept for the discovery panel's own per-NIC filter
+            # (see the matching comment in coordinator.py's precompute).
             return {"devices": [{k: row.get(k) for k in (
                 "unique_id", "display_name", "display_manufacturer", "display_model",
                 "custom_role", "custom_location", "hidden", "monitor_mode", "ip", "ipv6", "hostname",
-                "mac", "serial", "category", "protocols", "sources", "confidence"
+                "mac", "serial", "category", "protocols", "sources", "confidence", "interface"
             )} for row in rows]}
         if self._key == "etc_sensor_catalog":
             return {"sensors": self.coordinator.data.get("etc_sensor_catalog", [])}
@@ -546,7 +551,10 @@ class ETCCEM3RackSensor(ShowNetworkEntity, SensorEntity):
 
 class ETCCEM3MetricSensor(ShowNetworkEntity, SensorEntity):
     METRICS = {
-        "cpu_temperature_c": ("CPU temperature", "°C"),
+        # cpu_temperature_c removed (audit: confirmed absent from the real
+        # captured CEM3 System page -- this device's firmware simply
+        # doesn't report it; keeping a sensor that can only ever show
+        # "unknown" is noise, not a monitoring gap).
         "line_frequency_hz": ("Line frequency", "Hz"),
         "phase_x_voltage_v": ("Phase X voltage", "V"),
         "phase_y_voltage_v": ("Phase Y voltage", "V"),
@@ -593,7 +601,7 @@ class ETCCEM3MetricSensor(ShowNetworkEntity, SensorEntity):
 
     def _raw_cem3_rack_attributes(self):
         row = self._row()
-        return {
+        attrs = {
             "host": self.host,
             "rack_name": (row.get("data") or {}).get("rack_name"),
             "rack_number": (row.get("data") or {}).get("rack_number"),
@@ -601,6 +609,23 @@ class ETCCEM3MetricSensor(ShowNetworkEntity, SensorEntity):
             "last_seen_epoch": row.get("last_seen_epoch"),
             "read_only": True,
         }
+        if self.metric == "circuits_total":
+            # Real per-circuit configuration (audit: computed correctly
+            # in etc_cem3.py -- properties.xml merged with levels.xml --
+            # but never actually surfaced to a sensor before this fix).
+            # Verified field-for-field against parse_cem3_properties'
+            # own documented columns, not guessed.
+            circuits = (row.get("dimmers") or {}).get("circuits") or []
+            attrs["circuits"] = [
+                {
+                    "space": c.get("space"), "circuit": c.get("circuit"),
+                    "module_type": c.get("module_type"), "control_mode": c.get("control_mode"),
+                    "curve": c.get("curve"), "firing_mode": c.get("firing_mode"),
+                    "level_percent": c.get("level_percent"),
+                }
+                for c in circuits
+            ]
+        return attrs
 
 
 async def async_setup_entry(

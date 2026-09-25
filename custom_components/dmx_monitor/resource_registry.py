@@ -7,8 +7,25 @@ or to a particular NIC/device address.
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
+
+# Audit fix (confirmed in production logs after 0.15.27 deployment):
+# "Task could not be canceled and was still running after shutdown" for
+# show-network-sacn-supervisor and show-network-artnet-supervisor.
+# Root cause traced to async_stop_all below, not to those tasks'
+# own cancellation handling (DmxNetworkReceiver.stop() awaits its own
+# tasks correctly) -- every resource was stopped sequentially with no
+# per-resource time budget at all. This project has grown many more
+# stoppable resources over this session (Millumin, Green-GO, and others,
+# each with their own socket/listener to tear down); a single slow or
+# genuinely stuck resource earlier in the sequence could consume the
+# whole of Home Assistant's own overall unload timeout, starving
+# whichever resources happened to be stopped later -- which is exactly
+# the "some tasks, not all" shape the production warning showed.
+_STOP_TIMEOUT_S = 5.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,10 +73,17 @@ class ResourceRegistry:
             for resource in self._resources.values()
         ]
 
-    async def async_stop_all(self, logger) -> None:
+    async def async_stop_all(self, logger: logging.Logger, *, timeout: float = _STOP_TIMEOUT_S) -> None:
         for resource in reversed(list(self._resources.values())):
             try:
-                await resource.async_stop()
+                await asyncio.wait_for(resource.async_stop(), timeout=timeout)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Show Network: %s (%s) did not stop within %.0fs -- moving on so it "
+                    "doesn't hold up the rest of shutdown; its own task may still be "
+                    "cancelled by Home Assistant's own final cleanup afterwards",
+                    resource.resource_id, resource.driver.key, timeout,
+                )
             except Exception as err:
                 logger.debug("Error while stopping resource %s: %s", resource.resource_id, err)
         self._resources.clear()
