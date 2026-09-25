@@ -966,6 +966,25 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         # value already fits), so the per-key overhead that's worth
         # avoiding is the thread-pool dispatch itself, not the
         # computation.
+        # device_inventory is transformed (trimmed to a fixed field set)
+        # before being bounded -- sensor.py does the same trim on-the-fly
+        # in its fallback path, kept identical here so the precomputed
+        # value matches exactly what an uncached read would produce.
+        # "interface" added (audit fix): the network-discovery panel's own
+        # per-NIC filter dropdown (ShowNetworkDiscovery's interfaceOf(r) =>
+        # r.interface) reads this exact field from these same rows -- it
+        # was never in the trimmed set, so the filter's own <select> always
+        # had no real options to offer, confirmed as a real user report
+        # ("toujours pas possible de choisir les cartes... pour regarder
+        # par carte"). The raw field already existed on DeviceInventory
+        # itself (device_inventory.py); it just never survived the trim.
+        _device_inventory_trimmed = {"devices": [
+            {k: row.get(k) for k in (
+                "unique_id", "display_name", "display_manufacturer", "display_model",
+                "custom_role", "custom_location", "hidden", "monitor_mode", "ip", "ipv6", "hostname",
+                "mac", "serial", "category", "protocols", "sources", "confidence", "interface",
+            )} for row in (snapshot.get("device_inventory") or [])
+        ]}
         _bound_source = {
             "protocol_rx_diagnostics": rx_diag,
             "device_model": snapshot.get("device_model"),
@@ -975,6 +994,7 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             "incident_center": snapshot.get("incident_center"),
             "pre_show": snapshot.get("pre_show"),
             "etc_cem3": snapshot.get("etc_cem3"),
+            "device_inventory": _device_inventory_trimmed,
         }
 
         def _bound_all():

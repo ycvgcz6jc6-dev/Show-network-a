@@ -170,12 +170,30 @@ async def _osc_port_conflict_error(hass, data: dict, *, previous_port: int | Non
     return {} if available else {"osc_input_port": "port_in_use"}
 
 
-async def _choices_for_hass(hass) -> tuple[list[str], list[str], list[str]]:
-    """Discover form choices without blocking Home Assistant's event loop."""
+async def _choices_for_hass(hass, *, timeout: float = 5.0) -> tuple[list[str], list[str], list[str]]:
+    """Discover form choices without blocking Home Assistant's event loop.
+
+    Each source is bounded individually (audit: a stuck ENTTEC USB or MIDI
+    port enumeration on some systems could otherwise hang this indefinitely
+    -- nothing here previously had any timeout at all, so the config/options
+    menu itself would simply never open, matching a real report of
+    "j'arrive plus à accéder au menu configuration". Falls back to an empty
+    list for whichever source timed out rather than failing the whole menu,
+    the same "don't let one slow thing starve everything else" fix already
+    applied to ResourceRegistry.async_stop_all. `timeout` is a parameter
+    (not a hardcoded constant) purely so tests can exercise a real timeout
+    without waiting for the production default.
+    """
+    async def _bounded(coro):
+        try:
+            return await asyncio.wait_for(coro, timeout=timeout)
+        except (asyncio.TimeoutError, Exception):
+            return []
+
     rows, enttec_ports, midi_ports = await asyncio.gather(
-        hass.async_add_executor_job(network_interface_snapshot),
-        hass.async_add_executor_job(discover_ports),
-        hass.async_add_executor_job(MIDIInputRuntime.list_input_ports),
+        _bounded(hass.async_add_executor_job(network_interface_snapshot)),
+        _bounded(hass.async_add_executor_job(discover_ports)),
+        _bounded(hass.async_add_executor_job(MIDIInputRuntime.list_input_ports)),
     )
     return _interfaces(rows), [port.device for port in enttec_ports], midi_ports
 
