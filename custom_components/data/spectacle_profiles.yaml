@@ -1,0 +1,724 @@
+- key: l_acoustics
+  manufacturer: L-Acoustics
+  domains:
+  - AUDIO
+  - NETWORK
+  product_families:
+  - Kara
+  - Kara II
+  - Kara III
+  - K2
+  - K3
+  - K1
+  - A15
+  - A10
+  - X12
+  - X8
+  - KS28
+  - KS21
+  - LA4X
+  - LA12X
+  - LA7.16
+  - LA2Xi
+  - P1
+  - LA Network Manager
+  passive_protocols:
+  - Milan-AVB
+  - AES67
+  - SNMP
+  - mDNS
+  - LLDP
+  diagnostics:
+  - amplified_controller_status
+  - unit_temperature
+  - input_level
+  - output_level
+  - limiter_activity
+  - load_checker
+  - protection
+  - events
+  - network_health
+  control_paths:
+  - LA Network Manager
+  - HTTP API
+  - SNMP
+  - Q-SYS
+  - Crestron
+- key: d_and_b
+  manufacturer: d&b audiotechnik
+  domains:
+  - AUDIO
+  - NETWORK
+  product_families:
+  - D20
+  - D40
+  - D80
+  - 10D
+  - 30D
+  - 5D
+  - 40D
+  - R1
+  passive_protocols:
+  - Dante
+  - mDNS
+  - LLDP
+  diagnostics:
+  - amplifier_status
+  - errors
+  - channel_temperature
+  - input_monitoring
+  - load_monitoring
+  - preset
+  - network_health
+  control_paths:
+  - R1
+  - AMX
+  - Crestron
+- key: lab_gruppen_lake
+  manufacturer: Lab Gruppen / Lake
+  domains:
+  - AUDIO
+  - NETWORK
+  product_families:
+  - PLM
+  - D Series
+  - FP+
+  - Lake
+  - NomadLink
+  passive_protocols:
+  - Dante
+  - AVB
+  - NomadLink
+  - mDNS
+  - LLDP
+  diagnostics:
+  - amplifier_status
+  - PSU_temperature
+  - DSP_temperature
+  - channel_temperature
+  - protection
+  - clip
+  - input_monitoring
+  - load_monitoring
+  - faults
+  control_paths:
+  - Lake Controller
+  - NomadLink
+- key: adamson
+  manufacturer: Adamson
+  domains:
+  - AUDIO
+  - NETWORK
+  product_families:
+  - CS-Series
+  - CS7
+  - CS10
+  - CS119
+  - ArrayIntelligence
+  - Adamson AI
+  passive_protocols:
+  - Milan-AVB
+  - mDNS
+  - LLDP
+  diagnostics:
+  - device_status
+  - DSP_status
+  - amplifier_status
+  - network_health
+  - switch_port_status
+  control_paths:
+  - Adamson AI
+- key: luminex
+  manufacturer: Luminex
+  domains:
+  - NETWORK
+  - LIGHT
+  product_families:
+  - GigaCore
+  - DMX8
+  - DMX4
+  - Ethernet-DMX nodes
+  passive_protocols:
+  - SNMP
+  - LLDP
+  - IGMP
+  - mDNS
+  diagnostics:
+  - temperature
+  - cpu_memory
+  - ports
+  - PoE
+  - SFP
+  - VLAN
+  - LLDP
+  - multicast
+  - link_errors
+  control_paths:
+  - GigaCore HTTP/API (GET-only when documented)
+- key: elc
+  manufacturer: ELC Lighting
+  domains:
+  - LIGHT
+  - NETWORK
+  product_families:
+  - dmXLAN Node
+  - NodeGBx
+  - NodeHD
+  - Buddy
+  - SwitchGBx
+  - ShowstoreGBx
+  passive_protocols:
+  - Art-Net
+  - sACN
+  - RDM
+  - SNMP
+  - LLDP
+  - IGMP
+  - PTP
+  diagnostics:
+  - DMX ports
+  - link
+  - PoE
+  - VLAN
+  - IGMP
+  - PTP
+  - bandwidth
+  control_paths: []
+- key: green_go
+  manufacturer: Green-GO
+  domains:
+  - COMMS
+  - NETWORK
+  product_families:
+  - Beltpack X
+  - Multichannel X
+  - Interface X
+  - Bridge X
+  - Switch 6
+  - Switch 18
+  passive_protocols:
+  - mDNS
+  - LLDP
+  - IGMP
+  - PTP
+  diagnostics:
+  - PoE
+  - link
+  - multicast
+  - VLAN
+  - PTP
+  control_paths: []
+- key: ma_lighting
+  manufacturer: MA Lighting
+  domains:
+  - LIGHT
+  - MA REMOTE
+  - NETWORK
+  product_families:
+  - grandMA3
+  - grandMA3 onPC
+  - processing units
+  - network nodes
+  passive_protocols:
+  - MA-Net3
+  - multicast
+  - LLDP
+  diagnostics:
+  - station_seen
+  - session_observed
+  - multicast_groups
+  - packet_rate
+  - network_health
+  control_paths:
+  - Web Remote
+  - OSC
+- key: etc
+  manufacturer: ETC
+  domains:
+  - LIGHT
+  - NETWORK
+  product_families:
+  - Eos
+  - ETCnomad
+  - Sensor3
+  - CEM3
+  - Net3 gateways
+  passive_protocols:
+  - sACN
+  - Art-Net
+  - Net3
+  - LLDP
+  - SNMP
+  diagnostics:
+  - rack_temperature
+  - load_monitoring
+  - DMX_error
+  - phase
+  - fan
+  - zero_cross
+  - voltage
+  control_paths: []
+- key: rve
+  manufacturer: RVE
+  domains:
+  - LIGHT
+  - NETWORK
+  product_families:
+  - STAGER
+  - EASY 12
+  - CUBE
+  - MINICUBE
+  - DIMKIT
+  - 3D CONCEPT
+  passive_protocols:
+  - DMX512
+  - DALI
+  - 0-10V
+  diagnostics:
+  - DMX
+  - load
+  - output_status
+  control_paths: []
+- key: artistic_licence
+  manufacturer: Artistic Licence
+  domains:
+  - LIGHT
+  - NETWORK
+  product_families:
+  - ArtNet Nodes
+  - Net-Patch
+  - Rackfusion
+  - ArtBridge
+  - DALI Gateway
+  passive_protocols:
+  - ArtPoll/ArtPollReply
+  - mDNS
+  - HTTP
+  diagnostics: []
+  control_paths:
+  - Art-Net input
+- key: pathport
+  manufacturer: Pathway Connectivity (Pathport)
+  domains:
+  - LIGHT
+  - NETWORK
+  product_families:
+  - Pathport Duo
+  - Pathport Quattro
+  - Pathport VIA
+  - Pathport Prophet
+  passive_protocols:
+  - ArtPoll/ArtPollReply
+  - mDNS
+  - HTTP
+  - SNMP
+  diagnostics: []
+  control_paths:
+  - Art-Net/sACN input
+- key: dmxking
+  manufacturer: DMXking
+  domains:
+  - LIGHT
+  - NETWORK
+  product_families:
+  - ultraDMX
+  - eDMX
+  - ultraSPLIT
+  passive_protocols:
+  - ArtPoll/ArtPollReply
+  - mDNS
+  diagnostics: []
+  control_paths:
+  - Art-Net/sACN input
+- key: enttec
+  manufacturer: ENTTEC
+  domains:
+  - LIGHT
+  product_families:
+  - DMX USB Pro
+  - DMX USB Pro Mk2
+  - Open DMX USB
+  passive_protocols:
+  - USB serial
+  diagnostics:
+  - connection
+  - frames
+  - valid_frames
+  - errors
+  - active_channels
+  control_paths: []
+- key: panasonic
+  manufacturer: Panasonic Connect
+  domains:
+  - PROJECTION
+  - NETWORK
+  product_families:
+  - PT-series projectors
+  - Panasonic professional projectors
+  passive_protocols:
+  - PJLink
+  - HTTP/Web API
+  - SNMP
+  diagnostics:
+  - power
+  - input
+  - AV mute
+  - temperature when reported
+  - fans when reported
+  - lamp_laser_hours
+  - errors
+  control_paths:
+  - PJLink
+  - Panasonic Web API/LAN (model dependent)
+- key: digital_projection
+  manufacturer: Digital Projection
+  domains:
+  - PROJECTION
+  - NETWORK
+  product_families:
+  - E-Vision
+  - Titan
+  - HIGHlite
+  passive_protocols:
+  - PJLink
+  - TCP/IP
+  - SNMP
+  diagnostics:
+  - power
+  - input
+  - AV mute
+  - temperature when reported
+  - lamp_laser_hours
+  - errors
+  control_paths:
+  - PJLink
+- key: christie
+  manufacturer: Christie
+  domains:
+  - PROJECTION
+  - NETWORK
+  product_families:
+  - Christie projectors
+  - Christie Conductor
+  passive_protocols:
+  - PJLink
+  - SNMP
+  - HTTP/LAN
+  diagnostics:
+  - power
+  - input
+  - AV mute
+  - temperature when reported
+  - fans when reported
+  - lamp_laser_hours
+  - errors
+  - network_health
+  control_paths:
+  - PJLink
+  - Christie network control (model dependent)
+- key: barco
+  manufacturer: Barco
+  domains:
+  - PROJECTION
+  - NETWORK
+  product_families:
+  - Barco projectors
+  - Pulse
+  - UDM
+  - UDX
+  passive_protocols:
+  - PJLink
+  - SNMP
+  - HTTP/LAN
+  diagnostics:
+  - power
+  - input
+  - AV mute
+  - temperature when reported
+  - fans when reported
+  - lamp_laser_hours
+  - errors
+  - network_health
+  control_paths:
+  - PJLink
+  - Barco network control (model dependent)
+- key: epson
+  manufacturer: Epson
+  domains:
+  - PROJECTION
+  - NETWORK
+  product_families:
+  - Epson professional projectors
+  - EB-series
+  - EV-series
+  passive_protocols:
+  - PJLink
+  - SNMP
+  - HTTP/Web Control
+  diagnostics:
+  - power
+  - input
+  - AV mute
+  - temperature when reported
+  - lamp_laser_hours
+  - errors
+  control_paths:
+  - PJLink
+- key: sony
+  manufacturer: Sony
+  domains:
+  - PROJECTION
+  - NETWORK
+  product_families:
+  - Sony professional projectors
+  - laser projectors
+  passive_protocols:
+  - PJLink
+  - SNMP
+  - HTTP/LAN
+  diagnostics:
+  - power
+  - input
+  - AV mute
+  - temperature when reported
+  - lamp_laser_hours
+  - errors
+  control_paths:
+  - PJLink
+  - Sony network control (model dependent)
+- key: nec_sharp
+  manufacturer: NEC / Sharp
+  domains:
+  - PROJECTION
+  - NETWORK
+  product_families:
+  - NEC projectors
+  - Sharp/NEC professional projectors
+  passive_protocols:
+  - PJLink
+  - SNMP
+  - HTTP/LAN
+  diagnostics:
+  - power
+  - input
+  - AV mute
+  - temperature when reported
+  - lamp_laser_hours
+  - errors
+  control_paths:
+  - PJLink
+- key: audinate
+  manufacturer: Audinate
+  domains:
+  - AUDIO
+  - NETWORK
+  product_families:
+  - Dante-enabled devices
+  - Dante AVIO (analog/USB/AES3 adapters)
+  - Dante-MY16
+  - Dante Domain Manager
+  - Dante Via
+  - Dante Controller
+  passive_protocols:
+  - mDNS
+  - Dante monitoring
+  - PTP
+  diagnostics:
+  - device_inventory
+  - clock_health
+  - latency
+  - network_health
+  - last_seen
+  control_paths: []
+- key: cisco
+  manufacturer: Cisco
+  domains:
+  - NETWORK
+  product_families:
+  - Catalyst
+  - Nexus
+  - Business switches
+  passive_protocols:
+  - SNMP
+  - LLDP
+  - IGMP
+  - PTP
+  diagnostics:
+  - interfaces
+  - link_errors
+  - VLAN
+  - PoE
+  - SFP
+  - temperature
+  - cpu_memory
+  - multicast
+  control_paths: []
+- key: hpe_aruba
+  manufacturer: HPE Aruba
+  domains:
+  - NETWORK
+  product_families:
+  - Aruba
+  - Aruba CX
+  - 2930F/2930M
+  passive_protocols:
+  - SNMP
+  - LLDP
+  - IGMP
+  - PTP
+  diagnostics:
+  - interfaces
+  - link_errors
+  - VLAN
+  - PoE
+  - SFP
+  - temperature
+  - cpu_memory
+  - multicast
+  control_paths: []
+- key: generic_switch
+  manufacturer: Generic
+  domains:
+  - NETWORK
+  product_families:
+  - Managed Ethernet switch
+  passive_protocols:
+  - SNMP
+  - LLDP
+  - IGMP
+  diagnostics:
+  - sysName
+  - sysDescr
+  - sysUpTime
+  - interfaces
+  - VLAN
+  - LLDP
+  - multicast
+  control_paths: []
+- key: powersoft
+  manufacturer: Powersoft
+  domains: [AUDIO, NETWORK]
+  product_families: [X Series, T Series, Unica, Mezzo]
+  passive_protocols: [Dante, AES67, mDNS, LLDP]
+  diagnostics: [amplifier_status, temperature, input_monitoring, output_monitoring, limiter_activity, faults, network_health]
+  control_paths: [ArmoníaPlus]
+- key: qsc
+  manufacturer: QSC
+  domains: [AUDIO, NETWORK]
+  product_families: [Q-SYS, CX-Q, PLD]
+  passive_protocols: [Dante, AES67, mDNS, LLDP, SNMP]
+  diagnostics: [amplifier_status, temperature, channel_status, faults, network_health]
+  control_paths: [Q-SYS]
+- key: crown
+  manufacturer: Crown Audio
+  domains: [AUDIO, NETWORK]
+  product_families: [DCi, I-Tech, XTi]
+  passive_protocols: [Dante, AES67, mDNS, SNMP]
+  diagnostics: [amplifier_status, temperature, channel_status, limiter_activity, faults]
+  control_paths: [Audio Architect]
+- key: meyer_sound
+  manufacturer: Meyer Sound
+  domains: [AUDIO, NETWORK]
+  product_families: [Galileo GALAXY, RMS]
+  passive_protocols: [mDNS, LLDP]
+  diagnostics: [health_monitoring_capability, temperature, faults, network_health]
+  control_paths: [Compass, RMServer]
+- key: netgear
+  manufacturer: NETGEAR
+  domains: [NETWORK]
+  product_families: [M4250 Series, Managed Pro / AV switches]
+  passive_protocols: [SNMP, LLDP]
+  diagnostics: [interfaces, link_errors, vlan, poe, sfp, port_bandwidth]
+  control_paths: []
+- key: ubiquiti
+  manufacturer: Ubiquiti
+  domains: [NETWORK]
+  product_families: [UniFi Switch, EdgeSwitch]
+  passive_protocols: [SNMP, LLDP]
+  diagnostics: [interfaces, link_errors, vlan, poe, sfp, cpu_memory]
+  control_paths: []
+- key: mikrotik
+  manufacturer: MikroTik
+  domains: [NETWORK]
+  product_families: [RouterOS switches, CRS Series, CSS Series]
+  passive_protocols: [SNMP, LLDP]
+  diagnostics: [interfaces, link_errors, vlan, poe, sfp, temperature, cpu_memory]
+  control_paths: []
+- key: tp_link
+  manufacturer: TP-Link
+  domains: [NETWORK]
+  product_families: [Omada managed switches, JetStream]
+  passive_protocols: [SNMP, LLDP]
+  diagnostics: [interfaces, link_errors, vlan, poe, sfp, port_bandwidth]
+  control_paths: []
+- key: allied_telesis
+  manufacturer: Allied Telesis
+  domains: [NETWORK]
+  product_families: [Managed switches, x-series]
+  passive_protocols: [SNMP, LLDP]
+  diagnostics: [interfaces, link_errors, vlan, poe, sfp, temperature]
+  control_paths: []
+- key: juniper
+  manufacturer: Juniper
+  domains: [NETWORK]
+  product_families: [EX Series, QFX Series]
+  passive_protocols: [SNMP, LLDP]
+  diagnostics: [interfaces, link_errors, vlan, poe, sfp, temperature, cpu_memory]
+  control_paths: []
+- key: audiofocus
+  manufacturer: AUDIOFOCUS
+  domains: [AUDIO]
+  product_families: [A Series SCiO amplifiers, ELIZ, ISOLDE, ARRoCC, CYRIS, CARYS line arrays and loudspeakers]
+  # Confirmed from AUDIOFOCUS's own A Series Operation Manual (v1.1): "The
+  # communication protocol used by the A Series is UDP/IP based... Unicast
+  # ...for the remote control of properties... and Multicast...for
+  # auto-discovery of devices and property changes (such as driving meters
+  # within SCIO)." No further detail (multicast group/port, packet format)
+  # is publicly documented anywhere found -- see audiofocus.py for the
+  # passive listener scaffold awaiting a real packet capture before any
+  # parsing logic is written.
+  passive_protocols: [UDP multicast (undocumented format)]
+  diagnostics: []
+  control_paths: [SCiO WebUI (no published API)]
+- key: midas
+  manufacturer: Midas
+  domains: [AUDIO]
+  product_families: [HD96, PRO X, PRO2, PRO3, PRO6, XL8]
+  passive_protocols: [mDNS (brand-name text match only)]
+  diagnostics: []
+  control_paths: [OSC (model-dependent, no fixed address space)]
+- key: soundcraft
+  manufacturer: Soundcraft
+  domains: [AUDIO]
+  product_families: [Vi Series, Si Series]
+  passive_protocols: [mDNS (brand-name text match only)]
+  diagnostics: []
+  control_paths: [OSC (model-dependent, no fixed address space)]
+- key: digico
+  manufacturer: DiGiCo
+  domains: [AUDIO]
+  product_families: [SD5, SD7, SD9, SD10, SD11, SD12, Quantum Series]
+  passive_protocols: [mDNS (brand-name text match only)]
+  diagnostics: []
+  control_paths: [OSC (model-dependent, no fixed address space)]
+- key: allen_heath
+  manufacturer: Allen & Heath
+  domains: [AUDIO]
+  product_families: [dLive, SQ Series, Avantis]
+  passive_protocols: [mDNS (brand-name text match only)]
+  diagnostics: []
+  control_paths: [OSC (model-dependent, no fixed address space)]
+- key: avid
+  manufacturer: Avid
+  domains: [AUDIO]
+  product_families: [VENUE, S6L]
+  passive_protocols: [mDNS (brand-name text match only)]
+  diagnostics: []
+  control_paths: [Ethernet Sound Grid (proprietary, no published API)]
+- key: solid_state_logic
+  manufacturer: Solid State Logic
+  domains: [AUDIO]
+  product_families: [Live L200, Live L300, Live L500, Live L550]
+  passive_protocols: [mDNS (brand-name text match only)]
+  diagnostics: []
+  control_paths: [OSC (model-dependent, no fixed address space)]
