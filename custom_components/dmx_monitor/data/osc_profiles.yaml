@@ -1,0 +1,393 @@
+- key: grandma3
+  label_fr: grandMA3 / MA
+  label_en: grandMA3 / MA
+  description_fr: Commandes OSC courantes pour executors, faders, encoders et /cmd.
+  description_en: Common OSC controls for executors, faders, encoders and /cmd.
+  setup_steps_fr:
+  - 'Dans grandMA3 : Menu → In & Out → OSC.'
+  - Activer Enable Input sur la ligne OSC utilisée.
+  - Configurer le Prefix si vous en utilisez un.
+  - Activer Receive pour les données OSC.
+  - Pour /cmd, activer séparément Receive Command.
+  - Vérifier l'adresse IP et le port OSC du réseau de contrôle.
+  setup_steps_en:
+  - 'In grandMA3: Menu → In & Out → OSC.'
+  - Enable Input on the OSC configuration line.
+  - Configure Prefix if you use one.
+  - Enable Receive for OSC data.
+  - For /cmd, enable Receive Command separately.
+  - Verify the control-network IP address and OSC port.
+  actions:
+  - key: executor_fader
+    label_fr: Fader Executor
+    label_en: Executor fader
+    address: /Page1/Fader201
+    value_type: float
+    destination_domain: grandma3
+    destination_attribute: fader
+    notes_fr: 'Exemple : 0–100 selon FaderRange.'
+    notes_en: 'Example: 0–100 depending on FaderRange.'
+  - key: executor_key
+    label_fr: Touche Executor
+    label_en: Executor key
+    address: /Page1/Key201
+    value_type: bool
+    destination_domain: grandma3
+    destination_attribute: key
+    notes_fr: Peut servir à Go+, Flash, etc. selon l'affectation.
+    notes_en: Can trigger Go+, Flash, etc. depending on assignment.
+  - key: executor_encoder
+    label_fr: Encodeur Executor
+    label_en: Executor encoder
+    address: /Page1/Encoder201
+    value_type: float
+    destination_domain: grandma3
+    destination_attribute: encoder
+    notes_fr: Valeur relative selon la fonction de l'encodeur.
+    notes_en: Relative value depending on encoder function.
+  - key: command
+    label_fr: Commande /cmd
+    label_en: /cmd command
+    address: /cmd
+    value_type: string
+    destination_domain: grandma3
+    destination_attribute: command
+    notes_fr: Nécessite Receive Command. À utiliser avec prudence.
+    notes_en: Requires Receive Command. Use with care.
+- key: chamsys_magicq
+  label_fr: ChamSys MagicQ
+  label_en: ChamSys MagicQ
+  description_fr: Banque OSC documentée pour playbacks, Execute, blackout et feedback.
+  description_en: Documented OSC bank for playbacks, Execute, blackout and feedback.
+  setup_steps_fr:
+  - Activer OSC dans Setup → View Settings → Network.
+  - Choisir Rx/Tx et les ports.
+  - Tester une commande avant d'activer les automatisations.
+  setup_steps_en:
+  - Enable OSC in Setup → View Settings → Network.
+  - Choose Rx/Tx and ports.
+  - Test a command before enabling automations.
+  actions:
+  - key: pb_go
+    label_fr: GO Playback
+    label_en: Playback GO
+    address: /pb/{playback}/go
+    value_type: bool
+    destination_domain: chamsys
+    destination_attribute: go
+    notes_fr: Playback 1–10 dans les adresses intégrées.
+    notes_en: Built-in addresses cover playbacks 1–10.
+  - key: pb_fader
+    label_fr: Fader Playback
+    label_en: Playback fader
+    address: /pb/{playback}
+    value_type: float
+    destination_domain: chamsys
+    destination_attribute: fader
+    notes_fr: 0.0–1.0 ou 0–100.
+    notes_en: 0.0–1.0 or 0–100.
+  - key: pb_flash
+    label_fr: Flash Playback
+    label_en: Playback flash
+    address: /pb/{playback}/flash
+    value_type: bool
+    destination_domain: chamsys
+    destination_attribute: flash
+    notes_fr: Non-zéro = flash.
+    notes_en: Non-zero = flash.
+  - key: pb_release
+    label_fr: Release Playback
+    label_en: Playback release
+    address: /pb/{playback}/release
+    value_type: bool
+    destination_domain: chamsys
+    destination_attribute: release
+    notes_fr: ''
+    notes_en: ''
+  - key: blackout
+    label_fr: Blackout
+    label_en: Blackout
+    address: /dbo
+    value_type: bool
+    destination_domain: chamsys
+    destination_attribute: blackout
+    notes_fr: 0/1 selon le comportement MagicQ.
+    notes_en: 0/1 according to MagicQ behavior.
+  - key: exec
+    label_fr: Execute
+    label_en: Execute item
+    address: /exec/{page}/{item}
+    value_type: bool
+    destination_domain: chamsys
+    destination_attribute: execute
+    notes_fr: ''
+    notes_en: ''
+- key: yamaha_rivage
+  label_fr: Yamaha RIVAGE PM
+  label_en: Yamaha RIVAGE PM
+  description_fr: Banque basée sur la spécification OSC officielle RIVAGE PM.
+  description_en: Bank based on the official RIVAGE PM OSC specification.
+  setup_steps_fr:
+  - Configurer OSC selon la documentation RIVAGE PM.
+  - Choisir la console/cible.
+  - Utiliser uniquement les paramètres proposés par la spécification du modèle.
+  setup_steps_en:
+  - Configure OSC according to the RIVAGE PM documentation.
+  - Choose the console/target.
+  - Use only parameters documented for the model.
+  actions:
+  - key: active_cue
+    label_fr: Active Cue
+    label_en: Active Cue
+    address: /yosc:req/set/MIXER:Current/Cue/ActiveCue
+    value_type: string
+    destination_domain: yamaha_rivage
+    destination_attribute: cue
+    notes_fr: ''
+    notes_en: ''
+  - key: cue_mode
+    label_fr: Cue Mode
+    label_en: Cue mode
+    address: /yosc:req/set/MIXER:Current/Cue/CueMode
+    value_type: string
+    destination_domain: yamaha_rivage
+    destination_attribute: cue_mode
+    notes_fr: MIX ou LAST.
+    notes_en: MIX or LAST.
+  - key: dca_cue
+    label_fr: DCA Cue ON/OFF
+    label_en: DCA cue ON/OFF
+    address: /yosc:req/set/MIXER:Current/Cue/DCA/On
+    value_type: int
+    destination_domain: yamaha_rivage
+    destination_attribute: dca_cue
+    notes_fr: ''
+    notes_en: ''
+- key: qlab
+  label_fr: QLab
+  label_en: QLab
+  description_fr: Commandes OSC QLab courantes avec support UDP/TCP et réponses documentées.
+  description_en: Common QLab OSC commands with documented UDP/TCP and replies.
+  setup_steps_fr:
+  - Configurer OSC dans QLab.
+  - Choisir la cible et le port.
+  - Tester /go avant une automatisation de spectacle.
+  setup_steps_en:
+  - Configure OSC in QLab.
+  - Choose target and port.
+  - Test /go before a show automation.
+  actions:
+  - key: go
+    label_fr: GO
+    label_en: GO
+    address: /go
+    value_type: none
+    destination_domain: qlab
+    destination_attribute: go
+    notes_fr: ''
+    notes_en: ''
+  - key: panic
+    label_fr: Panic
+    label_en: Panic
+    address: /panic
+    value_type: none
+    destination_domain: qlab
+    destination_attribute: panic
+    notes_fr: 'Commande sensible : laisser la confirmation active.'
+    notes_en: 'Sensitive command: keep confirmation enabled.'
+  - key: save
+    label_fr: Save
+    label_en: Save
+    address: /save
+    value_type: none
+    destination_domain: qlab
+    destination_attribute: save
+    notes_fr: ''
+    notes_en: ''
+  - key: updates_on
+    label_fr: Updates ON
+    label_en: Enable updates
+    address: /updates
+    value_type: int
+    destination_domain: qlab
+    destination_attribute: updates
+    notes_fr: 1 = activer, 0 = désactiver.
+    notes_en: 1 = enable, 0 = disable.
+- key: grandma2
+  label_fr: grandMA2
+  label_en: grandMA2
+  description_fr: 'Profil catalogue grandMA2 : adresses à renseigner selon la configuration
+    OSC de la console.'
+  description_en: 'grandMA2 catalog profile: addresses depend on the console OSC configuration.'
+  setup_steps_fr:
+  - Configurer OSC sur grandMA2.
+  - Renseigner le port et le prefix utilisés.
+  - Utiliser Learn pour enregistrer une adresse réellement reçue.
+  setup_steps_en:
+  - Configure OSC on grandMA2.
+  - Enter the port and prefix used.
+  - Use Learn to capture a real address.
+  actions: []
+- key: midas
+  label_fr: Midas
+  label_en: Midas
+  description_fr: 'Profil console Midas : banque prête à accueillir les commandes
+    documentées du modèle.'
+  description_en: 'Midas console profile: ready for model-specific documented commands.'
+  setup_steps_fr:
+  - Choisir le modèle Midas.
+  - Activer OSC si le modèle/firmware le permet.
+  - Utiliser Learn ou des adresses documentées par le constructeur.
+  setup_steps_en:
+  - Choose the Midas model.
+  - Enable OSC if supported by the model/firmware.
+  - Use Learn or manufacturer-documented addresses.
+  actions: []
+- key: soundcraft
+  label_fr: Soundcraft
+  label_en: Soundcraft
+  description_fr: 'Profil console Soundcraft : commandes dépendantes du modèle/firmware,
+    sans adresses inventées.'
+  description_en: 'Soundcraft console profile: model/firmware-dependent commands,
+    with no invented addresses.'
+  setup_steps_fr:
+  - Choisir le modèle.
+  - Activer le protocole documenté par Soundcraft.
+  - Utiliser Learn pour les commandes spécifiques.
+  setup_steps_en:
+  - Choose the model.
+  - Enable the protocol documented by Soundcraft.
+  - Use Learn for model-specific commands.
+  actions: []
+- key: medialon
+  label_fr: Medialon Show Control
+  label_en: Medialon Show Control
+  description_fr: 'Medialon (7thSense) supporte OSC nativement, mais son espace
+    d''adresses OSC (OSC Methods / Address Space) est défini dans la programmation
+    de chaque show via son module OSC (MXM), pas par une norme fixe du constructeur.
+    Aucune adresse fixe ne peut donc être fournie ici sans se référer à un show
+    précis : utiliser Learn pour découvrir les adresses réellement envoyées/attendues
+    par cette installation.'
+  description_en: 'Medialon (7thSense) supports OSC natively, but its OSC address
+    space (OSC Methods / Address Space) is defined per-show in its own OSC module
+    (MXM), not by a fixed vendor standard. No fixed address can therefore be
+    provided here without referring to a specific show: use Learn to discover
+    the addresses this particular installation actually sends/expects.'
+  setup_steps_fr:
+  - Dans Medialon Manager, ouvrir le module OSC (MXM) du show concerné.
+  - Noter les alias/adresses OSC définis par le programmeur du show.
+  - Utiliser Learn côté Show Network pour confirmer les adresses réellement
+    échangées.
+  setup_steps_en:
+  - In Medialon Manager, open the show's OSC module (MXM).
+  - Note the OSC aliases/addresses the show's programmer defined.
+  - Use Learn on the Show Network side to confirm the addresses actually
+    exchanged.
+  actions: []
+- key: etc_eos
+  label_fr: ETC Eos
+  label_en: ETC Eos
+  description_fr: Profil OSC Eos catalogue, avec apprentissage pour les commandes
+    dépendantes de la configuration.
+  description_en: Eos OSC catalog profile, with learn support for configuration-dependent
+    commands.
+  setup_steps_fr:
+  - Configurer OSC sur Eos.
+  - Choisir la cible et le port.
+  - Apprendre une commande depuis le moniteur OSC.
+  setup_steps_en:
+  - Configure OSC on Eos.
+  - Choose target and port.
+  - Learn a command from the OSC monitor.
+  actions: []
+- key: avolites
+  label_fr: Avolites
+  label_en: Avolites
+  description_fr: Profil catalogue Avolites avec apprentissage des adresses selon
+    Titan/console.
+  description_en: Avolites catalog profile with address learning per Titan/console
+    configuration.
+  setup_steps_fr:
+  - Activer le contrôle réseau/OSC supporté par la version.
+  - Utiliser Learn pour les adresses propres au show.
+  setup_steps_en:
+  - Enable the network/OSC control supported by the version.
+  - Use Learn for show-specific addresses.
+  actions: []
+- key: sound_console
+  label_fr: Console son / Sound console
+  label_en: Sound console / audio
+  description_fr: 'Profil générique pour commandes typiques de console son : faders,
+    mute, master, transport et snapshots. Les adresses restent éditables.'
+  description_en: 'Generic profile for common sound-console controls: faders, mute,
+    master, transport and snapshots. Addresses remain editable.'
+  setup_steps_fr:
+  - Activer l'entrée OSC sur la console son.
+  - Choisir le port OSC et l'interface réseau.
+  - Définir les adresses OSC de la console ou utiliser celles proposées.
+  - Tester avec le moniteur OSC avant d'activer les mappings.
+  setup_steps_en:
+  - Enable OSC input on the sound console.
+  - Choose the OSC port and network interface.
+  - Define the console's OSC addresses or use the suggested ones.
+  - Test with the OSC monitor before enabling mappings.
+  actions:
+  - key: channel_fader
+    label_fr: Fader canal
+    label_en: Channel fader
+    address: /ch/1/fader
+    value_type: float
+    destination_domain: media_player
+    destination_attribute: volume_level
+    notes_fr: ''
+    notes_en: ''
+  - key: channel_mute
+    label_fr: Mute canal
+    label_en: Channel mute
+    address: /ch/1/mute
+    value_type: bool
+    destination_domain: switch
+    destination_attribute: turn_on
+    notes_fr: ''
+    notes_en: ''
+  - key: master
+    label_fr: Master
+    label_en: Master
+    address: /master/fader
+    value_type: float
+    destination_domain: media_player
+    destination_attribute: volume_level
+    notes_fr: ''
+    notes_en: ''
+  - key: snapshot
+    label_fr: Snapshot
+    label_en: Snapshot
+    address: /snapshot
+    value_type: integer
+    destination_domain: event
+    destination_attribute: event_type
+    notes_fr: ''
+    notes_en: ''
+  - key: transport_play
+    label_fr: Play
+    label_en: Play
+    address: /transport/play
+    value_type: bool
+    destination_domain: media_player
+    destination_attribute: play
+    notes_fr: ''
+    notes_en: ''
+- key: generic
+  label_fr: OSC générique
+  label_en: Generic OSC
+  description_fr: Aucun constructeur imposé. Créez vos adresses librement.
+  description_en: No vendor assumed. Create your own addresses.
+  setup_steps_fr:
+  - Choisir le port d'écoute.
+  - Créer ou apprendre une adresse OSC.
+  - Tester puis activer le mapping.
+  setup_steps_en:
+  - Choose the listening port.
+  - Create or learn an OSC address.
+  - Test then enable the mapping.
+  actions: []
