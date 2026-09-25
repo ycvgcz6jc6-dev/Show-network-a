@@ -1,0 +1,1517 @@
+"""Home Assistant coordinator for Show Network telemetry."""
+from __future__ import annotations
+
+import asyncio
+import base64
+import functools
+
+from datetime import timedelta
+import logging
+
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+
+from .device_inventory import DeviceInventory
+from .green_go import GreenGOInventory
+from .elc import ELCInventory
+from .gigacore import GigaCoreMonitor
+from .etc import profile as etc_profile
+from .etc_cem3 import CEM3WebMonitor
+from .switch_profiles import enabled_profiles
+from .lighting_receiver import UniverseTracker
+from .signal_watchdog import SignalWatchdogManager
+from .rules import RuleSet
+from .security import SecurityManager
+from .network_interfaces import snapshot as network_interface_snapshot
+from .network_interfaces import NetworkInterfaceInfo, route_to_target
+from .topology import ShowTopology
+from .rule_storage import RuleStore
+from .projector_monitor import PJLinkMonitor
+from .network_health import NetworkHealth
+from .health_engine import ShowNetworkHealthEngine
+from .device_model import DeviceModel
+from .doctor import ShowNetworkDoctor
+from .incident_center import IncidentCenter
+from .pre_show import PreShowCheck
+from .show_snapshot import ShowSnapshotManager
+from .ma_remote import MARemoteInventory
+from .audio_amplifiers import AudioAmplifierInventory
+from .power_manager import PowerManager
+from .fixture_control import FixtureControlEngine
+from .dmx_scene_bank import DmxSceneBank
+from .rdm_inventory import RDMInventory
+from .dmx_circuit_monitor import DmxCircuitMonitor
+from .dmx_ha_mapping import DmxHAMappingEngine
+from .dmx_ha_mapping_storage import DmxHAMappingStore
+from .dmx_ha_zones import DmxHAZoneEngine, DmxHAZone
+from .backup import ConfigBackupManager
+from .diagnostics_export import DiagnosticsExporter
+from .osc_output import OSCOutput, OSCTargetStore
+from .midi_output import MIDIOutput, MIDITargetStore
+from .show_control import ShowControlBank
+from .timecode import TimecodeMonitor
+from .reliability import ChaosSimulator, capacity_snapshot
+from .rate_limiter import RateLimiter
+from .flow_pipeline import LatestValuePipeline
+from .ha.action_dispatcher import HAActionDispatcher
+from .core.contracts import ServiceAction
+from .core.state_store import RuntimeStateStore
+from .host_metrics import snapshot as host_metrics_snapshot
+from .performance_manager import AdaptivePerformance
+from .osc_learn import OSCLearnSession
+from .manufacturer_profiles import all_profiles as all_manufacturer_profiles, match_manufacturer
+from .osc_profiles import PROFILES as OSC_SOURCE_PROFILES
+from .artnet_discovery import ArtNetNodeInventory
+from .attribute_bounds import bound_attributes
+from dataclasses import asdict
+from .video_ip_supervision import VideoIPSupervision
+
+_LOGGER = logging.getLogger(__name__)
+
+UPDATE_INTERVAL = timedelta(seconds=5)
+
+
+def _lowest_vlan_id(vlans: list[dict] | None) -> int | None:
+    """topology.py's TopologyLink has a single `vlan` slot, but a trunk
+    port can legitimately report several (lldp_discovery.py's own
+    async_walk_lldp_neighbors() returns the full list) -- the lowest VLAN
+    id is used as a representative single value rather than silently
+    picking whichever happened to be last in the walk order."""
+    if not vlans:
+        return None
+    ids = [int(v["id"]) for v in vlans if str(v.get("id", "")).isdigit()]
+    return min(ids) if ids else None
+
+
+class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
+    """Central coordinator for passive inspectors and read-only pollers."""
+
+    def __init__(self, hass: HomeAssistant, inventory: DeviceInventory, gigacore: GigaCoreMonitor | None = None) -> None:
+        super().__init__(
+            hass,
+            logger=_LOGGER,
+            name="show_network",
+            update_interval=UPDATE_INTERVAL,
+            always_update=False,
+        )
+        self.inventory = inventory
+        self.green_go = GreenGOInventory()
+        self.elc = ELCInventory()
+        self.vendor_discovery = []
+        self.gigacore = gigacore
+        # Generic, standards-based SNMP telemetry (identity/uptime/interfaces,
+        # PoE if the device answers it) for ELC/Green-GO-hosting or any other
+        # switch that isn't GigaCore -- complementary to self.elc/self.green_go
+        # above, which are identity-only catalogs fed by mDNS, not live SNMP
+        # telemetry. No vendor-private OIDs are used since none are publicly
+        # documented for ELC/Green-GO.
+        self.generic_switch_monitor = None
+        self.switch_port_monitor = None
+        self.lldp_monitor = None
+        self.ups_monitor = None
+        self.etc_cem3_monitor = None
+        self.ontime_monitor = None
+        self.qlcplus_bridge = None
+        self.ma_listener = None
+        self.ma_remote = MARemoteInventory()
+        self._ma_web_remote_last_probe = 0.0
+        self.ptp_monitor = None
+        self.dante_monitor = None
+        self.aes67_monitor = None
+        self.aes70_monitor = None
+        self.yamaha_osc_monitor = None
+        self.sendspin_dante_zone_monitor = None
+        self.greengo_monitor = None
+        self.qlab_monitor = None
+        self.resolume_monitor = None
+        self.millumin_monitor = None
+        self.nexus_audio_monitor = None
+        self.pdu_monitor = None
+        self.reolink_ha_monitor = None
+        self.nexus_audio_zone_monitor = None
+        self.avdecc_monitor = None
+        self.st2110_monitor = None
+        self.avb_monitor = None
+        self.enttec_input = None
+        self.punchlight = None
+        self.resource_registry = None
+        self.performance_manager = AdaptivePerformance("auto")
+        self.enttec_listen_enabled = bool(self.enttec_input)
+        self.dmx_tracker = UniverseTracker()
+        self._dmx_universe_entity_keys: set[tuple[str, int]] = set()
+        self.dmx_universe_entity_callback = None
+        self.watchdogs = SignalWatchdogManager(hass, action_guard=self._watchdog_action_allowed, event_callback=self._watchdog_event)
+        self.rules = RuleSet()
+        self.rule_store = RuleStore(hass.config.path())
+        # Persisted rules are loaded asynchronously by runtime/setup.py.  Do not
+        # touch disk in the coordinator constructor: HA creates it on the event loop.
+        self.topology = ShowTopology()
+        self.network_health = NetworkHealth()
+        self.health_engine = ShowNetworkHealthEngine()
+        self.device_model = DeviceModel()
+        self.doctor = ShowNetworkDoctor()
+        self.incident_center = IncidentCenter(hass.config.config_dir)
+        self.pre_show = PreShowCheck(hass.config.config_dir)
+        self.show_snapshots = ShowSnapshotManager(hass.config.config_dir)
+        self.audio_amplifiers = AudioAmplifierInventory()
+        self.power_manager = PowerManager(hass.config.path("show_network_power_manager.json"))
+        self.fixture_control = FixtureControlEngine(hass.config.path())
+        self.dmx_scene_bank = DmxSceneBank(hass.config.path("show_network_dmx_scenes.json"))
+        self.rdm_inventory = RDMInventory()
+        self.rdm_bridge = None
+        self.rdmnet_bridge = None
+        self.rdm_allow_writes = False
+        self.dmx_circuit_monitor = DmxCircuitMonitor(hass.config.path("show_network_dmx_circuit_monitor.json"))
+        self.archive = None
+        self.chaos = ChaosSimulator()
+        self.capacity_config = {"link_mbps": 1000.0, "dante_mbps": 0.0, "cameras_mbps": 0.0, "st2110_mbps": 0.0, "other_mbps": 0.0}
+        self._timeline_dmx_hashes = {}
+        self._dmx_publish_limiter = RateLimiter(interval_s=0.2)
+        # Node-RED-inspired latest-value pipeline: watchdogs see every packet,
+        # while rules/HA mappings process coalesced snapshots at a bounded rate.
+        self._dmx_flow = LatestValuePipeline(self._process_dmx_snapshot, interval_s=0.05, max_keys=256, byte_change_threshold=1)
+        self._ha_dispatcher = HAActionDispatcher(hass)
+        self.state_store = RuntimeStateStore(history_limit=100)
+        # Safety gate: light/scene actions remain blocked until explicitly enabled.
+        self.light_sync_enabled = False
+        from .osc_mapping import Mapping, MappingEngine
+        self.control_mapping_engine = MappingEngine()
+        from .control_mapping import ControlMappingStore
+        self.control_mapping_store = ControlMappingStore(hass.config.path("show_network_control_mappings.json"))
+        # NOTE (audit fix): control_mapping_store.load() used to run here
+        # directly (blocking file I/O on the event loop, confirmed in
+        # production logs). Deferred to runtime/setup.py via
+        # hass.async_add_executor_job(coordinator._load_control_mappings).
+        self.dmx_ha_mapping_engine = DmxHAMappingEngine()
+        self._dmx_ha_highlights: dict[str, dict[str, dict]] = {}
+        self.dmx_ha_mapping_store = DmxHAMappingStore(hass.config.path())
+        self.dmx_ha_zone_engine = DmxHAZoneEngine()
+        self.dmx_ha_zone_store_path = hass.config.path("show_network_dmx_ha_zones.json")
+        # NOTE (audit fix): self._load_dmx_ha_zones() used to run here
+        # (blocking file I/O on the event loop, confirmed in production
+        # logs). Deferred to runtime/setup.py via
+        # hass.async_add_executor_job(coordinator._load_dmx_ha_zones).
+        self.config_backups = ConfigBackupManager(hass.config.path())
+        self.diagnostics_exporter = DiagnosticsExporter(hass.config.path())
+        # NOTE (audit fix): dmx_ha_mapping_store.load() used to run here
+        # directly (blocking file I/O on the event loop, confirmed in
+        # production logs). Deferred to runtime/setup.py via
+        # hass.async_add_executor_job(coordinator._load_dmx_ha_mappings).
+        self.control_mapping_events = []
+        self.osc_output = OSCOutput()
+        self.osc_learn = OSCLearnSession()
+        self.osc_target_store = OSCTargetStore(hass.config.path("show_network_osc_targets.json"))
+        self.osc_targets = {}
+        self.midi_output = MIDIOutput()
+        self.midi_target_store = MIDITargetStore(hass.config.path("show_network_midi_targets.json"))
+        self.midi_targets = {}
+        self.show_control = ShowControlBank(hass.config.path("show_network_show_control.json"))
+        self.timecode = TimecodeMonitor()
+        self.projector_monitor = PJLinkMonitor()
+        self.video_ip_supervision = VideoIPSupervision()
+        self.security = SecurityManager(hass.config.path(), autoload=False)
+        # Cache for the static manufacturer/OSC reference catalogs: computed
+        # once, not on every refresh cycle, since this data never changes at
+        # runtime.
+        self._profile_catalog_cache = None
+        # Generic, manufacturer-agnostic Art-Net node discovery (ELC, Luminex,
+        # ETC, or anything else compliant) via standard ArtPoll/ArtPollReply --
+        # complementary to vendor_discovery.py's mDNS-only approach, since not
+        # every Art-Net node also advertises via mDNS.
+        self.artnet_nodes = ArtNetNodeInventory(match_manufacturer=match_manufacturer)
+        self._last_activity = {}
+        self.data = {
+            "devices_total": 0,
+            "devices_confirmed": 0,
+            "devices_candidates": 0,
+            "devices_unknown": 0,
+            "device_inventory": [],
+            "discovery_status": {"state": "idle", "mdns_state": "idle", "mdns_services": 0, "mdns_detail": "not scanned yet", "arp_neighbors": 0, "inventory_total": 0, "errors": []},
+            "protocol_rx_diagnostics": {},
+            "device_overrides": {},
+            "ma_packets": 0,
+            "ma_sources": 0,
+            "ma_groups": 0,
+            "osc_messages": 0,
+            "osc_output_enabled": False,
+            "osc_sent": 0,
+            "osc_errors": 0,
+            "osc_last_target": None,
+            "osc_last_address": None,
+            "osc_last_error": None,
+            "timecode": self.timecode.snapshot(),
+            "giga_core_temperature": {},
+            "gigacore_status": {},
+            "control_mappings": list(self.control_mapping_engine.mappings),
+            "control_mapping_events": [],
+            "osc_input": {"enabled": False, "messages": 0, "last_address": None, "last_source": None, "last_error": None},
+            "osc_learn": {"active": False, "suggestions": []},
+            "midi_input": {"enabled": False, "connected": False, "messages": 0, "port": None, "last_error": None},
+            "midi_output": self.midi_output.snapshot(),
+            "midi_output_sent": 0,
+            "midi_targets": [],
+            **self.show_control.snapshot(),
+            "ptp_packets": 0,
+            "ptp_sources": 0,
+            "ptp_event_packets": 0,
+            "ptp_general_packets": 0,
+            "ptp_last_source": None,
+            "ptp_last_message_type": None,
+            "ptp_last_version": None,
+            "ptp_last_domain": None,
+            "ptp_last_length": None,
+            "dante_packets": 0,
+            "dante_sources": 0,
+            "dante_mdns_packets": 0,
+            "dante_mdns_matches": 0,
+            "dante_monitor_packets": 0,
+            "dante_setup_packets": 0,
+            "dante_last_source": None,
+            "dante_last_kind": None,
+            "dante_last_port": None,
+            "dante_last_length": None,
+            "dante_endpoints": 0,
+            "dante_inventory": [],
+            "aes67_sap_packets": 0,
+            "aes67_sap_sources": 0,
+            "aes67_last_source": None,
+            "aes67_last_length": None,
+            "aes67_last_hint": None,
+            "st2110_packets": 0,
+            "st2110_rtp_packets": 0,
+            "st2110_sources": 0,
+            "st2110_last_source": None,
+            "st2110_last_payload_type": None,
+            "st2110_last_sequence": None,
+            "st2110_last_timestamp": None,
+            "st2110_last_size": None,
+            "green_go_devices": 0,
+            "green_go_sources": 0,
+            "etc_sensor_catalog": [],
+            "etc_cem3": {"enabled": False, "total": 0, "online": 0, "errors_total": 0, "racks": []},
+            "etc_cem3_racks_total": 0,
+            "etc_cem3_racks_online": 0,
+            "etc_cem3_errors_total": 0,
+            "etc_cem3_temperature_max": None,
+            "switch_profiles": [],
+            "switch_manufacturers": [],
+            "enttec_connected": False,
+            "enttec_frames": 0,
+            "enttec_valid": False,
+            "enttec_error_flags": 0,
+            "enttec_active_channels": 0,
+            "enttec_serial_number": None,
+            "enttec_device": None,
+            "enttec_model": None,
+            "enttec_values": bytes(512),
+            "punchlight": {"configured": False, "connected": False, "recording": False, "ready": False, "messages": 0},
+            "tally_ip": {"enabled": False, "listening": False, "on": False, "receive_only": True},
+            "dmx_universes": [],
+            "watchdog_rules": [],
+            "watchdog_active": 0,
+            "dmx_rules": [],
+            "dmx_rule_traces": [],
+            "topology": {"nodes": [], "links": []},
+            "network_health": {"interfaces": [], "interfaces_up": 0, "interfaces_stale": 0, "packets_observed": 0, "protocols": []},
+            "light_sync_enabled": False,
+            "dmx_ha_mappings": self.dmx_ha_mapping_engine.snapshot(),
+            "dmx_ha_zones": self.dmx_ha_zone_engine.snapshot(),
+            "dmx_ha_rdm": self.dmx_ha_zone_engine.rdm_snapshot(),
+            "projector_control_enabled": False,
+            "security": self.security.snapshot(),
+            "network_interfaces": [],
+            "chaos": self.chaos.snapshot(),
+            "network_capacity": capacity_snapshot([], **self.capacity_config),
+            "archive": {},
+            "runtime_resources": [],
+            "host_metrics": host_metrics_snapshot().snapshot(),
+            "performance": {"profile": "auto", "level": "normal", "telemetry_interval_s": 5.0, "discovery_enabled": True, "secondary_polling": True},
+        }
+
+
+    async def async_set_dmx_ha_mapping_highlight(self, mapping_id: str, enabled: bool) -> None:
+        """Temporarily highlight mapped HA lights, restoring their exact prior state."""
+        mapping = self.dmx_ha_mapping_engine.mappings.get(mapping_id)
+        if not mapping or not mapping.entity_id:
+            raise ValueError("Mapping inconnue ou sans entité Home Assistant")
+        entity_ids = mapping.entity_id if isinstance(mapping.entity_id, list) else [mapping.entity_id]
+        saved = self._dmx_ha_highlights.get(mapping_id, {})
+        if enabled:
+            for entity_id in entity_ids:
+                if entity_id in saved:
+                    continue
+                state = self.hass.states.get(entity_id)
+                if not state:
+                    continue
+                saved[entity_id] = {"state": state.state, "attributes": dict(state.attributes)}
+                data = {"entity_id": entity_id, "brightness_pct": 100}
+                modes = state.attributes.get("supported_color_modes") or []
+                if any(mode in modes for mode in ("rgb", "rgbw", "rgbw_color", "hs", "xy")):
+                    data["rgb_color"] = [255, 255, 255]
+                await self.hass.services.async_call("light", "turn_on", data, blocking=True)
+            self._dmx_ha_highlights[mapping_id] = saved
+        else:
+            for entity_id, previous in saved.items():
+                if previous.get("state") == "off":
+                    await self.hass.services.async_call("light", "turn_off", {"entity_id": entity_id}, blocking=True)
+                    continue
+                attrs = previous.get("attributes", {})
+                data = {"entity_id": entity_id}
+                if "brightness" in attrs:
+                    data["brightness"] = attrs["brightness"]
+                if "rgb_color" in attrs:
+                    data["rgb_color"] = attrs["rgb_color"]
+                elif "color_temp_kelvin" in attrs:
+                    data["color_temp_kelvin"] = attrs["color_temp_kelvin"]
+                elif "color_temp" in attrs:
+                    data["color_temp"] = attrs["color_temp"]
+                if "effect" in attrs and attrs["effect"] is not None:
+                    data["effect"] = attrs["effect"]
+                await self.hass.services.async_call("light", "turn_on", data, blocking=True)
+            self._dmx_ha_highlights.pop(mapping_id, None)
+
+    async def set_enttec_listen_enabled(self, enabled: bool) -> None:
+        """Enable/disable receive-only ENTTEC USB listening without DMX output."""
+        enttec = getattr(self, "enttec_input", None)
+        if enabled:
+            if enttec is None:
+                raise RuntimeError("Aucun périphérique ENTTEC configuré")
+            await enttec.start() if not enttec.connected else asyncio.sleep(0)
+        else:
+            if enttec is not None and enttec.connected:
+                await enttec.stop()
+        self.enttec_listen_enabled = bool(enabled)
+        self.publish(enttec_listen_enabled=self.enttec_listen_enabled)
+
+    def _compute_route_to_targets(self, interfaces_snapshot: list[dict]) -> list[dict]:
+        """Phase C9 (rapport maître S99): 'route to target pour CEM3,
+        Dante, Luminex, MA, Reolink, etc.' -- for a curated set of known
+        show device IPs (explicitly configured ETC CEM3/Luminex GigaCore
+        hosts, plus every device the passive inventory already knows an
+        IP for), report which local interface would actually reach it.
+        Pure computation from already-gathered data; sends nothing.
+        Runs off the event loop (called via executor) since it's CPU work
+        over a potentially sizeable inventory, not I/O, but keeping it
+        off the loop matches this module's own established pattern for
+        anything non-trivial.
+        """
+        try:
+            interfaces = [NetworkInterfaceInfo(**row) for row in interfaces_snapshot]
+        except TypeError:
+            return []
+        targets: dict[str, str] = {}  # ip -> label, de-duplicated
+        for host in getattr(self.gigacore, "hosts", ()) or ():
+            targets[host] = "Luminex GigaCore"
+        for host in getattr(getattr(self, "etc_cem3_monitor", None), "hosts", ()) or ():
+            targets[host] = "ETC CEM3"
+        for device in self.inventory.public():
+            ip = device.get("ip")
+            if ip and ip not in targets:
+                targets[ip] = device.get("display_name") or "Appareil découvert"
+            if len(targets) >= 200:  # defensive cap; a normal show network is nowhere near this
+                break
+        results = []
+        for ip, label in targets.items():
+            result = route_to_target(interfaces, ip)
+            result["label"] = label
+            results.append(result)
+        return results
+
+    def _ingest_lldp_neighbors(self) -> None:
+        """Phase C11 (rapport maître S101): 'Développer réellement: LLDP...'
+        Resolves each polled neighbor's identity against the device
+        inventory where possible (same 'mac:<mac>' convention
+        device_inventory.py's own identity() uses, so a match here is the
+        *same* node the rest of Show Network already knows), falling back
+        to a synthetic 'lldp:<chassis id>' identity for a neighbor not yet
+        otherwise known -- topology.py already supports nodes minted this
+        way (ShowTopology docstring: "links are created only from
+        explicit evidence"). Feeds each into the topology graph as an
+        LLDP-evidenced link; device_model.py already specifically looks
+        for protocol "LLDP" when building each device's physical_links,
+        so this is the missing data source for a filter that already
+        existed with nothing to filter.
+        """
+        for host, neighbors in self.lldp_monitor.snapshot().items():
+            switch_device = self.inventory.find_by_ip(host)
+            switch_id = switch_device.unique_id if switch_device else f"candidate:{host}"
+            for n in neighbors:
+                chassis_id = n.get("chassis_id")
+                neighbor_id = None
+                if n.get("chassis_id_type") == "mac_address" and chassis_id:
+                    candidate_id = f"mac:{str(chassis_id).lower().replace(':','').replace('-','')}"
+                    if candidate_id in self.inventory.devices:
+                        neighbor_id = candidate_id
+                if neighbor_id is None:
+                    neighbor_id = f"lldp:{chassis_id or n.get('sys_name') or n.get('port_id') or 'unknown'}"
+                self.topology.observe_link(
+                    switch_id, neighbor_id,
+                    source_port=n.get("local_port_name") or n.get("local_port_num"),
+                    target_port=n.get("port_id"),
+                    vlan=_lowest_vlan_id(n.get("vlans")),
+                    protocol="LLDP", confidence=0.9,
+                    evidence=f"LLDP: {n.get('sys_name') or chassis_id or 'appareil'}",
+                )
+
+    async def _async_update_data(self) -> dict:
+        """Return a snapshot from the currently active inspectors.
+
+        Protocol workers should update the snapshot and call
+        async_set_updated_data() for push-style telemetry. The periodic refresh
+        keeps the entity layer alive and allows future read-only pollers.
+        """
+        summary = self.inventory.summary()
+        if self.gigacore:
+            await self.gigacore.async_update()
+        if self.generic_switch_monitor:
+            await self.generic_switch_monitor.async_update()
+        if self.switch_port_monitor:
+            await self.switch_port_monitor.async_update()
+        if self.yamaha_osc_monitor:
+            await self.yamaha_osc_monitor.async_update()
+        if self.qlab_monitor:
+            await self.qlab_monitor.async_update()
+        if self.resolume_monitor:
+            await self.resolume_monitor.async_update()
+        if self.nexus_audio_monitor:
+            await self.nexus_audio_monitor.async_update()
+        if self.pdu_monitor:
+            await self.pdu_monitor.async_update()
+        if self.lldp_monitor:
+            await self.lldp_monitor.async_update()
+            self._ingest_lldp_neighbors()
+        if self.ups_monitor:
+            await self.ups_monitor.async_update()
+        if getattr(self, "projector_monitor_enabled", True):
+            await self.projector_monitor.async_update()
+        if self.etc_cem3_monitor:
+            await self.etc_cem3_monitor.async_update()
+        if getattr(self, "ontime_monitor", None):
+            await self.ontime_monitor.async_update()
+        if getattr(self, "qlcplus_bridge", None):
+            await self.qlcplus_bridge.async_update()
+        if getattr(self, "dante_managed_monitor", None):
+            await self.dante_managed_monitor.async_update()
+        snapshot = dict(self.data)
+        # NOTE (audit fix): timecode/artnet_nodes must be re-read fresh every
+        # cycle -- both objects keep updating live via lighting_receiver.py's
+        # callbacks, so a stale snapshot merged only once would silently drift.
+        snapshot["timecode"] = self.timecode.snapshot()
+        snapshot.update(self.artnet_nodes.snapshot())
+        snapshot["security"] = self.security.snapshot()
+        snapshot["network_interfaces"] = await self.hass.async_add_executor_job(network_interface_snapshot)
+        snapshot["network_routes"] = await self.hass.async_add_executor_job(self._compute_route_to_targets, snapshot["network_interfaces"])
+        host = host_metrics_snapshot()
+        snapshot["host_metrics"] = host.snapshot()
+        decision = self.performance_manager.decide(host.cpu_percent, host.memory_percent)
+        snapshot["performance"] = {"profile": self.performance_manager.profile, "level": decision.level, "telemetry_interval_s": decision.telemetry_interval_s, "discovery_enabled": decision.discovery_enabled, "secondary_polling": decision.secondary_polling}
+        # Adapt only the coordinator refresh cadence; protocol listeners/watchdogs remain independent.
+        self.update_interval = timedelta(seconds=decision.telemetry_interval_s)
+        if self.resource_registry is not None:
+            snapshot["runtime_resources"] = self.resource_registry.snapshot()
+        snapshot.update(
+            devices_total=summary["total"],
+            devices_confirmed=summary["confirmed"],
+            devices_candidates=summary["candidates"],
+        )
+        snapshot["giga_core_temperature"] = dict(self.gigacore.temperatures) if self.gigacore else {}
+        snapshot["gigacore_status"] = self.gigacore.snapshot() if self.gigacore else {}
+        snapshot["generic_switch_status"] = self.generic_switch_monitor.snapshot() if self.generic_switch_monitor else {}
+        snapshot["switch_telemetry"] = self.switch_port_monitor.snapshot() if self.switch_port_monitor else []
+        snapshot.update(self.ups_monitor.snapshot() if self.ups_monitor else {"ups_units": [], "ups_total": 0, "ups_online": 0, "ups_on_battery": 0, "ups_battery_low": 0})
+        if getattr(self, "greengo_monitor", None):
+            greengo_raw = self.greengo_monitor.snapshot()
+            for row in greengo_raw.get("greengo_source_stats", []):
+                # Phase C15: feeds the same GreenGOInventory the existing
+                # mDNS-string-matching path already populates (source
+                # tagged "udp_5810" here vs "mdns" there) -- a device
+                # transmitting on the configured group is real protocol
+                # evidence, stronger than an mDNS vendor-string guess.
+                self.green_go.observe(row["source"], source="udp_5810", evidence=[f"UDP 5810 multicast, {row['packets']} packet(s) observed"], last_seen=row.get("last_seen"))
+            snapshot["greengo_monitor"] = greengo_raw
+        gg = self.green_go.snapshot()
+        snapshot["green_go_devices"] = len(gg)
+        snapshot["green_go_sources"] = len({d.get("source") for d in gg if d.get("source")})
+        snapshot["green_go_inventory"] = gg
+        snapshot["elc_inventory"] = self.elc.snapshot()
+        snapshot["vendor_discovery"] = list(self.vendor_discovery)
+        snapshot["etc_sensor_catalog"] = etc_profile().get("sensors", [])
+        if self._profile_catalog_cache is None:
+            try:
+                self._profile_catalog_cache = {
+                    "manufacturer_profiles": all_manufacturer_profiles(),
+                    "osc_source_profiles": [asdict(p) for p in OSC_SOURCE_PROFILES],
+                }
+            except Exception:
+                _LOGGER.warning("Could not build manufacturer/OSC profile catalogs", exc_info=True)
+                self._profile_catalog_cache = {"manufacturer_profiles": [], "osc_source_profiles": []}
+        snapshot["manufacturer_profiles"] = self._profile_catalog_cache["manufacturer_profiles"]
+        snapshot["osc_source_profiles"] = self._profile_catalog_cache["osc_source_profiles"]
+        etc_live = self.etc_cem3_monitor.snapshot(detail=False) if self.etc_cem3_monitor else {"enabled": False, "total": 0, "online": 0, "errors_total": 0, "temperature_max_c": None, "racks": []}
+        snapshot.update(self.ontime_monitor.snapshot() if self.ontime_monitor else {"ontime": None})
+        snapshot.update(self.qlcplus_bridge.snapshot() if self.qlcplus_bridge else {"qlcplus": None})
+        snapshot["etc_cem3"] = etc_live
+        snapshot["etc_cem3_racks_total"] = etc_live.get("total", 0)
+        snapshot["etc_cem3_racks_online"] = etc_live.get("online", 0)
+        snapshot["etc_cem3_errors_total"] = etc_live.get("errors_total", 0)
+        snapshot["etc_cem3_temperature_max"] = etc_live.get("temperature_max_c")
+        # DMX Universe Matrix: aggregate passive sources by protocol/universe and
+        # track lifecycle transitions for the Flight Recorder. A source is only
+        # called lost after 3 s without a frame; it remains in the matrix so the
+        # operator can see what disappeared.
+        now_mono = __import__("time").monotonic()
+        matrix_groups = {}
+        active_keys = set()
+        for item in self.dmx_tracker.all():
+            age = max(0.0, now_mono - item.last_seen_monotonic)
+            source_key = (str(item.protocol), int(item.universe), str(item.source or ""), str(item.cid or ""))
+            active = age <= 3.0
+            if active:
+                active_keys.add(source_key)
+            group = matrix_groups.setdefault((str(item.protocol), int(item.universe)), {"protocol": item.protocol, "universe": item.universe, "sources": []})
+            group["sources"].append({
+                "source": item.source, "source_name": item.source_name, "cid": item.cid,
+                "priority": item.priority, "sequence": item.sequence, "packet_rate": round(item.packet_rate, 2),
+                "active_channels": item.active_channels, "interface": item.interface,
+                "jitter_ms": item.jitter_ms, "sequence_loss_pct": item.sequence_loss_pct,
+                "last_seen_age_s": round(age, 2), "active": active,
+            })
+        previous_active = getattr(self, "_dmx_active_source_keys", set())
+        if self.archive:
+            for lost in previous_active - active_keys:
+                proto, uni, source, cid = lost
+                self.archive.record("dmx", "source_lost", {"protocol": proto, "universe": uni, "source": source, "cid": cid or None, "timeout_s": 3.0})
+            for recovered in active_keys & getattr(self, "_dmx_lost_source_keys", set()):
+                proto, uni, source, cid = recovered
+                self.archive.record("dmx", "source_recovered", {"protocol": proto, "universe": uni, "source": source, "cid": cid or None})
+        self._dmx_lost_source_keys = (getattr(self, "_dmx_lost_source_keys", set()) | (previous_active - active_keys)) - active_keys
+        self._dmx_active_source_keys = active_keys
+        matrix = []
+        for row in matrix_groups.values():
+            row["sources"].sort(key=lambda x: (not x["active"], -(x.get("packet_rate") or 0), str(x.get("source") or "")))
+            active_sources = [x for x in row["sources"] if x["active"]]
+            row["active_sources"] = len(active_sources)
+            row["source_count"] = len(row["sources"])
+            row["multi_source"] = len(active_sources) > 1
+            row["max_loss_pct"] = max([x.get("sequence_loss_pct") or 0 for x in active_sources] or [0])
+            row["max_jitter_ms"] = max([x.get("jitter_ms") or 0 for x in active_sources] or [0])
+            matrix.append(row)
+        snapshot["dmx_universe_matrix"] = sorted(matrix, key=lambda x: (str(x["protocol"]), int(x["universe"])))
+        snapshot["switch_profiles"] = [p.key for p in enabled_profiles(self.data.get("switch_manufacturers"))]
+        self.topology.ingest_inventory(self.inventory.public())
+        # Promote every observed DMX/audio/control source into the topology with
+        # evidence, while keeping the topology descriptive/read-only.
+        for item in self.dmx_tracker.all():
+            node_id = f"ip:{item.source}" if item.source else f"source:{item.protocol}:{item.universe}"
+            self.topology.observe_protocol(node_id, item.protocol, label=item.source or node_id,
+                                           ip=item.source if item.source else None,
+                                           category="show_network_source", confidence=0.8,
+                                           source="dmx_observation")
+            if item.source:
+                self.inventory.upsert(
+                    ip=item.source, protocols={item.protocol}, sources={"dmx_passive"},
+                    confidence="candidate", confidence_score=0.8, unique_id=f"candidate:{item.source}",
+                    evidence=[{"field":"universe","value":item.universe,"source":"dmx_passive","confidence":0.9}],
+                )
+            self.network_health.observe_packet(item.interface or "unknown", item.protocol)
+        # MA-Net3 station sources are also genuine passive discovery evidence.
+        for station in self.ma_remote.snapshot().get("stations", []):
+            ip = station.get("ip")
+            if ip:
+                self.inventory.upsert(ip=ip, protocols={"MA-Net3"}, sources={"ma_net3_passive"},
+                                      confidence="candidate", confidence_score=0.8, unique_id=f"candidate:{ip}")
+        snapshot["device_inventory"] = self.inventory.public(include_hidden=True)
+        snapshot["device_overrides"] = dict(self.inventory.overrides)
+        snapshot["topology"] = self.topology.snapshot()
+        snapshot["network_health"] = self.network_health.snapshot()
+        if self.ptp_monitor:
+            snapshot.update(self.ptp_monitor.snapshot())
+        if self.dante_monitor:
+            dante_snapshot = self.dante_monitor.snapshot()
+            snapshot.update(dante_snapshot)
+            for row in dante_snapshot.get("dante_inventory", []):
+                ip = row.get("source")
+                if not ip:
+                    continue
+                label = row.get("display_name")
+                evidence = [
+                    {"field": "dns_sd", "value": value, "source": "dante_mdns_passive", "confidence": 0.9}
+                    for value in row.get("identity_evidence", [])[:10]
+                ]
+                self.inventory.upsert(
+                    ip=ip,
+                    hostname=label,
+                    protocols={"Dante/DNS-SD"},
+                    sources={"dante_mdns_passive"},
+                    confidence="candidate",
+                    confidence_score=0.85,
+                    unique_id=f"candidate:{ip}",
+                    evidence=evidence,
+                )
+        if self.aes67_monitor:
+            snapshot.update(self.aes67_monitor.snapshot())
+        if getattr(self, "aes70_monitor", None):
+            aes70_snapshot = self.aes70_monitor.snapshot()
+            snapshot.update(aes70_snapshot)
+            for row in aes70_snapshot.get("aes70_devices", []):
+                manufacturer = row.get("manufacturer") or "AES70/OCA"
+                host = row.get("host")
+                if not host:
+                    continue
+                key = f"aes70:{host}"
+                self.audio_amplifiers.observe(
+                    key=key,
+                    manufacturer=manufacturer,
+                    host=host,
+                    model=row.get("model"),
+                    serial=row.get("serial"),
+                    device_name=row.get("device_name"),
+                    protocol="AES70/OCA",
+                    evidence="live OCP.1 DeviceManager/role map",
+                    observed_at=row.get("last_seen"),
+                )
+                if row.get("last_seen"):
+                    aes70_roles = row.get("telemetry") or {}
+                    temperatures = {}
+                    loads = {}
+                    mutes = {}
+                    input_levels = {}
+                    output_levels = {}
+                    controls = []
+                    for role_name, entry in aes70_roles.items():
+                        if not isinstance(entry, dict):
+                            continue
+                        kind = entry.get("kind")
+                        value = entry.get("value")
+                        controls.append({"role": role_name, **entry})
+                        if kind == "temperature" and isinstance(value, (int, float)):
+                            temperatures[str(role_name)] = float(value)
+                        elif kind == "mute" and isinstance(entry.get("muted"), bool):
+                            mutes[str(role_name)] = bool(entry.get("muted"))
+                        elif kind == "impedance":
+                            # OcaImpedance is complex (magnitude/phase). Preserve
+                            # the full role data in controls and only expose a
+                            # scalar load when a real magnitude is present.
+                            magnitude = None
+                            if isinstance(value, dict):
+                                for candidate in ("magnitude", "Magnitude", "value", "Value"):
+                                    if isinstance(value.get(candidate), (int, float)):
+                                        magnitude = float(value[candidate]); break
+                            elif isinstance(value, (int, float)):
+                                magnitude = float(value)
+                            if magnitude is not None:
+                                loads[str(role_name)] = magnitude
+                        elif kind == "level" and isinstance(value, (int, float)):
+                            role_l = str(role_name).lower()
+                            if "input" in role_l or role_l.startswith("in"):
+                                input_levels[str(role_name)] = float(value)
+                            elif "output" in role_l or role_l.startswith("out"):
+                                output_levels[str(role_name)] = float(value)
+                    max_temp = max(temperatures.values()) if temperatures else None
+                    self.audio_amplifiers.update_telemetry(
+                        key,
+                        observed_at=row.get("last_seen"),
+                        source="AES70/OCA",
+                        status=str(row.get("state")) if row.get("state") is not None else "online",
+                        error=row.get("error"),
+                        temperature_c=max_temp,
+                        temperatures=temperatures,
+                        load=loads,
+                        mute=mutes,
+                        input_level=input_levels,
+                        output_level=output_levels,
+                        controls=controls or [{"role": role} for role in row.get("roles", [])],
+                    )
+        if getattr(self, "yamaha_osc_monitor", None):
+            snapshot["yamaha_osc_consoles"] = self.yamaha_osc_monitor.snapshot()
+        if getattr(self, "qlab_monitor", None):
+            snapshot["qlab_status"] = self.qlab_monitor.snapshot()
+        if getattr(self, "resolume_monitor", None):
+            snapshot["resolume_status"] = self.resolume_monitor.snapshot()
+        if getattr(self, "nexus_audio_monitor", None):
+            snapshot["nexus_audio_status"] = self.nexus_audio_monitor.snapshot()
+        if getattr(self, "pdu_monitor", None):
+            snapshot["pdu_status"] = self.pdu_monitor.snapshot()
+        if getattr(self, "reolink_ha_monitor", None):
+            snapshot["reolink_cameras"] = self.reolink_ha_monitor.snapshot()
+        if getattr(self, "nexus_audio_zone_monitor", None):
+            snapshot["nexus_audio_zones"] = self.nexus_audio_zone_monitor.snapshot()
+        if getattr(self, "millumin_monitor", None):
+            snapshot["millumin_status"] = self.millumin_monitor.snapshot()
+        if getattr(self, "sendspin_dante_zone_monitor", None):
+            snapshot["sendspin_dante_zones"] = self.sendspin_dante_zone_monitor.snapshot()
+        if getattr(self, "avdecc_monitor", None):
+            avdecc_snapshot = self.avdecc_monitor.snapshot()
+            snapshot.update(avdecc_snapshot)
+            for row in avdecc_snapshot.get("avdecc_entities", []):
+                manufacturer = row.get("manufacturer") or "AVDECC/Milan"
+                entity_id = row.get("entity_id")
+                if not entity_id:
+                    continue
+                key = f"avdecc:{entity_id}"
+                observed_at = row.get("last_seen")
+                self.audio_amplifiers.observe(
+                    key=key,
+                    manufacturer=manufacturer,
+                    host=row.get("host"),
+                    model=row.get("model"),
+                    serial=row.get("serial"),
+                    entity_id=entity_id,
+                    device_name=row.get("name"),
+                    firmware=row.get("firmware"),
+                    protocol="AVDECC/Milan",
+                    evidence="L-Acoustics LA_avdecc helper bridge",
+                    observed_at=observed_at,
+                )
+                if observed_at is not None:
+                    self.audio_amplifiers.update_telemetry(
+                        key,
+                        observed_at=observed_at,
+                        source="AVDECC/Milan",
+                        status="online" if row.get("online") else "offline",
+                        error=row.get("error"),
+                        streams=row.get("streams") or [],
+                        counters=row.get("counters") or {},
+                        clock=row.get("clock") or {},
+                        controls=row.get("controls") or [],
+                    )
+        if self.st2110_monitor:
+            snapshot.update(self.st2110_monitor.snapshot())
+        if self.avb_monitor:
+            snapshot.update({f"avb_{k}": v for k, v in self.avb_monitor.snapshot().items()})
+        if getattr(self, "dante_managed_monitor", None):
+            snapshot["dante_managed"] = self.dante_managed_monitor.snapshot()
+        if getattr(self, "audio_health", None):
+            snapshot.update(self.audio_health.snapshot(
+                dante=self.dante_monitor.snapshot() if self.dante_monitor else None,
+                ptp=self.ptp_monitor.snapshot() if self.ptp_monitor else None,
+                aes67=self.aes67_monitor.snapshot() if self.aes67_monitor else None,
+                st2110=self.st2110_monitor.snapshot() if self.st2110_monitor else None,
+                avb=self.avb_monitor.snapshot() if self.avb_monitor else None,
+            ))
+        # Passive manufacturer-aware amplifier inventory. No vendor commands are sent.
+        if self.dante_monitor:
+            for row in self.dante_monitor.snapshot().get("dante_inventory", []):
+                # NOTE (Show Network audit): dante_inventory rows never contain a
+                # "markers" key, so `row.get("markers", [])` was always empty.
+                # The manufacturer name observed over mDNS lives in
+                # instances/hostnames/display_name too, not just services.
+                identity_fields = (
+                    row.get("services", [])
+                    + row.get("instances", [])
+                    + row.get("hostnames", [])
+                    + ([row["display_name"]] if row.get("display_name") else [])
+                )
+                text = " ".join(identity_fields).lower()
+                # Conservative candidates: manufacturer evidence must come from observed payload markers.
+                hints = (("L-Acoustics", "l-acoustics"), ("L-Acoustics", "l acoustics"), ("d&b audiotechnik", "d&b"), ("d&b audiotechnik", "db audiotechnik"), ("Lab Gruppen/Lake", "lab gruppen"), ("Lab Gruppen/Lake", "lake"), ("Adamson", "adamson"), ("QSC", "qsc"), ("Crown", "crown"), ("Yamaha", "yamaha"), ("Meyer Sound", "meyer sound"))
+                for manufacturer, marker in hints:
+                    if marker in text:
+                        observed_at = row.get("last_seen") or row.get("last_timestamp")
+                        self.audio_amplifiers.observe(key=f"{manufacturer}:{row.get('source')}", manufacturer=manufacturer, host=row.get("source"), protocol="Dante/mDNS", evidence=marker, observed_at=observed_at)
+        snapshot.update(self.audio_amplifiers.snapshot())
+        if getattr(self, "rdm_bridge", None):
+            rows = list(self.rdm_bridge.devices)
+            # Do not refresh responder freshness merely because the coordinator
+            # re-reads the bridge cache.  Only a successful bridge poll is
+            # evidence that these rows were observed again.
+            if self.rdm_bridge.last_success is not None:
+                self.rdm_inventory.ingest(rows, transport="RDM/OLA", observed_at=self.rdm_bridge.last_success)
+            snapshot.update(self.rdm_bridge.snapshot())
+        if getattr(self, "rdmnet_bridge", None):
+            rows = list(self.rdmnet_bridge.devices)
+            if self.rdmnet_bridge.last_success is not None:
+                self.rdm_inventory.ingest(rows, transport="RDMnet", observed_at=self.rdmnet_bridge.last_success)
+            snapshot.update(self.rdmnet_bridge.snapshot())
+        snapshot.update(self.rdm_inventory.snapshot())
+        snapshot.update(self.power_manager.snapshot())
+        snapshot.update(self.fixture_control.snapshot())
+        snapshot.update(self.dmx_scene_bank.snapshot())
+        snapshot.update(self.dmx_circuit_monitor.snapshot())
+        if self.enttec_input:
+            snapshot.update(self.enttec_input.snapshot())
+        if self.punchlight:
+            snapshot["punchlight"] = self.punchlight.snapshot()
+        snapshot["projectors"] = self.projector_monitor.snapshot()
+        # Phase 10 stays out of the HA entity model. The panel reads this
+        # coordinator snapshot through the authenticated websocket endpoint.
+        snapshot["video_ip_supervision"] = self.video_ip_supervision.snapshot()
+        snapshot["projector_status"] = self.projector_monitor.status()
+        snapshot["projectors_total"] = snapshot["projector_status"].get("total", 0)
+        snapshot["projectors_online"] = snapshot["projector_status"].get("online", 0)
+        snapshot["projectors_errors"] = snapshot["projector_status"].get("errors", 0)
+        # Flight Recorder: record only state transitions from already-observed
+        # telemetry. This adds no network traffic and does not infer root cause.
+        self._archive_operational_transitions(snapshot)
+        snapshot["network_capacity"] = capacity_snapshot(snapshot.get("dmx_universes", []), **self.capacity_config)
+        snapshot["chaos"] = self.chaos.snapshot()
+        snapshot["archive"] = await self.hass.async_add_executor_job(self.archive.status) if self.archive else {}
+        snapshot["archive"]["configuration_backups"] = await self.hass.async_add_executor_job(self.config_backups.status)
+        snapshot["archive"]["diagnostics"] = self.diagnostics_exporter.status()
+        if getattr(self, "dmx_network", None):
+            snapshot["dmx_network_health"] = self.dmx_network.snapshot()
+        else:
+            snapshot["dmx_network_health"] = {}
+        snapshot["dmx_universes"] = [
+            {
+                "protocol": item.protocol,
+                "universe": item.universe,
+                "source": item.source,
+                "priority": item.priority,
+                "sequence": item.sequence,
+                "packet_rate": round(item.packet_rate, 2),
+                "active_channels": item.active_channels,
+                "last_change": item.last_change,
+                "interface": item.interface,
+                "inter_arrival_ms": item.inter_arrival_ms,
+                "jitter_ms": item.jitter_ms,
+                "sequence_loss_pct": item.sequence_loss_pct,
+                "values_b64": base64.b64encode(item.values).decode("ascii"),
+            }
+            for item in self.dmx_tracker.all()
+        ]
+        snapshot.update(self.watchdogs.snapshot())
+        snapshot["network_capacity"] = capacity_snapshot(snapshot.get("dmx_universes", []), **self.capacity_config)
+        if self.archive:
+            self._archive_transitions(snapshot)
+        rx_diag = {"dmx": self.dmx_network.snapshot() if self.dmx_network else {"running": False, "error": "receiver unavailable"}}
+        if self.ma_listener:
+            ma = self.ma_listener.snapshot()
+            snapshot.update(ma_packets=ma["packets"], ma_sources=ma["sources"], ma_groups=ma["groups"])
+            rx_diag["ma_net3"] = ma.get("diagnostics", {})
+            source_hints={x.get("source_ip"):x.get("identity_hints",[]) for x in ma.get("diagnostics",{}).get("raw_sources",[])}
+            source_epochs={x.get("source_ip"):x.get("last_packet_epoch") for x in ma.get("diagnostics",{}).get("raw_sources",[])}
+            for obs in ma.get("observations", [])[-50:]:
+                try:
+                    self.ma_remote.observe(
+                        obs.source_ip, obs.destination_group,
+                        session_index=getattr(obs, "session_index", None),
+                        identity_hints=source_hints.get(obs.source_ip),
+                        observed_at=getattr(obs, "received_at", None),
+                        packet_epoch=source_epochs.get(obs.source_ip),
+                    )
+                except AttributeError:
+                    self.ma_remote.observe(
+                        obs["source_ip"], obs["destination_group"],
+                        session_index=obs.get("session_index"),
+                        identity_hints=source_hints.get(obs.get("source_ip")),
+                        observed_at=obs.get("received_at"),
+                        packet_epoch=source_epochs.get(obs.get("source_ip")),
+                    )
+            now_monotonic = __import__("time").monotonic()
+            if now_monotonic - self._ma_web_remote_last_probe > 30.0:
+                # Phase C23 (rapport maître S113): "Web Remote: UNKNOWN /
+                # AVAILABLE / UNAVAILABLE." Throttled to every 30s rather
+                # than every refresh cycle (5s) -- a TCP-connect probe is
+                # cheap but still real network traffic, no reason to repeat
+                # it faster than a Web Remote's reachability could
+                # meaningfully change.
+                self._ma_web_remote_last_probe = now_monotonic
+                await self.ma_remote.async_probe_web_remote()
+            snapshot["ma_remote"] = self.ma_remote.snapshot()
+        else:
+            rx_diag["ma_net3"] = {"state": "disabled_or_unavailable", "interface": snapshot.get("show_network_config", {}).get("interface_ma")}
+        rx_diag["mdns"] = dict(snapshot.get("discovery_status", {}))
+        rx_diag["dante"] = self.dante_monitor.snapshot() if self.dante_monitor else {"state":"disabled_or_unavailable"}
+        rx_diag["ptp"] = self.ptp_monitor.snapshot() if self.ptp_monitor else {"state":"disabled_or_unavailable"}
+        rx_diag["audio"] = {
+            "aes67": self.aes67_monitor.snapshot() if self.aes67_monitor else {"state":"disabled_or_unavailable"},
+            "st2110": self.st2110_monitor.snapshot() if self.st2110_monitor else {},
+            "avb": self.avb_monitor.snapshot() if self.avb_monitor else {},
+        }
+        snapshot["protocol_rx_diagnostics"] = rx_diag
+        # Publication time is deliberately separate from protocol packet ages.
+        # The frontend can therefore distinguish "HA refreshed" from "fresh network data".
+        import time as _time
+        # Cross-protocol, evidence-based operator diagnostic. Run after all live
+        # protocol snapshots have been assembled so correlations use fresh data.
+        snapshot["device_model"] = self.device_model.build(self.inventory.public(include_hidden=True), snapshot.get("topology"))
+        # Link Flight Recorder evidence to the central Device Model only when an
+        # explicit identifier/IP/source matches. Never fuzzy-match an incident.
+        if snapshot.get("archive", {}).get("flight_recorder"):
+            snapshot["archive"]["flight_recorder"] = self.device_model.correlate_flight_recorder(
+                snapshot["archive"]["flight_recorder"], snapshot["device_model"]
+            )
+        # Device history is a bounded view of recent journal evidence. Inventory
+        # first_seen/last_seen remain separate lifetime observations.
+        snapshot["device_model"] = self.device_model.attach_event_history(
+            snapshot["device_model"], snapshot.get("archive", {}).get("persisted_timeline_tail", snapshot.get("archive", {}).get("recent_events", []))
+        )
+        snapshot["show_network_health"] = self.health_engine.run(snapshot)
+        snapshot["show_network_doctor"] = self.doctor.run(snapshot)
+        snapshot["show_snapshot"] = self.show_snapshots.compare(snapshot)
+        # Operator views derived from evidence already collected by Show Network.
+        snapshot["incident_center"] = self.incident_center.build(snapshot.get("archive", {}).get("flight_recorder", {}), snapshot.get("device_model", {}))
+        if self.incident_center.dirty:
+            # See incident_center.py: build() only flags "dirty" now
+            # instead of saving synchronously on the event loop.
+            await self.hass.async_add_executor_job(self.incident_center._save)
+            self.incident_center.dirty = False
+        snapshot["pre_show"] = self.pre_show.run(snapshot)
+        # NOTE (audit fix): sensor.diagnostics_reception_protocoles_
+        # protocol_receive_diagnostics was confirmed taking ~0.6s per
+        # update in production. The cause: its extra_state_attributes
+        # property ran bound_attributes() -- a full json.dumps() of a
+        # whole nested dict, sometimes twice -- on every single entity
+        # attribute read, not once per actual data update. That was
+        # first fixed for just this one measured key; the same pattern
+        # (a large nested dict, read via extra_state_attributes on every
+        # HA state read) applies equally to every key below, whether or
+        # not any one of them has yet been individually measured as slow
+        # on a given installation -- so all of them get the same
+        # precompute rather than waiting for a report-per-sensor.
+        # Batched into one executor round trip rather than one per key:
+        # each individual bound_attributes() call is cheap on the common
+        # case (its own size() check short-circuits immediately when the
+        # value already fits), so the per-key overhead that's worth
+        # avoiding is the thread-pool dispatch itself, not the
+        # computation.
+        # device_inventory is transformed (trimmed to a fixed field set)
+        # before being bounded -- sensor.py does the same trim on-the-fly
+        # in its fallback path, kept identical here so the precomputed
+        # value matches exactly what an uncached read would produce.
+        # "interface" added (audit fix): the network-discovery panel's own
+        # per-NIC filter dropdown (ShowNetworkDiscovery's interfaceOf(r) =>
+        # r.interface) reads this exact field from these same rows -- it
+        # was never in the trimmed set, so the filter's own <select> always
+        # had no real options to offer, confirmed as a real user report
+        # ("toujours pas possible de choisir les cartes... pour regarder
+        # par carte"). The raw field already existed on DeviceInventory
+        # itself (device_inventory.py); it just never survived the trim.
+        _device_inventory_trimmed = {"devices": [
+            {k: row.get(k) for k in (
+                "unique_id", "display_name", "display_manufacturer", "display_model",
+                "custom_role", "custom_location", "hidden", "monitor_mode", "ip", "ipv6", "hostname",
+                "mac", "serial", "category", "protocols", "sources", "confidence", "interface",
+            )} for row in (snapshot.get("device_inventory") or [])
+        ]}
+        _bound_source = {
+            "protocol_rx_diagnostics": rx_diag,
+            "device_model": snapshot.get("device_model"),
+            "show_network_health": snapshot.get("show_network_health"),
+            "show_network_doctor": snapshot.get("show_network_doctor"),
+            "show_snapshot": snapshot.get("show_snapshot"),
+            "incident_center": snapshot.get("incident_center"),
+            "pre_show": snapshot.get("pre_show"),
+            "etc_cem3": snapshot.get("etc_cem3"),
+            "device_inventory": _device_inventory_trimmed,
+        }
+
+        def _bound_all():
+            return {k: bound_attributes(dict(v) if isinstance(v, dict) else v) for k, v in _bound_source.items() if v is not None}
+
+        for key, bounded in (await self.hass.async_add_executor_job(_bound_all)).items():
+            snapshot[f"{key}_bounded"] = bounded
+        snapshot["show_network_freshness"] = {
+            "published_at_epoch": round(_time.time(), 3),
+            "published_monotonic": round(_time.monotonic(), 3),
+            "update_interval_s": float(self.update_interval.total_seconds()) if self.update_interval else None,
+        }
+        self.data = snapshot
+        return snapshot
+
+
+    def _archive_operational_transitions(self, snapshot: dict) -> None:
+        """Journal meaningful PTP/Dante/switch/amplifier/projector transitions."""
+        if not self.archive:
+            return
+        previous = getattr(self, "_operational_transition_state", {})
+        current = {}
+
+        def changed(key, value, kind, event, data):
+            current[key] = value
+            if key in previous and previous[key] != value:
+                self.archive.record(kind, event, {**data, "previous": previous[key], "value": value})
+
+        gm = snapshot.get("ptp_active_grandmaster_identity")
+        if gm:
+            changed("ptp:grandmaster", gm, "ptp", "grandmaster_change", {"domain": snapshot.get("ptp_last_domain")})
+        clock_present = bool(snapshot.get("ptp_clock_present"))
+        changed("ptp:clock_present", clock_present, "ptp", "clock_recovered" if clock_present else "clock_lost", {"age_s": snapshot.get("ptp_clock_age_s")})
+
+        # Timecode lifecycle is based only on the decoded ArtTimeCode/MTC
+        # snapshot. A source/FPS/transport change is a fact, not a fault.
+        tc=snapshot.get("timecode",{}) or {}
+        tc_status=str(tc.get("status") or "waiting")
+        changed("timecode:status", tc_status, "timecode", "signal_recovered" if tc_status=="locked" else "signal_lost" if tc_status=="lost" else "signal_waiting", {"source":tc.get("source"),"transport":tc.get("transport"),"fps":tc.get("fps"),"age_s":tc.get("age_s")})
+        if tc.get("source"):
+            changed("timecode:source", str(tc.get("source")), "timecode", "source_change", {"transport":tc.get("transport"),"fps":tc.get("fps")})
+            changed("timecode:transport", str(tc.get("transport") or "unknown"), "timecode", "transport_change", {"source":tc.get("source"),"fps":tc.get("fps")})
+            changed("timecode:fps", float(tc.get("fps") or 0), "timecode", "fps_change", {"source":tc.get("source"),"transport":tc.get("transport"),"drop_frame":tc.get("drop_frame")})
+
+        for row in snapshot.get("dante_source_stats") or []:
+            source = str(row.get("source") or "")
+            if not source: continue
+            fresh = bool(row.get("fresh"))
+            changed(f"dante:{source}:fresh", fresh, "dante", "device_recovered" if fresh else "device_lost", {"source": source, "age_s": row.get("age_s"), "ports": row.get("ports")})
+
+        for sw in snapshot.get("switch_telemetry") or []:
+            switch_label = str(sw.get("name") or sw.get("ip") or "switch")
+            switch = f"{sw.get('interface') or 'unknown'}|{sw.get('ip') or switch_label}"
+            for port in sw.get("ports") or []:
+                idx = port.get("index"); up = bool(port.get("up"))
+                changed(f"switch:{switch}:port:{idx}", up, "switch", "port_recovered" if up else "port_lost", {"switch": switch, "switch_name": switch_label, "interface": sw.get("interface"), "ip": sw.get("ip"), "port_index": idx, "port_name": port.get("name"), "alias": port.get("alias")})
+                # Error counters are monotonic. Journal only a positive increase;
+                # resets/reboots are not classified as packet errors.
+                speed=port.get("speed_mbps")
+                if isinstance(speed,(int,float)) and speed>0:
+                    util=[]
+                    for direction in ("rx_mbps","tx_mbps"):
+                        mbps=port.get(direction)
+                        if isinstance(mbps,(int,float)):
+                            util.append((direction, mbps/speed*100.0))
+                    if util:
+                        direction,pct=max(util,key=lambda x:x[1])
+                        band="critical" if pct>=85 else "warning" if pct>=70 else "normal"
+                        changed(f"switch:{switch}:port:{idx}:util_band", band, "audio", "bandwidth_critical" if band=="critical" else "bandwidth_warning" if band=="warning" else "bandwidth_normal", {"switch":switch,"switch_name":switch_label,"interface":sw.get("interface"),"ip":sw.get("ip"),"port_index":idx,"port_name":port.get("name"),"direction":direction,"utilization_pct":round(pct,2),"speed_mbps":speed})
+                for field,event in (("rx_errors","rx_errors_increased"),("tx_errors","tx_errors_increased")):
+                    value=port.get(field); ekey=f"switch:{switch}:port:{idx}:{field}"
+                    current[ekey]=value
+                    old=previous.get(ekey)
+                    if isinstance(value,(int,float)) and isinstance(old,(int,float)) and value>old:
+                        self.archive.record("switch", event, {"switch":switch,"switch_name":switch_label,"interface":sw.get("interface"),"ip":sw.get("ip"),"port_index":idx,"port_name":port.get("name"),"alias":port.get("alias"),"previous":old,"value":value,"delta":value-old})
+            lldp = tuple(sorted((str(x.get("local_port_index") or ""), str(x.get("remote_system") or ""), str(x.get("remote_port") or "")) for x in (sw.get("lldp_neighbors") or []) if x.get("remote_system")))
+            changed(f"switch:{switch}:lldp", lldp, "lldp", "neighbors_change", {"switch": switch, "switch_name": switch_label, "interface": sw.get("interface"), "ip": sw.get("ip"), "neighbors": [{"local_port_index": a,"remote_system": b, "remote_port": c} for a,b,c in lldp]})
+            # Per-neighbour physical history: explicit LLDP identity only. This
+            # lets Flight Recorder say appeared/disappeared/moved without fuzzy matching.
+            current_map={remote:{"local_port_index":local,"remote_port":rport} for local,remote,rport in lldp}
+            map_key=f"switch:{switch}:lldp_map"; current[map_key]=current_map
+            old_map=previous.get(map_key) if isinstance(previous.get(map_key),dict) else {}
+            for remote,where in current_map.items():
+                old_where=old_map.get(remote)
+                base={"switch":switch,"switch_name":switch_label,"interface":sw.get("interface"),"ip":sw.get("ip"),"remote_system":remote,"local_port_index":where.get("local_port_index"),"remote_port":where.get("remote_port")}
+                if old_where is None and map_key in previous:
+                    self.archive.record("lldp","device_appeared",base)
+                elif old_where and old_where.get("local_port_index") != where.get("local_port_index"):
+                    self.archive.record("lldp","device_moved",{**base,"previous_local_port_index":old_where.get("local_port_index"),"previous_remote_port":old_where.get("remote_port")})
+            for remote,old_where in old_map.items():
+                if remote not in current_map:
+                    self.archive.record("lldp","device_disappeared",{"switch":switch,"switch_name":switch_label,"interface":sw.get("interface"),"ip":sw.get("ip"),"remote_system":remote,"previous_local_port_index":old_where.get("local_port_index"),"previous_remote_port":old_where.get("remote_port")})
+
+        # Cross-switch LLDP movement. Per-switch maps above already cover a
+        # port move on one switch. This global map only records a move when the
+        # same explicit LLDP system name is unique in both snapshots and changes
+        # switch identity; duplicate system names are ambiguous and ignored.
+        global_paths = {}
+        ambiguous = set()
+        for sw in snapshot.get("switch_telemetry") or []:
+            sid = f"{sw.get('interface') or 'unknown'}|{sw.get('ip') or sw.get('name') or 'switch'}"
+            for n in sw.get("lldp_neighbors") or []:
+                remote = str(n.get("remote_system") or "").strip()
+                if not remote:
+                    continue
+                path = {"switch": sid, "switch_name": sw.get("name") or sw.get("ip"), "interface": sw.get("interface"), "ip": sw.get("ip"), "local_port_index": n.get("local_port_index"), "remote_port": n.get("remote_port")}
+                if remote in global_paths:
+                    ambiguous.add(remote)
+                else:
+                    global_paths[remote] = path
+        for remote in ambiguous:
+            global_paths.pop(remote, None)
+        gkey="lldp:global_paths"; current[gkey]=global_paths
+        old_global=previous.get(gkey) if isinstance(previous.get(gkey),dict) else {}
+        for remote,path in global_paths.items():
+            old=old_global.get(remote)
+            if old and old.get("switch") != path.get("switch"):
+                self.archive.record("lldp","device_moved",{**path,"remote_system":remote,"previous_switch":old.get("switch"),"previous_switch_name":old.get("switch_name"),"previous_interface":old.get("interface"),"previous_ip":old.get("ip"),"previous_local_port_index":old.get("local_port_index"),"previous_remote_port":old.get("remote_port"),"movement_scope":"cross_switch"})
+
+        for amp in snapshot.get("audio_amplifiers") or []:
+            key = str(amp.get("key") or amp.get("host") or "amplifier")
+            online = bool(amp.get("online"))
+            changed(f"amp:{key}:online", online, "amplifier", "device_recovered" if online else "device_lost", {"key": key, "host": amp.get("host"), "manufacturer": amp.get("manufacturer")})
+            error = amp.get("error")
+            if error not in (None, "", False, 0, "0", "ok", "OK", "normal"):
+                changed(f"amp:{key}:error", str(error), "amplifier", "error_change", {"key": key, "host": amp.get("host")})
+
+        for pj in snapshot.get("projectors") or []:
+            key = str(pj.get("key") or pj.get("host") or pj.get("name") or "projector")
+            online = bool(pj.get("online"))
+            changed(f"projector:{key}:online", online, "projector", "device_recovered" if online else "device_lost", {"key": key, "host": pj.get("host"), "name": pj.get("name"), "manufacturer": pj.get("manufacturer")})
+            stale = bool(pj.get("stale"))
+            changed(f"projector:{key}:stale", stale, "projector", "telemetry_stale" if stale else "telemetry_recovered", {"key": key, "host": pj.get("host")})
+
+        self._operational_transition_state = current
+
+    def _archive_transitions(self, snapshot: dict) -> None:
+        """Record compact protocol state transitions, not raw packet payloads."""
+        watched = {
+            "ma_sources": "ma", "ptp_sources": "ptp", "dante_sources": "dante",
+            "aes67_sap_sources": "aes67", "st2110_sources": "st2110", "avb_sources": "avb",
+        }
+        for key, kind in watched.items():
+            value = snapshot.get(key)
+            if value is None:
+                continue
+            previous = self._last_activity.get(key)
+            if previous != value:
+                event = "activity_change"
+                self.archive.record(kind, event, {"metric": key, "value": value, "previous": previous})
+                self._last_activity[key] = value
+
+    def observe_dmx(self, protocol: str, universe: int, source: str, values: bytes, priority=None, sequence=None, interface=None, cid=None, source_name=None) -> None:
+        """Register a DMX frame without propagating every packet to HA entities."""
+        key = (str(protocol), int(universe), str(source or ""))
+        entity_key = (str(protocol).strip().lower(), int(universe))
+        if entity_key not in self._dmx_universe_entity_keys:
+            if self.dmx_universe_entity_callback:
+                try:
+                    self.dmx_universe_entity_callback(protocol, int(universe))
+                except Exception:
+                    _LOGGER.exception("Unable to add dynamic DMX universe entity")
+        previous_item = next((x for x in self.dmx_tracker.all() if (x.protocol, x.universe, x.source) == (protocol, universe, source)), None)
+        self.dmx_tracker.observe(protocol, universe, source, values, priority, sequence, interface, cid, source_name)
+        if self.archive and previous_item is None:
+            self.archive.record("dmx", "source_seen", {"protocol": protocol, "universe": universe, "source": source, "interface": interface, "priority": priority, "cid": cid, "source_name": source_name})
+        elif self.archive and previous_item is not None and str(protocol).upper() == "SACN":
+            if cid and previous_item.cid and cid != previous_item.cid:
+                self.archive.record("dmx", "cid_change", {"universe": universe, "source": source, "previous_cid": previous_item.cid, "cid": cid})
+            if priority is not None and previous_item.priority is not None and priority != previous_item.priority:
+                self.archive.record("dmx", "priority_change", {"universe": universe, "source": source, "previous_priority": previous_item.priority, "priority": priority, "cid": cid})
+        # Single-universe HA scene output yields immediately to any external DMX
+        # source on that same universe, then resumes after the configured hold.
+        if self.dmx_scene_bank.observe_input(protocol, universe, source):
+            self.data.update(self.dmx_scene_bank.snapshot())
+        if self.archive:
+            timeline_key = (str(protocol).lower(), int(universe), str(source or ""))
+            compact_hash = hash(bytes(values[:512]))
+            if self._timeline_dmx_hashes.get(timeline_key) != compact_hash:
+                self.archive.record("dmx", "universe_change", {
+                    "protocol": protocol, "universe": universe, "source": source,
+                    "interface": interface, "active_channels": sum(1 for v in values[:512] if v),
+                    "sequence": sequence, "priority": priority,
+                })
+                self._timeline_dmx_hashes[timeline_key] = compact_hash
+        self.watchdogs.observe(protocol, universe, source)
+        self.dmx_circuit_monitor.observe(protocol, universe, source, values)
+        # Rules and HA mappings use the bounded pipeline; reception and watchdog
+        # observation remain synchronous and cheap. HA state publication is also
+        # coalesced to <=20 Hz to protect the event bus.
+        self._dmx_flow.push_nowait(key, bytes(values[:512]))
+        self._dmx_publish_limiter.push_nowait(key, self._publish_dmx_snapshot)
+
+    async def _process_dmx_snapshot(self, key, values: bytes) -> None:
+        protocol, universe, source = key
+        if self.light_sync_enabled:
+            for proposal in self.dmx_ha_mapping_engine.process(universe, source, values):
+                self._execute_ha_mapping(proposal)
+            for proposal in self.dmx_ha_zone_engine.process(universe, source, values):
+                self._execute_ha_mapping(proposal)
+        for result in self.rules.evaluate_snapshot(protocol, universe, source, values):
+            if result.action_due:
+                action = result.action_due
+                if self.archive:
+                    self.archive.record("system", "rule_action_requested", {"rule": result.rule_name, "domain": action.domain, "service": action.service, "entity_id": action.entity_id})
+                self._execute_rule_action(action)
+
+    def async_start_workers(self) -> None:
+        """Start bounded background workers once setup is complete."""
+        self._ha_dispatcher.start()
+
+    async def _publish_dmx_snapshot(self, _value=None) -> None:
+        self.data["dmx_rules"] = self.rules.snapshot()
+        self.data["dmx_rule_traces"] = self.rules.trace_snapshot()
+        self.data["light_sync_enabled"] = self.light_sync_enabled
+        self.data["dmx_universes"] = [
+            {
+                "protocol": item.protocol, "universe": item.universe, "source": item.source,
+                "priority": item.priority, "sequence": item.sequence,
+                "packet_rate": round(item.packet_rate, 2), "active_channels": item.active_channels,
+                "last_change": item.last_change, "interface": item.interface,
+                "cid": item.cid, "source_name": item.source_name,
+                "last_seen_age_s": round(max(0.0, __import__("time").monotonic() - item.last_seen_monotonic), 2),
+                "inter_arrival_ms": item.inter_arrival_ms,
+                "jitter_ms": item.jitter_ms,
+                "sequence_loss_pct": item.sequence_loss_pct,
+                "values_b64": base64.b64encode(item.values).decode("ascii"),
+            } for item in self.dmx_tracker.all()
+        ]
+        self.data["dmx_publish_rate"] = self._dmx_publish_limiter.snapshot()
+        self.data["dmx_flow_pipeline"] = self._dmx_flow.snapshot()
+        self.data["ha_action_dispatcher"] = self._ha_dispatcher.snapshot()
+        if getattr(self, "dmx_network", None):
+            self.data["dmx_network_health"] = self.dmx_network.snapshot()
+        self.async_set_updated_data(self.data)
+
+
+    async def async_stop(self) -> None:
+        """Stop coordinator-owned background workers cleanly."""
+        await self._dmx_publish_limiter.async_stop()
+        await self._dmx_flow.async_stop()
+        await self._ha_dispatcher.async_stop()
+
+    def process_control_input(self, address: str, value) -> None:
+        """Run unified OSC/MIDI mappings and enqueue accepted HA service calls."""
+        for result in self.control_mapping_engine.process(address, value):
+            self.control_mapping_events.append({"mapping_id": result.mapping_id, "accepted": result.accepted, "reason": result.reason, "value": result.value, "timestamp": result.timestamp})
+            if len(self.control_mapping_events) > 100:
+                del self.control_mapping_events[:-100]
+            if not result.accepted:
+                continue
+            mapping = self.control_mapping_engine.mappings.get(result.mapping_id)
+            if not mapping:
+                continue
+            if "." not in mapping.destination:
+                _LOGGER.warning("Invalid control mapping destination: %s", mapping.destination)
+                continue
+            domain, service = mapping.destination.split(".", 1)
+            data = {"entity_id": mapping.target}
+            data[mapping.attribute or "value"] = result.value
+            if not self._ha_dispatcher.submit(ServiceAction(domain, service, data, "control_mapping")):
+                _LOGGER.warning("HA action queue full; dropping control mapping action")
+        self.data["control_mappings"] = list(self.control_mapping_engine.mappings)
+        self.data["control_mapping_events"] = list(self.control_mapping_events[-20:])
+        self.async_set_updated_data(self.data)
+
+    def _execute_ha_mapping(self, proposal: dict) -> None:
+        """Translate a normalized mapping proposal into the bounded HA sink."""
+        if not self.hass.services.has_service(proposal["domain"], proposal["service"]):
+            return
+        data = dict(proposal.get("data") or {})
+        if proposal.get("entity_id"):
+            data["entity_id"] = proposal["entity_id"]
+        origin = "dmx_ha_zone" if proposal.get("zone_id") else "dmx_ha_mapping"
+        rate = 10.0 if proposal.get("hue_model_id") else None
+        if not self._ha_dispatcher.submit(ServiceAction(proposal["domain"], proposal["service"], data, origin, rate), zone_id=str(proposal["zone_id"]) if proposal.get("zone_id") else None):
+            _LOGGER.warning("HA action queue full; dropping %s action", origin)
+
+    def _watchdog_event(self, event: str, rule, reason: str) -> None:
+        if self.archive:
+            self.archive.record("watchdog", event, {"rule": rule.name, "protocol": rule.protocol, "universe": rule.universe, "source": rule.source, "reason": reason})
+        severity = "critical" if event == "signal_lost" else "warning" if event == "simulation_loss" else "info"
+        message = f"{rule.protocol} univers {rule.universe}" + (f" — {rule.source}" if rule.source else "") + f"\n{reason}"
+        notifications = getattr(self, "notifications", None)
+        if notifications:
+            self.hass.async_create_task(notifications.async_notify("Watchdog", message, severity, f"{rule.name}:{event}"))
+
+    def _watchdog_action_allowed(self, action: dict) -> bool:
+        """Apply the same explicit light/scene safety gate to watchdog actions."""
+        domain = action.get("domain")
+        if domain in {"light", "scene"}:
+            return self.light_sync_enabled
+        return True
+
+    def _execute_rule_action(self, action) -> None:
+        """Execute an explicitly enabled Home Assistant rule action.
+
+        Only Home Assistant service calls are allowed here; no network lighting
+        protocol output is generated by the rule engine.
+        """
+        if not action.domain or not action.service:
+            return
+        if not self.hass.services.has_service(action.domain, action.service):
+            if self.archive:
+                self.archive.record("system", "rule_action_failed", {"reason": "service_not_found", "domain": action.domain, "service": action.service, "entity_id": action.entity_id})
+            _LOGGER.warning("Rule action service not found: %s.%s", action.domain, action.service)
+            return
+        # The integration is receive-only for lighting protocols. HA light/scene
+        # actions are the only light-sync side effect and require an explicit gate.
+        if action.domain in {"light", "scene"} and not self.light_sync_enabled:
+            if self.archive:
+                self.archive.record("system", "rule_action_blocked", {"rule_gate": "light_sync_disabled", "domain": action.domain, "service": action.service, "entity_id": action.entity_id})
+            return
+        data = {**action.data, **({"entity_id": action.entity_id} if action.entity_id else {})}
+        if not self._ha_dispatcher.submit(ServiceAction(action.domain, action.service, data, "rule")):
+            _LOGGER.warning("HA action queue full; dropping rule action")
+
+    async def simulate_signal_loss(self, key: str | None = None) -> None:
+        if self.archive:
+            self.archive.record("chaos", "signal_loss_injection_start", {"watchdog": key})
+        await self.watchdogs.simulate_loss(key)
+        self.chaos.start(key or "watchdogs", "signal_loss", "logical only; no network packet suppression")
+        if getattr(self, "notifications", None):
+            self.hass.async_create_task(self.notifications.async_notify("Chaos", f"Simulation perte de signal — {key or 'tous les watchdogs'}", "warning"))
+        self.publish(chaos=self.chaos.snapshot())
+
+    async def simulate_signal_restore(self, key: str | None = None) -> None:
+        await self.watchdogs.simulate_restore(key)
+        if self.archive:
+            self.archive.record("chaos", "signal_restore_injection", {"watchdog": key})
+        self.chaos.stop()
+        self.publish(chaos=self.chaos.snapshot())
+
+    def simulate_ptp_drift(self, offset_ms: float) -> None:
+        value = float(offset_ms)
+        self.chaos.start("ptp", "clock_drift", f"simulated offset {value:g} ms")
+        if getattr(self, "notifications", None):
+            self.hass.async_create_task(self.notifications.async_notify("Chaos", f"Dérive PTP simulée : {value:g} ms", "warning"))
+        self.data["ptp_simulated_offset_ms"] = value
+        if self.archive:
+            self.archive.record("chaos", "ptp_drift_injection", {"offset_ms": value})
+        self.publish(chaos=self.chaos.snapshot(), ptp_simulated_offset_ms=value)
+
+    def clear_chaos(self) -> None:
+        if self.archive:
+            self.archive.record("chaos", "simulation_cleared", {})
+        self.chaos.stop()
+        self.data.pop("ptp_simulated_offset_ms", None)
+        self.publish(chaos=self.chaos.snapshot(), ptp_simulated_offset_ms=None)
+
+    def set_capacity_config(self, **values) -> None:
+        for key in self.capacity_config:
+            if key in values:
+                self.capacity_config[key] = max(0.0, float(values[key]))
+        self.publish(network_capacity=capacity_snapshot(self.data.get("dmx_universes", []), **self.capacity_config))
+
+    async def async_save_rules(self) -> None:
+        """Persist Rule Builder configuration without blocking HA's event loop."""
+        await self.rule_store.async_save(list(self.rules.rules.values()))
+        await self.hass.async_add_executor_job(self.config_backups.backup, "rule_save")
+
+    def save_rules(self) -> None:
+        """Compatibility wrapper for non-HA callers/tests.
+
+        Runtime service handlers use :meth:`async_save_rules`.
+        """
+        self.rule_store.save(list(self.rules.rules.values()))
+        self.config_backups.backup("rule_save")
+
+    async def async_save_dmx_ha_mappings(self) -> None:
+        """Persist DMX→HA mappings and backup off Home Assistant's event loop."""
+        mappings = list(self.dmx_ha_mapping_engine.mappings.values())
+        await self.hass.async_add_executor_job(self.dmx_ha_mapping_store.save, mappings)
+        await self.hass.async_add_executor_job(self.config_backups.backup, "mapping_save")
+
+    def save_dmx_ha_mappings(self) -> None:
+        """Compatibility wrapper for non-HA callers/tests only."""
+        self.dmx_ha_mapping_store.save(self.dmx_ha_mapping_engine.mappings.values())
+        self.config_backups.backup("mapping_save")
+
+    def _load_control_mappings(self) -> None:
+        """Deferred (see constructor NOTE): does blocking file I/O, call
+        via hass.async_add_executor_job, never directly on the event loop."""
+        from dataclasses import fields
+        from .osc_mapping import Mapping
+        for _raw in self.control_mapping_store.load():
+            try:
+                allowed = {f.name for f in fields(Mapping)}
+                self.control_mapping_engine.add(Mapping(**{k: v for k, v in _raw.items() if k in allowed}))
+            except (TypeError, ValueError, KeyError):
+                _LOGGER.warning("Ignoring invalid persisted control mapping")
+
+    def _load_dmx_ha_mappings(self) -> None:
+        """Deferred (see constructor NOTE): does blocking file I/O, call
+        via hass.async_add_executor_job, never directly on the event loop."""
+        for _mapping in self.dmx_ha_mapping_store.load():
+            self.dmx_ha_mapping_engine.add(_mapping)
+
+    def _load_dmx_ha_zones(self) -> None:
+        import json
+        from pathlib import Path
+        path = Path(self.dmx_ha_zone_store_path)
+        if not path.exists():
+            return
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError) as err:
+            # Now that saves are atomic (see async_save_dmx_ha_zones), a
+            # corrupted file here should be rare -- but if it still
+            # happens (e.g. a file edited by hand, or a leftover from
+            # before this fix), silently discarding every zone with no
+            # trace was itself a real observability gap. At minimum this
+            # now shows up in the log instead of just "zero zones,
+            # unexplained".
+            _LOGGER.warning("Could not load DMX→HA zones from %s (%s: %s) -- starting with no zones configured", path, type(err).__name__, err)
+            return
+        for item in raw if isinstance(raw, list) else []:
+            try:
+                data = dict(item)
+                data["channels"] = tuple(data.get("channels", []))
+                data["entity_ids"] = tuple(data.get("entity_ids", []))
+                data.pop("hue_capabilities", None)
+                self.dmx_ha_zone_engine.add(DmxHAZone(**data))
+            except (TypeError, ValueError):
+                continue
+
+    async def async_save_dmx_ha_zones(self) -> None:
+        """Persist DMX→HA zones and backup off Home Assistant's event loop.
+
+        Audit-confirmed gap ("écriture atomique des zones"): this used to
+        write directly to the live file (Path.write_text) -- a crash or
+        power loss mid-write could leave a truncated/corrupted JSON file,
+        which async_load_dmx_ha_zones's own parse failure handler then
+        silently discards (`except (OSError, ValueError, TypeError):
+        return`), losing every configured zone with no visible error.
+        Fixed to match the same tmp-file + atomic rename pattern already
+        used correctly elsewhere in this project (rule_storage.py,
+        dmx_ha_mapping_storage.py) -- the target file is always either
+        the old complete content or the new complete content, never a
+        partial write.
+        """
+        import json
+        from pathlib import Path
+        path = Path(self.dmx_ha_zone_store_path)
+        payload = json.dumps([z.snapshot() for z in self.dmx_ha_zone_engine.zones.values()], ensure_ascii=False, indent=2)
+
+        def _atomic_write():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(payload, encoding="utf-8")
+            tmp.replace(path)
+
+        await self.hass.async_add_executor_job(_atomic_write)
+        await self.hass.async_add_executor_job(self.config_backups.backup, "zone_save")
+
+    def save_dmx_ha_zones(self) -> None:
+        """Compatibility wrapper for non-HA callers/tests only. Same
+        atomic tmp-file + rename fix as async_save_dmx_ha_zones."""
+        import json
+        from pathlib import Path
+        path = Path(self.dmx_ha_zone_store_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps([z.snapshot() for z in self.dmx_ha_zone_engine.zones.values()], ensure_ascii=False, indent=2)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(payload, encoding="utf-8")
+        tmp.replace(path)
+        self.config_backups.backup("zone_save")
+
+    def set_dmx_ha_zones(self, zones: list[DmxHAZone]) -> None:
+        self.dmx_ha_zone_engine.zones.clear()
+        for zone in zones:
+            self.dmx_ha_zone_engine.add(zone)
+        self.save_dmx_ha_zones()
+        self.publish(dmx_ha_zones=self.dmx_ha_zone_engine.snapshot(), dmx_ha_rdm=self.dmx_ha_zone_engine.rdm_snapshot())
+
+    def set_light_sync_enabled(self, enabled: bool, require_security: bool = True) -> None:
+        """Explicitly arm/disarm HA light/scene actions triggered by rules."""
+        if enabled and require_security:
+            self.security.require_unlocked()
+        self.light_sync_enabled = bool(enabled)
+        self.data["light_sync_enabled"] = self.light_sync_enabled
+        if self.archive:
+            self.archive.record("system", "light_sync_gate_changed", {"enabled": self.light_sync_enabled})
+        self.async_set_updated_data(self.data)
+
+    def set_osc_output_enabled(self, enabled: bool, require_security: bool = True) -> None:
+        if enabled and require_security:
+            self.security.require_unlocked()
+        self.osc_output.enabled = bool(enabled)
+        self.data["security"] = self.security.snapshot()
+        self.data.update({"osc_output_enabled": self.osc_output.enabled})
+        self.async_set_updated_data(self.data)
+
+    async def async_save_osc_targets(self) -> None:
+        """Persist OSC targets and backup off Home Assistant's event loop."""
+        targets = list(self.osc_targets.values())
+        await self.hass.async_add_executor_job(self.osc_target_store.save, targets)
+        await self.hass.async_add_executor_job(self.config_backups.backup, "osc_target_save")
+
+    def save_osc_targets(self) -> None:
+        """Compatibility wrapper for non-HA callers/tests only."""
+        self.osc_target_store.save(list(self.osc_targets.values()))
+        self.config_backups.backup("osc_target_save")
+
+    def publish_osc_status(self) -> None:
+        self.data.update({
+            "osc_output_enabled": self.osc_output.enabled,
+            "osc_sent": self.osc_output.sent,
+            "osc_errors": self.osc_output.errors,
+            "osc_last_target": self.osc_output.last_target,
+            "osc_last_address": self.osc_output.last_address,
+            "osc_last_error": self.osc_output.last_error,
+        })
+        self.async_set_updated_data(self.data)
+
+    def publish(self, **updates) -> None:
+        """Publish normalized runtime state to the HA coordinator boundary."""
+        self.state_store.update(**updates)
+        self.data = {**self.data, **updates}
+        self.async_set_updated_data(self.data)
