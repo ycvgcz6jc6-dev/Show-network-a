@@ -295,7 +295,7 @@ class EventArchive:
             except OSError:
                 continue
 
-    def export_zip(self, target: str | None = None, include_all: bool = True) -> Path:
+    def export_zip(self, target: str | None = None) -> Path:
         self._require_storage()
         self.cleanup()
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

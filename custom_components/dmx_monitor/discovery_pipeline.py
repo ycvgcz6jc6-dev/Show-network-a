@@ -17,6 +17,19 @@ class DiscoveryPipeline:
         )
 
     def mdns_result(self, ip, service_type="", name="", properties=None):
+        if not ip and not name:
+            # Audit-confirmed: "une ligne vide affichée comme si elle
+            # existait" on the Network page. Without an IP or a name, the
+            # only thing left to key an inventory record on is the bare
+            # service_type ("mdns:_http._tcp.local." style) -- not
+            # device-specific, so every mDNS announcement of that service
+            # type from *any* device on the network collapses into one
+            # shared, near-empty phantom record that keeps getting
+            # touched and never represents one real piece of equipment.
+            # There is nothing useful to attribute this evidence to yet;
+            # skip creating an inventory row for it rather than fabricate
+            # one that just displays as blank.
+            return None
         fp=fingerprint_mdns(service_type,name,properties)
         protocol = fp.protocol or (f"mDNS:{service_type.rstrip('.')}" if service_type else "mDNS")
         fallback = f"candidate:{ip}" if ip else f"mdns:{name or service_type}"

@@ -8,10 +8,11 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
 import logging
 from .runtime_data import ShowNetworkRuntimeData
+from .const import VERSION
 
 DOMAIN = "dmx_monitor"
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = ["sensor", "binary_sensor", "switch", "number", "scene"]
+PLATFORMS = ["sensor", "binary_sensor", "switch", "number", "button", "scene"]
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Register the single canonical frontend asset path."""
@@ -47,7 +48,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             hass,
             webcomponent_name="show-network-pro-dashboard",
             frontend_url_path="show-network",
-            module_url="/api/dmx_monitor/static/show-network.js?v=0.15.26",
+            module_url=f"/api/dmx_monitor/static/show-network.js?v={VERSION}",
             sidebar_title="Show Network",
             sidebar_icon="mdi:network-outline",
             require_admin=True,

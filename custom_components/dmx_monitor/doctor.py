@@ -5,6 +5,7 @@ no control command is performed here.
 """
 from __future__ import annotations
 from time import time
+from .health_engine import find_high_utilization_switch_ports, SWITCH_UTIL_WARNING_PCT, SWITCH_UTIL_ERROR_PCT
 
 class ShowNetworkDoctor:
     def run(self, data: dict) -> dict:
@@ -25,6 +26,31 @@ class ShowNetworkDoctor:
         add("topology","Topologie","warning" if stale else "ok", f"{len(stale)} nœud(s) stale" if stale else f"{len(topo.get('nodes',[]))} nœud(s), aucun stale", {"stale":[n.get("id") for n in stale]})
         model=data.get("device_model",{}) or {}; conflicts=model.get("conflicts",[]) or []
         add("identity","Identités équipements","warning" if conflicts else "ok", f"{len(conflicts)} conflit(s) d'identité" if conflicts else f"{model.get('count',0)} équipement(s) consolidé(s), aucun conflit stable", {"conflicts":conflicts})
+        # Phase C10 (rapport maître S100): "Les favoris deviennent le
+        # périmètre privilégié de Doctor/Incident/History, sans limiter
+        # la découverte globale." monitor_mode ('monitor' = star/favorite,
+        # set via the inventory's own ☆/★ toggle) used to be stored and
+        # displayed but never actually read anywhere -- this is the first
+        # place that gives it real effect: a dedicated check surfacing
+        # favorited-equipment health specifically, on top of (not instead
+        # of) every other check here, which still covers the whole
+        # inventory exactly as before.
+        favorites=[d for d in (model.get("devices") or []) if d.get("monitor_mode")=="monitor"]
+        if favorites:
+            routes_by_ip={r.get("target"):r for r in (data.get("network_routes") or [])}
+            now_ts=time()
+            stale=[{"id":d.get("id"),"name":d.get("name"),"age_s":round(now_ts-d["last_seen"],1)}
+                   for d in favorites if isinstance(d.get("last_seen"),(int,float)) and (now_ts-d["last_seen"])>300]
+            unreachable=[{"id":d.get("id"),"name":d.get("name"),"ip":d.get("ip")}
+                        for d in favorites if d.get("ip") and routes_by_ip.get(d["ip"]) and not routes_by_ip[d["ip"]].get("reachable")]
+            status="error" if unreachable else "warning" if stale else "ok"
+            detail=(f"{len(favorites)} favori(s) · {len(stale)} silencieux depuis >5min · {len(unreachable)} sans route réseau"
+                    if stale or unreachable else f"{len(favorites)} favori(s), tous à jour et joignables")
+            related_ids=sorted({x["id"] for x in stale+unreachable if x.get("id")})
+            add("favorites","Équipements favoris (★)",status,detail,
+                {"favorites_total":len(favorites),"stale":stale,"unreachable":unreachable,"related_device_ids":related_ids})
+        else:
+            add("favorites","Équipements favoris (★)","info","Aucun équipement marqué favori — Doctor couvre tout le périmètre de façon égale",{"favorites_total":0})
         switches=data.get("switch_telemetry",[]) or []
         port_errors=[]
         for sw in switches:
@@ -33,21 +59,8 @@ class ShowNetworkDoctor:
                 if (isinstance(rx,(int,float)) and rx>0) or (isinstance(tx,(int,float)) and tx>0):
                     port_errors.append({"switch":sw.get("name") or sw.get("ip"),"ip":sw.get("ip"),"port_index":port.get("index"),"port_name":port.get("name"),"rx_errors":rx,"tx_errors":tx})
         add("switch_ports","Ports réseau","warning" if port_errors else "ok", f"{len(port_errors)} port(s) avec compteur d'erreurs non nul" if port_errors else f"{sum(len(sw.get('ports',[]) or []) for sw in switches)} port(s) supervisé(s), aucun compteur d'erreurs non nul", {"ports":port_errors[:50]})
-        high_util=[]
-        for sw in switches:
-            for port in sw.get("ports",[]) or []:
-                speed=port.get("speed_mbps")
-                if not isinstance(speed,(int,float)) or speed <= 0: continue
-                vals=[]
-                for direction in ("rx_mbps","tx_mbps"):
-                    mbps=port.get(direction)
-                    if isinstance(mbps,(int,float)):
-                        vals.append((direction, mbps/speed*100.0))
-                if vals:
-                    direction,pct=max(vals,key=lambda x:x[1])
-                    if pct >= 70:
-                        high_util.append({"switch":sw.get("name") or sw.get("ip"),"port_index":port.get("index"),"port_name":port.get("name"),"direction":direction,"utilization_pct":round(pct,2),"speed_mbps":speed,"severity":"error" if pct>=85 else "warning"})
-        add("audio_bandwidth","Bande passante audio/réseau","error" if any(x["severity"]=="error" for x in high_util) else "warning" if high_util else "ok", f"{len(high_util)} port(s) >=70%" if high_util else "Aucun port mesuré >=70%", {"ports":high_util[:50],"warning_pct":70,"critical_pct":85})
+        high_util=find_high_utilization_switch_ports(switches)
+        add("audio_bandwidth","Bande passante audio/réseau","error" if any(x["severity"]=="error" for x in high_util) else "warning" if high_util else "ok", f"{len(high_util)} port(s) >={SWITCH_UTIL_WARNING_PCT:.0f}%" if high_util else f"Aucun port mesuré >={SWITCH_UTIL_WARNING_PCT:.0f}%", {"ports":high_util[:50],"warning_pct":SWITCH_UTIL_WARNING_PCT,"critical_pct":SWITCH_UTIL_ERROR_PCT})
         ptp=data.get("protocol_rx_diagnostics",{}).get("ptp",{}) or {}; ptp_state=str(ptp.get("state","")).lower()
         dante_sources=int(data.get("dante_fresh_sources") or 0)
         dante_sources_seen=int(data.get("dante_sources") or 0)

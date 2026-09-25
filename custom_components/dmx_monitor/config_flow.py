@@ -34,6 +34,99 @@ def _notification_choices(hass, current: str = "") -> list[str]:
     return choices
 
 
+def _optional_bridge_url(value):
+    """Accept an empty string (bridge not configured / disabled) or a
+    well-formed http(s) URL -- rejects everything else with a clear
+    voluptuous error the config UI surfaces inline, instead of accepting
+    any string and only failing much later, deep inside a bridge
+    monitor's own poll error (avdecc_bridge_error/rdm_bridge_error/etc),
+    which is what the audit's own "avdecc_bridge_url non conforme à une
+    URL visible" finding described. Applies the same fix to
+    CONF_RDM_BRIDGE_URL and CONF_RDMNET_BRIDGE_URL too: identical
+    unvalidated `str` schema, same underlying bug, not just the one
+    instance the audit happened to catch.
+
+    Restricted to http(s) specifically (not just "any valid URL scheme"
+    -- vol.Url() alone accepts ftp://, mailto:, etc.) because every one
+    of these bridges (avdecc_bridge.py, and the equivalent RDM/RDMnet
+    bridge clients) is documented as a JSON-over-HTTP endpoint; any other
+    scheme would pass this check but always fail the moment the bridge
+    actually tries to fetch it.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    validated = vol.Url()(text)
+    from urllib.parse import urlparse
+    if urlparse(validated).scheme not in ("http", "https"):
+        raise vol.Invalid("URL must use http:// or https://")
+    return validated
+
+
+def _optional_multicast_group(value):
+    """Accept an empty string (Green-GO monitoring disabled -- the
+    multicast group is per-installation and cannot be guessed; see
+    greengo_monitor.py) or a syntactically valid IPv4 multicast address
+    (224.0.0.0-239.255.255.255)."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    import ipaddress
+    try:
+        addr = ipaddress.IPv4Address(text)
+    except ValueError:
+        raise vol.Invalid("must be a valid IPv4 address")
+    if not addr.is_multicast:
+        raise vol.Invalid("must be a multicast address (224.0.0.0-239.255.255.255)")
+    return text
+
+
+def _optional_host_port(value):
+    """Accept an empty string (feature disabled) or a "host:port" pair
+    with a syntactically valid port number. Used for Millumin's optional
+    one-shot /ping target -- Millumin's own OSC *listener* address
+    (help.millumin.com/docs/connect/devices/: "input port: define on
+    which port Millumin will listen to OSC"), distinct from Show
+    Network's own millumin_listen_port that receives feedback."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if ":" not in text:
+        raise vol.Invalid("must be host:port")
+    host, _, port_text = text.rpartition(":")
+    if not host:
+        raise vol.Invalid("must be host:port")
+    try:
+        port = int(port_text)
+    except ValueError:
+        raise vol.Invalid("port must be a number")
+    if not (1 <= port <= 65535):
+        raise vol.Invalid("port must be between 1 and 65535")
+    return text
+
+
+def _optional_pdu_hosts(value):
+    """Accept an empty string (disabled) or a comma-separated list of
+    "host:vendor" pairs, vendor one of pdu_monitor.SUPPORTED_VENDORS.
+    PDU has no single vendor-neutral MIB (see pdu_monitor.py's own
+    docstring) -- the vendor is a required, explicit part of each
+    entry, never guessed or auto-detected."""
+    from .pdu_monitor import SUPPORTED_VENDORS
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    for part in text.replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if ":" not in part:
+            raise vol.Invalid(f"'{part}' must be host:vendor (vendor one of {', '.join(SUPPORTED_VENDORS)})")
+        _host, _, vendor = part.rpartition(":")
+        if vendor not in SUPPORTED_VENDORS:
+            raise vol.Invalid(f"'{vendor}' is not a supported PDU vendor (use one of {', '.join(SUPPORTED_VENDORS)})")
+    return text
+
+
 def _udp_port_available(host: str, port: int) -> bool:
     """Best-effort check: can a UDP socket bind to (host, port) right now?
 
@@ -117,14 +210,25 @@ def _schema_for_hass(hass, data: dict | None, interfaces: list[str], enttec_port
         vol.Optional(const.CONF_UPS_HOSTS, default=data.get(const.CONF_UPS_HOSTS, "")): str,
         vol.Optional(const.CONF_GIGACORE_COMMUNITY, default=data.get(const.CONF_GIGACORE_COMMUNITY, const.DEFAULT_GIGACORE_COMMUNITY)): str,
         vol.Optional(const.CONF_AES70_HOSTS, default=data.get(const.CONF_AES70_HOSTS, "")): str,
+        vol.Optional(const.CONF_YAMAHA_OSC_HOSTS, default=data.get(const.CONF_YAMAHA_OSC_HOSTS, "")): str,
+        vol.Optional(const.CONF_QLAB_HOSTS, default=data.get(const.CONF_QLAB_HOSTS, "")): str,
+        vol.Optional(const.CONF_RESOLUME_HOSTS, default=data.get(const.CONF_RESOLUME_HOSTS, "")): str,
+        vol.Optional(const.CONF_NEXUS_AUDIO_HOSTS, default=data.get(const.CONF_NEXUS_AUDIO_HOSTS, "")): str,
+        vol.Optional(const.CONF_PDU_HOSTS, default=data.get(const.CONF_PDU_HOSTS, "")): vol.All(str, _optional_pdu_hosts),
+        vol.Optional(const.CONF_REOLINK_HA_ENABLED, default=data.get(const.CONF_REOLINK_HA_ENABLED, False)): bool,
+        vol.Optional(const.CONF_NEXUS_AUDIO_PLAYERS, default=data.get(const.CONF_NEXUS_AUDIO_PLAYERS, "")): str,
+        vol.Optional(const.CONF_MILLUMIN_LISTEN_PORT, default=data.get(const.CONF_MILLUMIN_LISTEN_PORT, 0)): vol.All(vol.Coerce(int), vol.Range(min=0, max=65535)),
+        vol.Optional(const.CONF_MILLUMIN_PING_TARGET, default=data.get(const.CONF_MILLUMIN_PING_TARGET, "")): vol.All(str, _optional_host_port),
+        vol.Optional(const.CONF_SENDSPIN_DANTE_PLAYERS, default=data.get(const.CONF_SENDSPIN_DANTE_PLAYERS, "")): str,
+        vol.Optional(const.CONF_GREENGO_MULTICAST_GROUP, default=data.get(const.CONF_GREENGO_MULTICAST_GROUP, "")): vol.All(str, _optional_multicast_group),
         vol.Optional(const.CONF_AES70_PORT, default=data.get(const.CONF_AES70_PORT, 65000)): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
-        vol.Optional(const.CONF_AVDECC_BRIDGE_URL, default=data.get(const.CONF_AVDECC_BRIDGE_URL, "")): str,
+        vol.Optional(const.CONF_AVDECC_BRIDGE_URL, default=data.get(const.CONF_AVDECC_BRIDGE_URL, "")): vol.All(str, _optional_bridge_url),
         vol.Optional(const.CONF_AVDECC_BRIDGE_TOKEN, default=data.get(const.CONF_AVDECC_BRIDGE_TOKEN, "")): str,
         vol.Optional(const.CONF_RDM_ENABLED, default=data.get(const.CONF_RDM_ENABLED, False)): bool,
-        vol.Optional(const.CONF_RDM_BRIDGE_URL, default=data.get(const.CONF_RDM_BRIDGE_URL, "")): str,
+        vol.Optional(const.CONF_RDM_BRIDGE_URL, default=data.get(const.CONF_RDM_BRIDGE_URL, "")): vol.All(str, _optional_bridge_url),
         vol.Optional(const.CONF_RDM_BRIDGE_TOKEN, default=data.get(const.CONF_RDM_BRIDGE_TOKEN, "")): str,
         vol.Optional(const.CONF_RDMNET_ENABLED, default=data.get(const.CONF_RDMNET_ENABLED, False)): bool,
-        vol.Optional(const.CONF_RDMNET_BRIDGE_URL, default=data.get(const.CONF_RDMNET_BRIDGE_URL, "")): str,
+        vol.Optional(const.CONF_RDMNET_BRIDGE_URL, default=data.get(const.CONF_RDMNET_BRIDGE_URL, "")): vol.All(str, _optional_bridge_url),
         vol.Optional(const.CONF_RDMNET_BRIDGE_TOKEN, default=data.get(const.CONF_RDMNET_BRIDGE_TOKEN, "")): str,
         vol.Optional(const.CONF_RDM_ALLOW_WRITES, default=data.get(const.CONF_RDM_ALLOW_WRITES, False)): bool,
         vol.Optional(const.CONF_ENTTEC_DEVICE, default=data.get(const.CONF_ENTTEC_DEVICE, "")): vol.In([""] + enttec_ports),

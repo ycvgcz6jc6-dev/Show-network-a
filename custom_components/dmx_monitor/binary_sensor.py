@@ -2,7 +2,7 @@ from __future__ import annotations
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
-from .ha_builder_entities import BuilderBinarySensor
+from .ha_builder_entities import BuilderBinarySensor, async_remove_builder_entity
 from .projector_platform import binary_entities as projector_binary_entities
 
 class PunchLightRecording(CoordinatorEntity, BinarySensorEntity):
@@ -77,8 +77,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if coordinator.data.get("tally_ip", {}).get("enabled"):
         entities.append(TallyIPOn(coordinator))
     entities.extend(projector_binary_entities(coordinator))
-    entities.extend(BuilderBinarySensor(coordinator, item) for item in coordinator.ha_builder.items.values() if item.entity_type == "binary_sensor" and item.enabled)
+    builder_entities = [BuilderBinarySensor(coordinator, item) for item in coordinator.ha_builder.items.values() if item.entity_type == "binary_sensor" and item.enabled]
+    entities.extend(builder_entities)
     async_add_entities(entities)
+    live_builder_binary_sensors = {e.item_id: e for e in builder_entities}
     coordinator._dmx_universe_entity_keys = set(seen)
     def _add_universe(protocol, universe):
         key = (str(protocol).strip().lower(), int(universe))
@@ -88,8 +90,17 @@ async def async_setup_entry(hass, entry, async_add_entities):
         async_add_entities([UniverseActive(coordinator, protocol, universe)])
     coordinator.dmx_universe_entity_callback = _add_universe
     coordinator.ha_builder_callbacks = getattr(coordinator, "ha_builder_callbacks", {})
-    coordinator.ha_builder_callbacks["binary_sensor"] = lambda item: async_add_entities([BuilderBinarySensor(coordinator, item)])
+    def _add_binary_sensor(item):
+        e = BuilderBinarySensor(coordinator, item)
+        live_builder_binary_sensors[item.item_id] = e
+        async_add_entities([e])
+    coordinator.ha_builder_callbacks["binary_sensor"] = _add_binary_sensor
     coordinator.ha_builder_remove_callbacks = getattr(coordinator, "ha_builder_remove_callbacks", {})
+    async def _remove_binary_sensor(item_id):
+        entity = live_builder_binary_sensors.pop(item_id, None)
+        if entity is not None:
+            await async_remove_builder_entity(hass, "binary_sensor", entity)
+    coordinator.ha_builder_remove_callbacks["binary_sensor"] = _remove_binary_sensor
 
 class UniverseActive(CoordinatorEntity, BinarySensorEntity):
     _attr_has_entity_name = True

@@ -123,7 +123,7 @@ def parse_cem3_system_html(body: str) -> dict:
             rack_number = float(match.group(1))
         rack_name = rack_name or " ".join(match.group(2).split())
 
-    web_name = _str(r"CEM3[ \t]+([^\n]+?)\s*\(Rack\s*#\s*\d+\)", text)
+    web_name = _str(r"CEM3[ \t]*([^\n]+?)\s*\(Rack\s*#\s*\d+\)", text)
     rack_name = rack_name or web_name
 
     software = _str(r"(?:SW\s*Ver(?:sion)?|Software\s*Version|CEM3\s+v)\s*[:=]?\s*([0-9][^\n ]*)", text)
@@ -135,6 +135,14 @@ def parse_cem3_system_html(body: str) -> dict:
     # a fault from unrelated occurrences of words such as "Error" in scripts.
     errors: list[str] = []
     for line in text.splitlines():
+        # "AF Card <N>" on its own is the Software Versions table's row label
+        # (e.g. "AF Card 1" followed on a separate line by its version
+        # number) -- confirmed against a real captured CEM3 System page,
+        # where these four lines sit in the version table, not the page's
+        # own Errors section. Only a genuine AF-prefixed fault line (with
+        # wording beyond just the card number) should still be caught.
+        if re.fullmatch(r"AF Card [1-4]", line.strip(), re.I):
+            continue
         if re.match(r"^(?:CPU Temp (?:High|Low)|DMX Error Port [AB]|No Data DMX port [AB]|No DMX Port [AB]|Frequency Error|Phase [ABC] Error|Fan Fail|AF .+|Dim Overtemp|Ambient Overtemp)\b", line, re.I):
             if line not in errors:
                 errors.append(line[:256])
@@ -157,6 +165,55 @@ def parse_cem3_system_html(body: str) -> dict:
         "errors": errors,
         "links": parser.links,
         "text_evidence": text[:4096],
+    }
+
+
+def parse_cem3_circuit_setup_html(body: str) -> dict:
+    """Extract per-circuit patch configuration from the CEM3 web UI's
+    "Circuit Setup" page (setup.html: Space / Circuit / Lug / Module /
+    Firing Mode / Control Mode / Curve), verified directly against a real
+    CEM3 rack's own captured page (72 real circuits, module part numbers
+    ETD15AFR/ETD25AFR/ED15N, control modes Dimmable/Switched, curves
+    Custom1/ModSquare -- all four real values confirmed present).
+
+    This is patch/configuration data, distinct from parse_cem3_dimmers_html
+    (live circuit levels on a different page, dimmers.html) -- no overlap,
+    no assumption that one page's schema applies to the other.
+
+    Deliberately conservative like the rest of this module: matches only
+    the documented column order and the HTML <select> "selected" option's
+    own value attribute for Control Mode/Curve (i.e. reads exactly what
+    the web UI itself currently shows as selected, never a private JSON
+    endpoint). A row missing any of the seven columns in this exact shape
+    is skipped rather than guessed at.
+    """
+    if len(body.encode("utf-8")) > MAX_BODY:
+        raise ValueError("Unsafe or oversized CEM3 HTML")
+    circuits = []
+    row_re = re.compile(
+        r"<tr><td>(\d{1,4})</td><td>(\d{1,4})</td><td>(\d{1,4})</td>"
+        r"<td>([^<]*)</td><td>([^<]*)</td>"
+        r"<td><select[^>]*>.*?<option\s+selected=\"selected\"\s+value=\"([^\"]*)\"[^>]*>.*?</select></td>"
+        r"<td><select[^>]*>.*?<option\s+selected=\"selected\"\s+value=\"([^\"]*)\"[^>]*>.*?</select></td></tr>",
+        re.S,
+    )
+    for m in row_re.finditer(body):
+        circuits.append({
+            "space": int(m.group(1)),
+            "circuit": int(m.group(2)),
+            "lug": int(m.group(3)),
+            "module": m.group(4).strip() or None,
+            "firing_mode": m.group(5).strip() or None,
+            "control_mode": m.group(6) or None,
+            "curve": m.group(7) or None,
+        })
+        if len(circuits) >= MAX_CIRCUITS:
+            break
+    modules = sorted({c["module"] for c in circuits if c["module"]})
+    return {
+        "circuit_setup_total": len(circuits),
+        "circuit_setup_modules": modules,
+        "circuits": circuits,
     }
 
 

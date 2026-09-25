@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 
 from datetime import timedelta
 import logging
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .device_inventory import DeviceInventory
 from .green_go import GreenGOInventory
@@ -22,6 +23,7 @@ from .signal_watchdog import SignalWatchdogManager
 from .rules import RuleSet
 from .security import SecurityManager
 from .network_interfaces import snapshot as network_interface_snapshot
+from .network_interfaces import NetworkInterfaceInfo, route_to_target
 from .topology import ShowTopology
 from .rule_storage import RuleStore
 from .projector_monitor import PJLinkMonitor
@@ -69,6 +71,18 @@ _LOGGER = logging.getLogger(__name__)
 UPDATE_INTERVAL = timedelta(seconds=5)
 
 
+def _lowest_vlan_id(vlans: list[dict] | None) -> int | None:
+    """topology.py's TopologyLink has a single `vlan` slot, but a trunk
+    port can legitimately report several (lldp_discovery.py's own
+    async_walk_lldp_neighbors() returns the full list) -- the lowest VLAN
+    id is used as a representative single value rather than silently
+    picking whichever happened to be last in the walk order."""
+    if not vlans:
+        return None
+    ids = [int(v["id"]) for v in vlans if str(v.get("id", "")).isdigit()]
+    return min(ids) if ids else None
+
+
 class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
     """Central coordinator for passive inspectors and read-only pollers."""
 
@@ -92,16 +106,29 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         # telemetry. No vendor-private OIDs are used since none are publicly
         # documented for ELC/Green-GO.
         self.generic_switch_monitor = None
+        self.switch_port_monitor = None
+        self.lldp_monitor = None
         self.ups_monitor = None
         self.etc_cem3_monitor = None
         self.ontime_monitor = None
         self.qlcplus_bridge = None
         self.ma_listener = None
         self.ma_remote = MARemoteInventory()
+        self._ma_web_remote_last_probe = 0.0
         self.ptp_monitor = None
         self.dante_monitor = None
         self.aes67_monitor = None
         self.aes70_monitor = None
+        self.yamaha_osc_monitor = None
+        self.sendspin_dante_zone_monitor = None
+        self.greengo_monitor = None
+        self.qlab_monitor = None
+        self.resolume_monitor = None
+        self.millumin_monitor = None
+        self.nexus_audio_monitor = None
+        self.pdu_monitor = None
+        self.reolink_ha_monitor = None
+        self.nexus_audio_zone_monitor = None
         self.avdecc_monitor = None
         self.st2110_monitor = None
         self.avb_monitor = None
@@ -356,6 +383,76 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         self.enttec_listen_enabled = bool(enabled)
         self.publish(enttec_listen_enabled=self.enttec_listen_enabled)
 
+    def _compute_route_to_targets(self, interfaces_snapshot: list[dict]) -> list[dict]:
+        """Phase C9 (rapport maître S99): 'route to target pour CEM3,
+        Dante, Luminex, MA, Reolink, etc.' -- for a curated set of known
+        show device IPs (explicitly configured ETC CEM3/Luminex GigaCore
+        hosts, plus every device the passive inventory already knows an
+        IP for), report which local interface would actually reach it.
+        Pure computation from already-gathered data; sends nothing.
+        Runs off the event loop (called via executor) since it's CPU work
+        over a potentially sizeable inventory, not I/O, but keeping it
+        off the loop matches this module's own established pattern for
+        anything non-trivial.
+        """
+        try:
+            interfaces = [NetworkInterfaceInfo(**row) for row in interfaces_snapshot]
+        except TypeError:
+            return []
+        targets: dict[str, str] = {}  # ip -> label, de-duplicated
+        for host in getattr(self.gigacore, "hosts", ()) or ():
+            targets[host] = "Luminex GigaCore"
+        for host in getattr(getattr(self, "etc_cem3_monitor", None), "hosts", ()) or ():
+            targets[host] = "ETC CEM3"
+        for device in self.inventory.public():
+            ip = device.get("ip")
+            if ip and ip not in targets:
+                targets[ip] = device.get("display_name") or "Appareil découvert"
+            if len(targets) >= 200:  # defensive cap; a normal show network is nowhere near this
+                break
+        results = []
+        for ip, label in targets.items():
+            result = route_to_target(interfaces, ip)
+            result["label"] = label
+            results.append(result)
+        return results
+
+    def _ingest_lldp_neighbors(self) -> None:
+        """Phase C11 (rapport maître S101): 'Développer réellement: LLDP...'
+        Resolves each polled neighbor's identity against the device
+        inventory where possible (same 'mac:<mac>' convention
+        device_inventory.py's own identity() uses, so a match here is the
+        *same* node the rest of Show Network already knows), falling back
+        to a synthetic 'lldp:<chassis id>' identity for a neighbor not yet
+        otherwise known -- topology.py already supports nodes minted this
+        way (ShowTopology docstring: "links are created only from
+        explicit evidence"). Feeds each into the topology graph as an
+        LLDP-evidenced link; device_model.py already specifically looks
+        for protocol "LLDP" when building each device's physical_links,
+        so this is the missing data source for a filter that already
+        existed with nothing to filter.
+        """
+        for host, neighbors in self.lldp_monitor.snapshot().items():
+            switch_device = self.inventory.find_by_ip(host)
+            switch_id = switch_device.unique_id if switch_device else f"candidate:{host}"
+            for n in neighbors:
+                chassis_id = n.get("chassis_id")
+                neighbor_id = None
+                if n.get("chassis_id_type") == "mac_address" and chassis_id:
+                    candidate_id = f"mac:{str(chassis_id).lower().replace(':','').replace('-','')}"
+                    if candidate_id in self.inventory.devices:
+                        neighbor_id = candidate_id
+                if neighbor_id is None:
+                    neighbor_id = f"lldp:{chassis_id or n.get('sys_name') or n.get('port_id') or 'unknown'}"
+                self.topology.observe_link(
+                    switch_id, neighbor_id,
+                    source_port=n.get("local_port_name") or n.get("local_port_num"),
+                    target_port=n.get("port_id"),
+                    vlan=_lowest_vlan_id(n.get("vlans")),
+                    protocol="LLDP", confidence=0.9,
+                    evidence=f"LLDP: {n.get('sys_name') or chassis_id or 'appareil'}",
+                )
+
     async def _async_update_data(self) -> dict:
         """Return a snapshot from the currently active inspectors.
 
@@ -368,6 +465,21 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             await self.gigacore.async_update()
         if self.generic_switch_monitor:
             await self.generic_switch_monitor.async_update()
+        if self.switch_port_monitor:
+            await self.switch_port_monitor.async_update()
+        if self.yamaha_osc_monitor:
+            await self.yamaha_osc_monitor.async_update()
+        if self.qlab_monitor:
+            await self.qlab_monitor.async_update()
+        if self.resolume_monitor:
+            await self.resolume_monitor.async_update()
+        if self.nexus_audio_monitor:
+            await self.nexus_audio_monitor.async_update()
+        if self.pdu_monitor:
+            await self.pdu_monitor.async_update()
+        if self.lldp_monitor:
+            await self.lldp_monitor.async_update()
+            self._ingest_lldp_neighbors()
         if self.ups_monitor:
             await self.ups_monitor.async_update()
         if getattr(self, "projector_monitor_enabled", True):
@@ -388,6 +500,7 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         snapshot.update(self.artnet_nodes.snapshot())
         snapshot["security"] = self.security.snapshot()
         snapshot["network_interfaces"] = await self.hass.async_add_executor_job(network_interface_snapshot)
+        snapshot["network_routes"] = await self.hass.async_add_executor_job(self._compute_route_to_targets, snapshot["network_interfaces"])
         host = host_metrics_snapshot()
         snapshot["host_metrics"] = host.snapshot()
         decision = self.performance_manager.decide(host.cpu_percent, host.memory_percent)
@@ -404,7 +517,18 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         snapshot["giga_core_temperature"] = dict(self.gigacore.temperatures) if self.gigacore else {}
         snapshot["gigacore_status"] = self.gigacore.snapshot() if self.gigacore else {}
         snapshot["generic_switch_status"] = self.generic_switch_monitor.snapshot() if self.generic_switch_monitor else {}
+        snapshot["switch_telemetry"] = self.switch_port_monitor.snapshot() if self.switch_port_monitor else []
         snapshot.update(self.ups_monitor.snapshot() if self.ups_monitor else {"ups_units": [], "ups_total": 0, "ups_online": 0, "ups_on_battery": 0, "ups_battery_low": 0})
+        if getattr(self, "greengo_monitor", None):
+            greengo_raw = self.greengo_monitor.snapshot()
+            for row in greengo_raw.get("greengo_source_stats", []):
+                # Phase C15: feeds the same GreenGOInventory the existing
+                # mDNS-string-matching path already populates (source
+                # tagged "udp_5810" here vs "mdns" there) -- a device
+                # transmitting on the configured group is real protocol
+                # evidence, stronger than an mDNS vendor-string guess.
+                self.green_go.observe(row["source"], source="udp_5810", evidence=[f"UDP 5810 multicast, {row['packets']} packet(s) observed"], last_seen=row.get("last_seen"))
+            snapshot["greengo_monitor"] = greengo_raw
         gg = self.green_go.snapshot()
         snapshot["green_go_devices"] = len(gg)
         snapshot["green_go_sources"] = len({d.get("source") for d in gg if d.get("source")})
@@ -598,6 +722,24 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
                         output_level=output_levels,
                         controls=controls or [{"role": role} for role in row.get("roles", [])],
                     )
+        if getattr(self, "yamaha_osc_monitor", None):
+            snapshot["yamaha_osc_consoles"] = self.yamaha_osc_monitor.snapshot()
+        if getattr(self, "qlab_monitor", None):
+            snapshot["qlab_status"] = self.qlab_monitor.snapshot()
+        if getattr(self, "resolume_monitor", None):
+            snapshot["resolume_status"] = self.resolume_monitor.snapshot()
+        if getattr(self, "nexus_audio_monitor", None):
+            snapshot["nexus_audio_status"] = self.nexus_audio_monitor.snapshot()
+        if getattr(self, "pdu_monitor", None):
+            snapshot["pdu_status"] = self.pdu_monitor.snapshot()
+        if getattr(self, "reolink_ha_monitor", None):
+            snapshot["reolink_cameras"] = self.reolink_ha_monitor.snapshot()
+        if getattr(self, "nexus_audio_zone_monitor", None):
+            snapshot["nexus_audio_zones"] = self.nexus_audio_zone_monitor.snapshot()
+        if getattr(self, "millumin_monitor", None):
+            snapshot["millumin_status"] = self.millumin_monitor.snapshot()
+        if getattr(self, "sendspin_dante_zone_monitor", None):
+            snapshot["sendspin_dante_zones"] = self.sendspin_dante_zone_monitor.snapshot()
         if getattr(self, "avdecc_monitor", None):
             avdecc_snapshot = self.avdecc_monitor.snapshot()
             snapshot.update(avdecc_snapshot)
@@ -756,6 +898,16 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
                         observed_at=obs.get("received_at"),
                         packet_epoch=source_epochs.get(obs.get("source_ip")),
                     )
+            now_monotonic = __import__("time").monotonic()
+            if now_monotonic - self._ma_web_remote_last_probe > 30.0:
+                # Phase C23 (rapport maître S113): "Web Remote: UNKNOWN /
+                # AVAILABLE / UNAVAILABLE." Throttled to every 30s rather
+                # than every refresh cycle (5s) -- a TCP-connect probe is
+                # cheap but still real network traffic, no reason to repeat
+                # it faster than a Web Remote's reachability could
+                # meaningfully change.
+                self._ma_web_remote_last_probe = now_monotonic
+                await self.ma_remote.async_probe_web_remote()
             snapshot["ma_remote"] = self.ma_remote.snapshot()
         else:
             rx_diag["ma_net3"] = {"state": "disabled_or_unavailable", "interface": snapshot.get("show_network_config", {}).get("interface_ma")}
@@ -768,14 +920,6 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             "avb": self.avb_monitor.snapshot() if self.avb_monitor else {},
         }
         snapshot["protocol_rx_diagnostics"] = rx_diag
-        # NOTE (audit fix): sensor.diagnostics_reception_protocoles_
-        # protocol_receive_diagnostics was confirmed taking ~0.6s per
-        # update in production. The cause: its extra_state_attributes
-        # property ran _bounded_attributes() -- a full json.dumps() of this
-        # whole nested dict, sometimes twice -- on every single entity
-        # attribute read, not once per actual data update. Precompute it
-        # here instead, once per refresh cycle, off the event loop.
-        snapshot["protocol_rx_diagnostics_bounded"] = await self.hass.async_add_executor_job(bound_attributes, dict(rx_diag))
         # Publication time is deliberately separate from protocol packet ages.
         # The frontend can therefore distinguish "HA refreshed" from "fresh network data".
         import time as _time
@@ -798,7 +942,46 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
         snapshot["show_snapshot"] = self.show_snapshots.compare(snapshot)
         # Operator views derived from evidence already collected by Show Network.
         snapshot["incident_center"] = self.incident_center.build(snapshot.get("archive", {}).get("flight_recorder", {}), snapshot.get("device_model", {}))
+        if self.incident_center.dirty:
+            # See incident_center.py: build() only flags "dirty" now
+            # instead of saving synchronously on the event loop.
+            await self.hass.async_add_executor_job(self.incident_center._save)
+            self.incident_center.dirty = False
         snapshot["pre_show"] = self.pre_show.run(snapshot)
+        # NOTE (audit fix): sensor.diagnostics_reception_protocoles_
+        # protocol_receive_diagnostics was confirmed taking ~0.6s per
+        # update in production. The cause: its extra_state_attributes
+        # property ran bound_attributes() -- a full json.dumps() of a
+        # whole nested dict, sometimes twice -- on every single entity
+        # attribute read, not once per actual data update. That was
+        # first fixed for just this one measured key; the same pattern
+        # (a large nested dict, read via extra_state_attributes on every
+        # HA state read) applies equally to every key below, whether or
+        # not any one of them has yet been individually measured as slow
+        # on a given installation -- so all of them get the same
+        # precompute rather than waiting for a report-per-sensor.
+        # Batched into one executor round trip rather than one per key:
+        # each individual bound_attributes() call is cheap on the common
+        # case (its own size() check short-circuits immediately when the
+        # value already fits), so the per-key overhead that's worth
+        # avoiding is the thread-pool dispatch itself, not the
+        # computation.
+        _bound_source = {
+            "protocol_rx_diagnostics": rx_diag,
+            "device_model": snapshot.get("device_model"),
+            "show_network_health": snapshot.get("show_network_health"),
+            "show_network_doctor": snapshot.get("show_network_doctor"),
+            "show_snapshot": snapshot.get("show_snapshot"),
+            "incident_center": snapshot.get("incident_center"),
+            "pre_show": snapshot.get("pre_show"),
+            "etc_cem3": snapshot.get("etc_cem3"),
+        }
+
+        def _bound_all():
+            return {k: bound_attributes(dict(v) if isinstance(v, dict) else v) for k, v in _bound_source.items() if v is not None}
+
+        for key, bounded in (await self.hass.async_add_executor_job(_bound_all)).items():
+            snapshot[f"{key}_bounded"] = bounded
         snapshot["show_network_freshness"] = {
             "published_at_epoch": round(_time.time(), 3),
             "published_monotonic": round(_time.monotonic(), 3),
@@ -1198,7 +1381,15 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
             return
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError):
+        except (OSError, ValueError, TypeError) as err:
+            # Now that saves are atomic (see async_save_dmx_ha_zones), a
+            # corrupted file here should be rare -- but if it still
+            # happens (e.g. a file edited by hand, or a leftover from
+            # before this fix), silently discarding every zone with no
+            # trace was itself a real observability gap. At minimum this
+            # now shows up in the log instead of just "zero zones,
+            # unexplained".
+            _LOGGER.warning("Could not load DMX→HA zones from %s (%s: %s) -- starting with no zones configured", path, type(err).__name__, err)
             return
         for item in raw if isinstance(raw, list) else []:
             try:
@@ -1211,20 +1402,45 @@ class ShowNetworkCoordinator(DataUpdateCoordinator[dict]):
                 continue
 
     async def async_save_dmx_ha_zones(self) -> None:
-        """Persist DMX→HA zones and backup off Home Assistant's event loop."""
+        """Persist DMX→HA zones and backup off Home Assistant's event loop.
+
+        Audit-confirmed gap ("écriture atomique des zones"): this used to
+        write directly to the live file (Path.write_text) -- a crash or
+        power loss mid-write could leave a truncated/corrupted JSON file,
+        which async_load_dmx_ha_zones's own parse failure handler then
+        silently discards (`except (OSError, ValueError, TypeError):
+        return`), losing every configured zone with no visible error.
+        Fixed to match the same tmp-file + atomic rename pattern already
+        used correctly elsewhere in this project (rule_storage.py,
+        dmx_ha_mapping_storage.py) -- the target file is always either
+        the old complete content or the new complete content, never a
+        partial write.
+        """
         import json
         from pathlib import Path
         path = Path(self.dmx_ha_zone_store_path)
         payload = json.dumps([z.snapshot() for z in self.dmx_ha_zone_engine.zones.values()], ensure_ascii=False, indent=2)
-        await self.hass.async_add_executor_job(path.write_text, payload, encoding="utf-8")
+
+        def _atomic_write():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(payload, encoding="utf-8")
+            tmp.replace(path)
+
+        await self.hass.async_add_executor_job(_atomic_write)
         await self.hass.async_add_executor_job(self.config_backups.backup, "zone_save")
 
     def save_dmx_ha_zones(self) -> None:
-        """Compatibility wrapper for non-HA callers/tests only."""
+        """Compatibility wrapper for non-HA callers/tests only. Same
+        atomic tmp-file + rename fix as async_save_dmx_ha_zones."""
         import json
         from pathlib import Path
         path = Path(self.dmx_ha_zone_store_path)
-        path.write_text(json.dumps([z.snapshot() for z in self.dmx_ha_zone_engine.zones.values()], ensure_ascii=False, indent=2), encoding="utf-8")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps([z.snapshot() for z in self.dmx_ha_zone_engine.zones.values()], ensure_ascii=False, indent=2)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(payload, encoding="utf-8")
+        tmp.replace(path)
         self.config_backups.backup("zone_save")
 
     def set_dmx_ha_zones(self, zones: list[DmxHAZone]) -> None:

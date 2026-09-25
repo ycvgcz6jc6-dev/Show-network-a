@@ -148,7 +148,20 @@ class DeviceInventory:
         device = self.devices.get(uid)
         # Discovery often sees an IP first (ARP/HTTP) and learns the stable MAC
         # later. Promote the existing candidate instead of creating a duplicate.
-        if device is None and (kwargs.get("serial") or kwargs.get("mac")) and kwargs.get("ip"):
+        #
+        # This used to only run when serial/mac was present. That left a real
+        # gap (audit-confirmed "duplicate IPs between ARP and DNS-SD"): ARP's
+        # own fallback ids are interface-qualified ("candidate:<ip>:<iface>",
+        # runtime/setup.py), but discovery_pipeline.mdns_result()'s fallback
+        # is plain "candidate:<ip>" with no serial/mac -- so an mDNS hit for
+        # an IP ARP had already recorded could never take this promotion
+        # path and always created a second, separate record for the same
+        # address. find_by_ip() already does the right thing with no
+        # interface hint (only merges when exactly one existing record
+        # matches that IP, declining on genuine ambiguity), so the fix is to
+        # try promotion for any upsert carrying an IP, not just ones that
+        # also carry a serial/mac.
+        if device is None and kwargs.get("ip"):
             existing = self.find_by_ip(kwargs.get("ip"), interface=kwargs.get("interface"))
             if existing is not None and existing.unique_id != uid:
                 old_uid = existing.unique_id
